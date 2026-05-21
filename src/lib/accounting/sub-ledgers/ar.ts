@@ -137,24 +137,34 @@ export async function applyArPayment(
   });
 }
 
-// Direct write-off of an AR open item. Posts the paired GL entry
-// (Dr Bad Debt Expense, Cr AR control) so the AR-control-account =
-// sum-of-open invariant holds afterward, then marks the item WRITTEN_OFF.
+// Write-off of an AR open item. Two methods supported:
 //
-// v0.4 uses the direct method. The allowance method (estimate + apply
-// against an allowance account) is more sophisticated and is what most
-// public companies use; it lands when a customer engagement asks for it.
+//   DIRECT (the default): Dr Bad Debt Expense, Cr AR.
+//     Simple but mismatches expense recognition with revenue period. Fine
+//     for small businesses; not GAAP-conforming for any material amount.
+//
+//   ALLOWANCE: Dr Allowance for Doubtful Accounts, Cr AR.
+//     Uses a previously-estimated allowance built up via
+//     estimateBadDebtAllowance (Dr Bad Debt Expense, Cr Allowance). The
+//     write-off itself doesn't hit the expense account because the expense
+//     was already recognized when the allowance was estimated. This is the
+//     GAAP / IFRS preferred method for material AR.
+//
+// Either way, the paired GL entry posts first (so a failure leaves the
+// open item untouched), then the open item transitions to WRITTEN_OFF.
 export interface WriteOffArInput {
   openItemId: string;
   writeOffDate: Date;
-  badDebtAccountCode?: string; // default "7500"
+  method?: "DIRECT" | "ALLOWANCE";    // default DIRECT
+  badDebtAccountCode?: string;        // default "7500" (used by DIRECT)
+  allowanceAccountCode?: string;      // default "1210" (used by ALLOWANCE)
   source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
 }
 
 export async function writeOffArItem(
   prisma: PrismaClient,
   input: WriteOffArInput
-): Promise<{ entryNumber: string; amount: Decimal }> {
+): Promise<{ entryNumber: string; amount: Decimal; method: "DIRECT" | "ALLOWANCE" }> {
   const item = await prisma.arOpenItem.findUniqueOrThrow({
     where: { id: input.openItemId },
     include: {
@@ -168,15 +178,18 @@ export async function writeOffArItem(
   }
 
   const amount = toDecimal(item.currentBalance);
-  const badDebtAccount = input.badDebtAccountCode ?? "7500";
+  const method = input.method ?? "DIRECT";
+  const debitAccountCode =
+    method === "ALLOWANCE"
+      ? input.allowanceAccountCode ?? "1210"
+      : input.badDebtAccountCode ?? "7500";
 
-  // Post the paired JE first so if it fails, the open item is untouched.
   const entry = await postJournalEntry(prisma, {
     entityCode: item.entity.code,
     bookCode: item.book.code,
     currencyCode: item.currencyId,
     documentDate: input.writeOffDate,
-    memo: `Bad debt write-off — ${item.referenceNumber ?? item.id}`,
+    memo: `Bad debt write-off (${method}) — ${item.referenceNumber ?? item.id}`,
     source: input.source ?? "SYSTEM",
     sourceRecordType: "BadDebtWriteOff",
     sourceRecordId: item.id,
@@ -184,12 +197,15 @@ export async function writeOffArItem(
       openItemId: item.id,
       partyCode: item.party.code,
       writeOffAmount: amount.toFixed(2),
+      method,
     },
     lines: [
       {
-        accountCode: badDebtAccount,
+        accountCode: debitAccountCode,
         debit: amount.toFixed(4),
-        description: `Bad debt — ${item.party.code}`,
+        description: method === "ALLOWANCE"
+          ? `Apply allowance — ${item.party.code}`
+          : `Bad debt — ${item.party.code}`,
       },
       {
         accountCode: item.controlAccountCode,
@@ -200,7 +216,6 @@ export async function writeOffArItem(
     ],
   });
 
-  // Then update the open item lifecycle.
   await prisma.$transaction([
     prisma.arApplication.create({
       data: {
@@ -216,6 +231,60 @@ export async function writeOffArItem(
     }),
   ]);
 
+  return { entryNumber: entry.entryNumber, amount, method };
+}
+
+// Estimate (build up) the allowance for doubtful accounts. Typically run
+// each month-end or quarter-end based on an aging-bucket percentage or a
+// percent-of-revenue method. Posts:
+//   Dr Bad Debt Expense
+//   Cr Allowance for Doubtful Accounts
+//
+// The amount is a judgment call; this function just books what the caller
+// computed. To reduce an over-built allowance, the caller should post a
+// manual reversal entry — adding two-way support is a v0.6 task.
+export interface EstimateAllowanceInput {
+  entityCode: string;
+  bookCode: string;
+  asOfDate: Date;
+  amount: Decimal | string | number;
+  badDebtAccountCode?: string;      // default "7500"
+  allowanceAccountCode?: string;    // default "1210"
+  source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
+}
+
+export async function estimateBadDebtAllowance(
+  prisma: PrismaClient,
+  input: EstimateAllowanceInput
+): Promise<{ entryNumber: string; amount: Decimal }> {
+  const amount = toDecimal(input.amount);
+  if (amount.lessThanOrEqualTo(0)) {
+    throw new Error(`Allowance estimate must be positive (got ${amount})`);
+  }
+  const badDebtAccount = input.badDebtAccountCode ?? "7500";
+  const allowanceAccount = input.allowanceAccountCode ?? "1210";
+
+  const entry = await postJournalEntry(prisma, {
+    entityCode: input.entityCode,
+    bookCode: input.bookCode,
+    documentDate: input.asOfDate,
+    memo: `Bad debt allowance estimate — ${input.asOfDate.toISOString().slice(0, 10)}`,
+    source: input.source ?? "SYSTEM",
+    sourceRecordType: "AllowanceEstimate",
+    extensions: { estimateAmount: amount.toFixed(2) },
+    lines: [
+      {
+        accountCode: badDebtAccount,
+        debit: amount.toFixed(4),
+        description: `Bad debt expense — period estimate`,
+      },
+      {
+        accountCode: allowanceAccount,
+        credit: amount.toFixed(4),
+        description: `Build allowance for doubtful accounts`,
+      },
+    ],
+  });
   return { entryNumber: entry.entryNumber, amount };
 }
 
