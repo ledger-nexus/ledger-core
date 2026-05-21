@@ -22,7 +22,7 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 
 4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test.
 
-## What's wired now (v0.6)
+## What's wired now (v0.7)
 
 - ✅ Layer 1 — `Account`, `JournalEntry`, `JournalLine` with three currency amounts, lineage columns, multi-book scope, GIN-indexed extensions
 - ✅ Layer 2 — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`, `PartyRole`, `Item`
@@ -42,13 +42,14 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 - ✅ **QBO mapper (v0.5)** — `src/lib/mappers/qbo/` ships end-to-end QBO import + reverse exporter with lineage roundtrip. See `docs/qbo-mapping.md`.
 - ✅ **Allowance method (v0.5)** — `estimateBadDebtAllowance` + `writeOffArItem({ method: "ALLOWANCE" })`.
 - ✅ **NetSuite mapper + dimension engine exercise (v0.6)** — `src/lib/mappers/netsuite/` ships end-to-end NS import (4 dimensions: CLASS/DEPARTMENT/LOCATION + custom segments), per-line dimension assignments deduplicated via stable hash, custom fields in `extensions JSONB`, lineage roundtrip. See `docs/netsuite-mapping.md`.
+- ✅ **Next.js UI (v0.7)** — read-only surface in `src/app/`. Sidebar nav + multi-book switcher (cookie-backed via `setScopeAction` Server Action), dashboard, chart of accounts, journal entries list + detail (with frozen lineage payload), all four reports including BTD. Deployment guide at `docs/deployment.md`.
 
-## What lands next (v0.7)
+## What lands next (v0.8)
 
-- 🚧 Next.js UI: dashboard, chart of accounts, journal entries, all reports + BTD, multi-book switcher
-- 🚧 Vercel + Neon live demo + Loom walkthrough
-- 🚧 Multi-entity consolidation report with intercompany eliminations
-- 🚧 NS Accounting Books (multi-book parallel posting from one NS transaction)
+- 🚧 `/journal-entries/new` interactive form with real-time debit/credit balance indicator (the one read-write feature still missing)
+- 🚧 AR/AP application UI
+- 🚧 Demo reset endpoint
+- 🚧 Multi-entity consolidation report
 - 🚧 Cash flow statement
 
 ## Stack
@@ -103,6 +104,14 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 ### Lineage
 - Every ERP-import path must populate `sourceSystem`, `sourceRecordType`, `sourceRecordId`, `sourcePayload` (frozen raw JSON), and `mappingVersion`. Native seeds leave these null.
 - Never reuse a source-system primary key as our schema PK. Source IDs live in the lineage columns only.
+
+### UI work (v0.7)
+- App Router conventions in `src/app/`. Server Components by default; client components only when interactivity demands it.
+- UI primitives are inlined in `src/components/ui/` (no shadcn CLI dep). To add a new primitive, follow the existing pattern: `cn()` helper for class composition, `forwardRef` for inputs, simple variant maps for things like Button/Badge.
+- Forms: Server Actions (files marked `"use server"` in `src/app/actions/`). Don't add API routes unless an external caller needs them.
+- Money values run through `formatMoney()` in `src/lib/utils/format.ts` for consistent display (2 decimals, comma thousands, parens for negatives — accountant convention).
+- The scope cookie (`lc-scope`) is the canonical source for which `(entity, book)` the UI is viewing. Read with `getScope()` (Server Components); write via `setScopeAction` (Server Action). Never plumb scope through query params except for one-shot overrides (e.g. the BTD report's from/to book selectors).
+- Database access: import `prisma` from `@/lib/db` (the singleton). Never `new PrismaClient()` in a page or component — that exhausts the connection pool in dev under HMR.
 
 ## How to start a session
 

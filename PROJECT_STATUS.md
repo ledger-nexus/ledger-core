@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-05-21
 
-**Current state:** v0.6 just landed. NetSuite mapper — the "expressive ceiling" stress test of the universal schema. Layer 3 dimension engine (`Dimension` / `DimensionValue` / `DimensionSet` / `DimensionSetValue`) finally exercised on real data: 4 dimensions (CLASS, DEPARTMENT, LOCATION, custom segment), per-line dimension assignments deduplicated via stable hash, custom fields landing in `extensions JSONB`, and roundtrip equivalence preserved.
+**Current state:** v0.7 just landed. Next.js App Router UI on top of the substrate — dashboard with multi-book KPIs, chart of accounts, journal entries list + detail with lineage payload, four reports (Trial Balance, Income Statement, Balance Sheet, Book-Tax Difference), and a cookie-backed multi-entity / multi-book switcher in the header. Plus a Vercel + Neon deployment guide so the live demo is one push away.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -70,16 +70,32 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] Tests (`tests/netsuite-mapping.test.ts`): hash determinism, structural counts, sub-ledger reconciliation, dimension-engine population assertions (4 dimensions, 9 values, 5 distinct DimensionSets including the dedup case where two identical JE lines share one set), per-line dimension assignments match input, aggregation-by-department produces correct revenue totals, custom-field round-trip, idempotency, full roundtrip equivalence.
 - [x] New doc `docs/netsuite-mapping.md` — the ceiling-test companion to qbo-mapping.md.
 
+### v0.7 — Next.js UI on top of the substrate
+- [x] Tailwind config + global styles + accountant-friendly color palette (slate-leaning neutrals; emerald for positive numbers; red for negative).
+- [x] Inline UI primitives (`src/components/ui/`): Card, Table, Button, Badge, Input, Select, EmptyState. No shadcn CLI dependency — kept inline so the bundle stays small and the components are auditable.
+- [x] Singleton PrismaClient (`src/lib/db.ts`) compatible with Next.js HMR.
+- [x] Scope cookie (`lc-scope` = `{entityCode, bookCode}`) read by Server Components via `getScope()`, written by the `setScopeAction` Server Action. Default scope: NORTHWIND / US_GAAP.
+- [x] Root layout (`src/app/layout.tsx`) with sidebar nav + header showing the current scope and a BookSwitcher card.
+- [x] Dashboard (`/`): KPI grid (Cash, AR open, AP open, Fixed-asset NBV, Revenue YTD, Expenses YTD, Net Income YTD, BTD vs US_TAX delta when scope = US_GAAP), recent journal entries table.
+- [x] Chart of accounts (`/accounts`): grouped by AccountType, lineage badge per imported account, contra/control/bank flag badges.
+- [x] Journal entries (`/journal-entries`): paginated table with date range filter via URL params; detail page (`/journal-entries/[id]`) shows balanced line table + the frozen `sourcePayload` JSON (the Layer 6 lineage payoff displayed verbatim).
+- [x] Trial Balance (`/reports/trial-balance`): as-of date picker, balanced badge.
+- [x] Income Statement (`/reports/income-statement`): period range, two-column revenue/expenses, net income panel.
+- [x] Balance Sheet (`/reports/balance-sheet`): assets / liabilities / equity tables, A=L+E equation strip with balanced badge, retained earnings line.
+- [x] Book–Tax Difference (`/reports/book-tax-difference`): from-book/to-book selector + period range, summary KPIs (book NI, tax NI, Δ), P&L and BS delta tables with classification badges (PERMANENT/TEMPORARY/UNCLASSIFIED).
+- [x] Deployment guide (`docs/deployment.md`): Vercel + Neon end-to-end in ~10 minutes, including the Loom walkthrough script (6 beats, 2 minutes total).
+- [x] `vercel.json` wires `prisma generate` into the build command.
+- [x] Updated `.env.example` for Neon's `sslmode=require` connection string.
+
 ---
 
 ## What's next
 
-### v0.7 — UI + live demo
-- [ ] Initialize shadcn/ui in the repo
-- [ ] Pages: dashboard, chart of accounts, journal entries list + entry detail, all three reports + book-tax-diff
-- [ ] Multi-book switcher in the top nav
-- [ ] Deploy to Vercel + Neon (free tier)
-- [ ] Loom walkthrough + screenshots for the README
+### v0.8 — Manual journal entry form + demo reset
+- [ ] `/journal-entries/new` form: multi-line entry with live debit/credit balance indicator, posting via Server Action through postJournalEntry
+- [ ] AR/AP open-item application UI (mark an invoice paid by selecting cash + amount)
+- [ ] Scheduled reset endpoint (`POST /api/admin/reset`) so the public demo can return to a clean Northwind state nightly
+- [ ] Loom walkthrough recorded + linked in README
 
 ### v1.0 — Multi-entity consolidation + NetSuite Accounting Books
 - [ ] Multi-entity consolidation report with intercompany eliminations (uses `LegalEntity.parentEntityId` hierarchy)
@@ -114,6 +130,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - **2026-05-21** — NS dimension engine: dedup happens at the line scope via stable hash of sorted `(dimensionCode, valueCode)` pairs. The hash is the dedup key on `DimensionSet`, so two lines with identical assignments share one row. Hashing is plain string concatenation (`dim1:val1|dim2:val2|...`) not crypto — collision risk is essentially zero at our scale and the strings remain human-readable for debugging.
 - **2026-05-21** — NS custom segments map to `Dimension` rows keyed by the uppercased internalid (`custcol_region` → `CUSTCOL_REGION`). Same engine handles built-in (CLASS/DEPARTMENT/LOCATION) and custom dimensions uniformly — no fixed columns, no schema migration needed when an NS tenant adds a 9th custom segment.
 - **2026-05-21** — `dimensionSetId` is attached to `JournalLine` rows via a post-write update (`attachDimensionSets`) because `postJournalEntry` doesn't accept it in its input shape. Adding `dimensionSetId` to the input is a v0.7 enhancement; until then the NS orchestrator owns this small denormalization.
+- **2026-05-21** — UI is read-only in v0.7. The manual journal-entry form needs a real-time debit/credit balance indicator + client-side reactivity, which warrants its own batch with proper interactive testing. Shipping the read-only surface first means the live demo is useful immediately for recruiters who just want to click around.
+- **2026-05-21** — Multi-book / multi-entity switcher uses a single `lc-scope` cookie + a Server Action (`setScopeAction`) + `revalidatePath`. No client state, no URL params for scope — the cookie persists across sessions; URL params are reserved for report-specific filters (date ranges, book pairings on the BTD page).
+- **2026-05-21** — Inlined UI primitives (Card/Table/Button/Badge/Input) instead of running the shadcn CLI. Trade-off: less polish, but the bundle stays tiny, the components are auditable, and there's no interactive setup step blocking `pnpm install`.
 
 ---
 

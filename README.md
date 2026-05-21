@@ -16,7 +16,7 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 
 `ledger-core` does the unglamorous foundational work and does it against the universal schema, not a QBO-grade subset. Layers 1+2 of the universal schema, native sub-ledgers, and the book-tax-difference engine are all present today. Document tables (`invoice`, `bill`, `purchase_order`) live in the consumer repos (`recon`, `revenue-rec`) — they're consumers of the substrate, not part of it.
 
-## What's wired (v0.6)
+## What's wired (v0.7)
 
 - ✅ **Layer 1 posting substrate** — `Account`, `JournalEntry`, `JournalLine` with debits=credits, three-currency amounts, XOR debit/credit, atomic writes, sub-ledger keys, lineage. Enforced at app + DB layers.
 - ✅ **Layer 2 master data** — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`+`PartyRole`, `Item`.
@@ -32,10 +32,11 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 - ✅ **QuickBooks Online mapper (v0.5)** — end-to-end import of QBO exports (Accounts, Customers, Vendors, Invoices, Bills, Payments, BillPayments, JournalEntries) with full Layer 6 lineage, idempotent re-runs, AR/AP sub-ledger lifecycle wired, AND a reverse exporter that proves the roundtrip is lossless. See [docs/qbo-mapping.md](docs/qbo-mapping.md).
 - ✅ **Allowance-method bad debt (v0.5)** — `estimateBadDebtAllowance` builds the allowance via Dr Bad Debt / Cr Allowance; `writeOffArItem({ method: "ALLOWANCE" })` applies it via Dr Allowance / Cr AR. No double-counted expense.
 - ✅ **NetSuite mapper + dimension engine exercise (v0.6)** — the "expressive ceiling" stress test. Imports the full NS object graph (Subsidiary, Account, Class, Department, Location, CustomSegment, Customer, Vendor, Item, Invoice, VendorBill, CustomerPayment, VendorPayment, JournalEntry) with line-level dimension assignments deduplicated via `DimensionSet` stable hashes. Custom fields land in `extensions JSONB`. Lossless roundtrip same as QBO. See [docs/netsuite-mapping.md](docs/netsuite-mapping.md).
+- ✅ **Next.js UI (v0.7)** — read-only surface on top of the substrate. Sidebar nav + multi-book switcher (cookie-backed via Server Action) + dashboard with KPIs + chart of accounts + journal entries list/detail (with frozen `sourcePayload` lineage on display) + all four reports (Trial Balance, Income Statement, Balance Sheet, Book-Tax Difference). Vercel + Neon deployment guide in [docs/deployment.md](docs/deployment.md).
 
-## What lands next (v0.7 → v1.0)
+## What lands next (v0.8 → v1.0)
 
-- 🚧 Next.js UI + Vercel + Neon live demo + Loom walkthrough
+- 🚧 Manual journal entry form with real-time balance indicator (the one read-write piece)
 - 🚧 Multi-entity consolidation report with intercompany eliminations
 - 🚧 NS Accounting Books (multi-book parallel posting from one NS transaction)
 - 🚧 M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
@@ -63,7 +64,10 @@ cp .env.example .env
 pnpm db:push      # create schema
 pnpm db:seed      # load Northwind Cloud — 6 months across 3 books
 pnpm test         # run the invariant suite
+pnpm dev          # http://localhost:3000 — the v0.7 UI
 ```
+
+For deploying the public live demo (Vercel + Neon, ~10 minutes end-to-end) see [`docs/deployment.md`](docs/deployment.md).
 
 Once seeded, you can poke at the book-tax-difference report directly:
 
@@ -111,18 +115,29 @@ ledger-core/
 │   │   │   ├── leases.ts                      # createLease + runLeaseAccounting (full ASC 842)
 │   │   │   └── revenue-contracts.ts           # createRevenueContract + recognition runner
 │   │   └── types.ts                           # domain types + custom errors
-│   └── mappers/
-│       ├── qbo/                               # v0.5 — QuickBooks Online import/export
-│       │   ├── types.ts                       # QBO API shape types
-│       │   ├── mappers.ts                     # pure mapping functions
-│       │   ├── import.ts                      # idempotent orchestrator
-│       │   └── export.ts                      # reverse exporter (roundtrip proof)
-│       └── netsuite/                          # v0.6 — NetSuite import/export
-│           ├── types.ts                       # NS record + transaction shapes
-│           ├── dimensions.ts                  # Layer 3 dimension engine helpers
-│           ├── mappers.ts                     # pure mapping functions (including dim extraction)
-│           ├── import.ts                      # orchestrator with dim engine population
-│           └── export.ts                      # reverse exporter (roundtrip proof)
+│   ├── mappers/
+│   │   ├── qbo/                               # v0.5 — QuickBooks Online import/export
+│   │   │   ├── types.ts                       # QBO API shape types
+│   │   │   ├── mappers.ts                     # pure mapping functions
+│   │   │   ├── import.ts                      # idempotent orchestrator
+│   │   │   └── export.ts                      # reverse exporter (roundtrip proof)
+│   │   └── netsuite/                          # v0.6 — NetSuite import/export
+│   │       ├── types.ts                       # NS record + transaction shapes
+│   │       ├── dimensions.ts                  # Layer 3 dimension engine helpers
+│   │       ├── mappers.ts                     # pure mapping functions (including dim extraction)
+│   │       ├── import.ts                      # orchestrator with dim engine population
+│   │       └── export.ts                      # reverse exporter (roundtrip proof)
+│   ├── db.ts                                  # singleton PrismaClient (HMR-safe)
+│   ├── scope.ts                               # cookie-backed (entity, book) scope reader
+│   └── utils/                                 # cn(), formatMoney(), formatDate()
+├── app/                                       # v0.7 Next.js App Router UI
+│   ├── layout.tsx                             # sidebar + book switcher header
+│   ├── page.tsx                               # dashboard
+│   ├── accounts/                              # chart of accounts
+│   ├── journal-entries/                       # list + detail (with lineage payload)
+│   ├── reports/                               # trial-balance, income-statement, balance-sheet, book-tax-difference
+│   └── actions/                               # Server Actions (setScopeAction)
+└── components/                                # UI primitives + nav (sidebar, book-switcher)
 │   └── db/chart-of-accounts.ts                # shared chart
 ├── tests/
 │   ├── invariants.test.ts                     # Layer 1 invariants
@@ -137,6 +152,7 @@ ledger-core/
     ├── schema-erd.md                          # mermaid ERD (core + sub-ledger diagrams)
     ├── qbo-mapping.md                         # QBO import/export + roundtrip guide (v0.5)
     ├── netsuite-mapping.md                    # NS import + dimension engine guide (v0.6)
+    ├── deployment.md                          # Vercel + Neon live-demo guide (v0.7)
     ├── DESIGN.md                              # design doc
     └── accounting-notes.md                    # plain-English accounting explainer
 ```
