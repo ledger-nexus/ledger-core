@@ -233,6 +233,63 @@ v0.4 adds a posting-rules engine. The schema has had a `PostingRule` table since
 
 ---
 
+## The bad debt write-off, two ways
+
+You loan a customer credit. They don't pay. Eventually you give up. At the moment of giving up, what's the bookkeeping?
+
+**Direct method** (the simple one):
+
+| | Dr | Cr |
+|---|---|---|
+| Bad Debt Expense | $X | |
+| Accounts Receivable | | $X |
+
+You declare the expense at the moment you write it off. Easy. Used by very small businesses. **Mismatches timing**: the revenue was recognized when the invoice was created (often months ago), but the loss recognition is now. P&L bounces around.
+
+**Allowance method** (the GAAP / IFRS preferred one):
+
+You *estimate* — periodically, based on aging or percent-of-revenue history — how much of your AR is unlikely to be collected, and book the expense ahead of time:
+
+| | Dr | Cr |
+|---|---|---|
+| Bad Debt Expense | $estimate | |
+| Allowance for Doubtful Accounts | | $estimate |
+
+`Allowance for Doubtful Accounts` (1210 in our chart) is a contra-asset — it sits on the asset side of the balance sheet but reduces AR. Net AR on the BS = AR − Allowance.
+
+Then when a specific invoice goes bad, you apply the existing allowance:
+
+| | Dr | Cr |
+|---|---|---|
+| Allowance for Doubtful Accounts | $X | |
+| Accounts Receivable | | $X |
+
+No P&L impact at write-off time, because the expense was already recognized in the estimate. The matching principle is preserved.
+
+The schema and functions support both methods. `writeOffArItem({ method: "DIRECT" })` is the default; `method: "ALLOWANCE"` requires that you previously called `estimateBadDebtAllowance` to build up the contra-AR balance.
+
+---
+
+## Lineage-replay exports (and why Layer 6 needs the frozen payload)
+
+The spec rule for Layer 6:
+
+> Every imported row carries: source_system, source_record_type, source_record_id, source_payload JSONB (frozen raw original), mapping_version.
+
+The QBO mapper (v0.5) makes this concrete. `importFromQbo` populates `sourcePayload` with the verbatim QBO JSON object for every row it creates. Later, `exportToQbo` reads those payloads back out and reassembles the export structure. The roundtrip is lossless not because the mapper is reversible — it's lossless because **the source is preserved verbatim**.
+
+Why does this matter beyond clever roundtrip tricks?
+
+1. **Roundtrip audit.** If someone questions a posting, you can produce the original ERP record that drove it. "Where did this $5,000 come from?" → query `sourcePayload`, see the QBO Invoice 5001 JSON exactly as it was on import day.
+
+2. **Mapping versioning.** When the mapper's logic changes (`mappingVersion: "qbo-v2"`), you can re-run the new logic against the frozen raw payloads from old imports without re-extracting from QBO. Useful for fixing bugs in historical mappings.
+
+3. **Source-system drift detection.** If QBO changes its API (adds a field, renames a property), the new fields show up in fresh `sourcePayload` blobs without any code change. A diff between old and new payloads identifies the drift.
+
+The cost is one JSONB column per row. The benefit is the entire audit + replay story above. It's why the spec calls lineage "non-negotiable."
+
+---
+
 ## Further reading
 
 If this document made you want to understand accounting more deeply, the best resources I've found:

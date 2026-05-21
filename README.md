@@ -16,7 +16,7 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 
 `ledger-core` does the unglamorous foundational work and does it against the universal schema, not a QBO-grade subset. Layers 1+2 of the universal schema, native sub-ledgers, and the book-tax-difference engine are all present today. Document tables (`invoice`, `bill`, `purchase_order`) live in the consumer repos (`recon`, `revenue-rec`) — they're consumers of the substrate, not part of it.
 
-## What's wired (v0.4)
+## What's wired (v0.5)
 
 - ✅ **Layer 1 posting substrate** — `Account`, `JournalEntry`, `JournalLine` with debits=credits, three-currency amounts, XOR debit/credit, atomic writes, sub-ledger keys, lineage. Enforced at app + DB layers.
 - ✅ **Layer 2 master data** — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`+`PartyRole`, `Item`.
@@ -29,12 +29,13 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 - ✅ **Multi-book parallel posting** — Northwind seed exercises Pattern 2 end-to-end with divergent depreciation, cash-basis tax recognition, and ASC 842 leases (GAAP/IFRS capitalize; TAX cash-basis).
 - ✅ **Invariant tests** — TB/BS balance per book, AR/AP open-item = control account, fixed asset NBV divergence, BTD classification, disposal gain/loss math, ASC 842 commencement + amortization, posting-rules engine end-to-end.
 - ✅ **Property-based tests** via fast-check — balanced entries always accepted; unbalanced always rejected; arbitrary entry sequences leave BS balanced; AR open-item invariant survives arbitrary application sequences.
+- ✅ **QuickBooks Online mapper (v0.5)** — end-to-end import of QBO exports (Accounts, Customers, Vendors, Invoices, Bills, Payments, BillPayments, JournalEntries) with full Layer 6 lineage, idempotent re-runs, AR/AP sub-ledger lifecycle wired, AND a reverse exporter that proves the roundtrip is lossless. See [docs/qbo-mapping.md](docs/qbo-mapping.md).
+- ✅ **Allowance-method bad debt (v0.5)** — `estimateBadDebtAllowance` builds the allowance via Dr Bad Debt / Cr Allowance; `writeOffArItem({ method: "ALLOWANCE" })` applies it via Dr Allowance / Cr AR. No double-counted expense.
 
-## What lands next (v0.5 → v1.0)
+## What lands next (v0.6 → v1.0)
 
 - 🚧 Next.js UI + Vercel + Neon live demo + Loom walkthrough
-- 🚧 QBO and NetSuite end-to-end mapping examples (the "validate by mapping" step in `docs/universal-schema.md`)
-- 🚧 Allowance method for bad debt (estimate + apply via Allowance for Doubtful Accounts)
+- 🚧 NetSuite mapping (stresses the dimension engine + multi-book posting rules)
 - 🚧 M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
 - 🚧 Consolidation report across multiple legal entities
 
@@ -102,22 +103,29 @@ ledger-core/
 │   │   ├── reports/book-tax-difference.ts     # GAAP vs TAX diff with classification
 │   │   ├── posting-rules.ts                   # rules engine + minimal $.path DSL (v0.4)
 │   │   ├── sub-ledgers/
-│   │   │   ├── ar.ts                          # open/apply/write-off + aging + bad-debt JE
+│   │   │   ├── ar.ts                          # open/apply/write-off + aging + allowance method (v0.5)
 │   │   │   ├── ap.ts                          # mirror of AR
 │   │   │   ├── fixed-assets.ts                # createFixedAsset + runDepreciation + disposeFixedAsset
 │   │   │   ├── leases.ts                      # createLease + runLeaseAccounting (full ASC 842)
 │   │   │   └── revenue-contracts.ts           # createRevenueContract + recognition runner
 │   │   └── types.ts                           # domain types + custom errors
+│   └── mappers/qbo/                           # v0.5 — QuickBooks Online import/export
+│       ├── types.ts                           # QBO API shape types
+│       ├── mappers.ts                         # pure mapping functions
+│       ├── import.ts                          # idempotent orchestrator
+│       └── export.ts                          # reverse exporter (roundtrip proof)
 │   └── db/chart-of-accounts.ts                # shared chart
 ├── tests/
 │   ├── invariants.test.ts                     # Layer 1 invariants
 │   ├── sub-ledgers.test.ts                    # AR/AP lifecycle, FA depreciation, BTD
-│   ├── v0-4-features.test.ts                  # disposal, bad debt, ASC 842, posting rules
+│   ├── v0-4-features.test.ts                  # disposal, bad debt (DIRECT + ALLOWANCE), ASC 842, posting rules
+│   ├── qbo-mapping.test.ts                    # QBO import/export + roundtrip (v0.5)
 │   ├── property-based.test.ts                 # fast-check property tests
 │   └── seeded-company.test.ts                 # Northwind multi-book assertions
 └── docs/
     ├── universal-schema.md                    # CANONICAL — architecture decisions
     ├── schema-erd.md                          # mermaid ERD (core + sub-ledger diagrams)
+    ├── qbo-mapping.md                         # QBO import/export + roundtrip guide (v0.5)
     ├── DESIGN.md                              # design doc
     └── accounting-notes.md                    # plain-English accounting explainer
 ```

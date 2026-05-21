@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-05-21
 
-**Current state:** v0.4 just landed. Posting-rules engine, full ASC 842 operating lease mechanics (ROU + liability + interest accretion), fixed asset disposal with gain/loss recognition, AR bad debt write-off posting paired JE, and property-based tests via fast-check. Northwind seed now uses the full ASC 842 mechanics — GAAP/IFRS get ROU asset + lease liability on the BS while US_TAX (cash basis) shows neither.
+**Current state:** v0.5 just landed. QuickBooks Online mapper — the "validate by mapping" milestone from `docs/universal-schema.md`. End-to-end QBO import (Accounts, Customers, Vendors, Invoices, Bills, Payments, BillPayments, JournalEntries) with full Layer 6 lineage on every row, idempotent re-runs, paired AR/AP open-item lifecycle, AND a reverse exporter that reconstructs the original QBO JSON for roundtrip equivalence. Plus allowance-method bad debt to complete the bad-debt story.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -49,22 +49,32 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] Property-based tests via fast-check (`tests/property-based.test.ts`) covering: balanced entries always accepted with balancing TB; unbalanced entries always rejected; arbitrary sequences leave BS balanced; AR open-item invariant survives arbitrary application sequences.
 - [x] New accounts wired: 1210 Allowance for Doubtful Accounts (contra-AR), 1600 ROU Asset, 2600 Lease Liability, 7400 Lease Expense — Operating, 7500 Bad Debt Expense, 8100 Gain/Loss on Disposal, 8200 Interest Expense.
 
+### v0.5 — QBO mapping (validate-by-mapping milestone) + allowance-method bad debt
+- [x] Sample QBO export fixture (`prisma/fixtures/qbo-sample.json`) modeled on the QBO REST API shape: Accounts, Customers, Vendors, Invoices, Bills, Payments, BillPayments, JournalEntries.
+- [x] QBO type definitions (`src/lib/mappers/qbo/types.ts`) — hand-rolled from the QBO API docs to avoid the heavy SDK dependency.
+- [x] Pure mapper functions (`src/lib/mappers/qbo/mappers.ts`): mapAccount, mapCustomer, mapVendor, mapInvoice, mapBill, mapPayment, mapBillPayment, mapJournalEntry. Side-effect-free; testable without a DB.
+- [x] Import orchestrator (`src/lib/mappers/qbo/import.ts`): idempotent end-to-end. Imports accounts → parties → JEs → invoices (opens AR) → bills (opens AP) → payments (applies AR) → bill payments (applies AP). Layer 6 lineage on every row.
+- [x] Reverse exporter (`src/lib/mappers/qbo/export.ts`): reads frozen sourcePayload from each lineage row and reassembles a QBO-shaped export. The roundtrip proof of the universal-schema thesis.
+- [x] Allowance method for bad debt (`estimateBadDebtAllowance` + `writeOffArItem({ method: "ALLOWANCE" })`): build the allowance via Dr Bad Debt / Cr Allowance, then apply via Dr Allowance / Cr AR — no double-counting of bad debt expense.
+- [x] Tests (`tests/qbo-mapping.test.ts`): structural invariants (counts, lineage populated, AR/AP sub-ledger sums match control account, idempotency), roundtrip equivalence via diffQboExports.
+- [x] Allowance-method tests added to v0.4 features suite.
+- [x] New doc `docs/qbo-mapping.md` explains the import/export flow + the lineage roundtrip guarantee.
+
 ---
 
 ## What's next
 
-### v0.5 — UI + live demo
+### v0.6 — UI + live demo
 - [ ] Initialize shadcn/ui in the repo
 - [ ] Pages: dashboard, chart of accounts, journal entries list + entry detail, all three reports + book-tax-diff
 - [ ] Multi-book switcher in the top nav
 - [ ] Deploy to Vercel + Neon (free tier)
 - [ ] Loom walkthrough + screenshots for the README
 
-### v1.0 — ERP mapping demonstrations
-- [ ] QBO mapping example: ingest a QBO export, map to ledger-core schema with lineage populated, prove zero-loss round-trip
-- [ ] NetSuite mapping example: same but with 8 dimensions, multi-entity, and divergent posting rules
+### v1.0 — NetSuite mapping + consolidation
+- [ ] NetSuite mapping example (stresses dimension engine, multi-book posting rules, custom fields)
+- [ ] Multi-entity consolidation report with intercompany eliminations
 - [ ] M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
-- [ ] Consolidation report across multiple legal entities
 
 ---
 
@@ -87,7 +97,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - **2026-05-21** — v0.3 sub-ledger expansion: AR/AP open items are keyed per (entity, book). Cash-basis tax customers need per-book open-item lifecycles even when GAAP and TAX are usually identical.
 - **2026-05-21** — Revenue recognition math: month-based, not day-based. Day-based drifts by pennies per period and breaks clean BTD demos.
 - **2026-05-21** — Posting-rules engine DSL is intentionally minimal: `$.path` lookups + `${$.path}` interpolation. Arithmetic and conditionals are OUT. If a rule needs them, author it in TS directly. The rules engine exists to make ERP-event → GL mapping declarative + auditable, not to be a general-purpose computation language.
-- **2026-05-21** — Bad debt write-off uses the DIRECT method (Dr Bad Debt Expense, Cr AR). Allowance method (estimate + apply against a contra-AR allowance account) is more sophisticated and accurate but adds complexity; deferred until a customer engagement asks for it.
+- **2026-05-21** — Bad debt write-off shipped with both methods. DIRECT remains the default for simplicity; ALLOWANCE is opt-in via `method: "ALLOWANCE"` and pairs with `estimateBadDebtAllowance` for full GAAP-conforming flow. Initial v0.4 plan was DIRECT-only; promoted ALLOWANCE forward in v0.5 because the schema (account 1210) was already wired.
+- **2026-05-21** — QBO Account codes get the `Q` prefix in `code` to avoid colliding with the native chart (`1000`, `2000`, …). Original QBO Id is preserved in `sourceRecordId` for roundtrip integrity. Unified-chart imports (mapping QBO → native codes) are a manual reclassification step, not part of the automatic mapper.
+- **2026-05-21** — `exportToQbo` is a lineage-replay function: it reads `sourcePayload` and reconstructs the export. No re-translation from ledger-core data because the original payload is preserved verbatim. This is the practical demonstration of why Layer 6 lineage requires the frozen raw payload (not just IDs).
 
 ---
 
