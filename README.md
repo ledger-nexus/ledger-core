@@ -16,7 +16,7 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 
 `ledger-core` does the unglamorous foundational work and does it against the universal schema, not a QBO-grade subset. Layers 1+2 of the universal schema, native sub-ledgers, and the book-tax-difference engine are all present today. Document tables (`invoice`, `bill`, `purchase_order`) live in the consumer repos (`recon`, `revenue-rec`) — they're consumers of the substrate, not part of it.
 
-## What's wired (v0.5)
+## What's wired (v0.6)
 
 - ✅ **Layer 1 posting substrate** — `Account`, `JournalEntry`, `JournalLine` with debits=credits, three-currency amounts, XOR debit/credit, atomic writes, sub-ledger keys, lineage. Enforced at app + DB layers.
 - ✅ **Layer 2 master data** — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`+`PartyRole`, `Item`.
@@ -31,13 +31,15 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 - ✅ **Property-based tests** via fast-check — balanced entries always accepted; unbalanced always rejected; arbitrary entry sequences leave BS balanced; AR open-item invariant survives arbitrary application sequences.
 - ✅ **QuickBooks Online mapper (v0.5)** — end-to-end import of QBO exports (Accounts, Customers, Vendors, Invoices, Bills, Payments, BillPayments, JournalEntries) with full Layer 6 lineage, idempotent re-runs, AR/AP sub-ledger lifecycle wired, AND a reverse exporter that proves the roundtrip is lossless. See [docs/qbo-mapping.md](docs/qbo-mapping.md).
 - ✅ **Allowance-method bad debt (v0.5)** — `estimateBadDebtAllowance` builds the allowance via Dr Bad Debt / Cr Allowance; `writeOffArItem({ method: "ALLOWANCE" })` applies it via Dr Allowance / Cr AR. No double-counted expense.
+- ✅ **NetSuite mapper + dimension engine exercise (v0.6)** — the "expressive ceiling" stress test. Imports the full NS object graph (Subsidiary, Account, Class, Department, Location, CustomSegment, Customer, Vendor, Item, Invoice, VendorBill, CustomerPayment, VendorPayment, JournalEntry) with line-level dimension assignments deduplicated via `DimensionSet` stable hashes. Custom fields land in `extensions JSONB`. Lossless roundtrip same as QBO. See [docs/netsuite-mapping.md](docs/netsuite-mapping.md).
 
-## What lands next (v0.6 → v1.0)
+## What lands next (v0.7 → v1.0)
 
 - 🚧 Next.js UI + Vercel + Neon live demo + Loom walkthrough
-- 🚧 NetSuite mapping (stresses the dimension engine + multi-book posting rules)
+- 🚧 Multi-entity consolidation report with intercompany eliminations
+- 🚧 NS Accounting Books (multi-book parallel posting from one NS transaction)
 - 🚧 M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
-- 🚧 Consolidation report across multiple legal entities
+- 🚧 Cash flow statement
 
 ## Tech stack
 
@@ -109,23 +111,32 @@ ledger-core/
 │   │   │   ├── leases.ts                      # createLease + runLeaseAccounting (full ASC 842)
 │   │   │   └── revenue-contracts.ts           # createRevenueContract + recognition runner
 │   │   └── types.ts                           # domain types + custom errors
-│   └── mappers/qbo/                           # v0.5 — QuickBooks Online import/export
-│       ├── types.ts                           # QBO API shape types
-│       ├── mappers.ts                         # pure mapping functions
-│       ├── import.ts                          # idempotent orchestrator
-│       └── export.ts                          # reverse exporter (roundtrip proof)
+│   └── mappers/
+│       ├── qbo/                               # v0.5 — QuickBooks Online import/export
+│       │   ├── types.ts                       # QBO API shape types
+│       │   ├── mappers.ts                     # pure mapping functions
+│       │   ├── import.ts                      # idempotent orchestrator
+│       │   └── export.ts                      # reverse exporter (roundtrip proof)
+│       └── netsuite/                          # v0.6 — NetSuite import/export
+│           ├── types.ts                       # NS record + transaction shapes
+│           ├── dimensions.ts                  # Layer 3 dimension engine helpers
+│           ├── mappers.ts                     # pure mapping functions (including dim extraction)
+│           ├── import.ts                      # orchestrator with dim engine population
+│           └── export.ts                      # reverse exporter (roundtrip proof)
 │   └── db/chart-of-accounts.ts                # shared chart
 ├── tests/
 │   ├── invariants.test.ts                     # Layer 1 invariants
 │   ├── sub-ledgers.test.ts                    # AR/AP lifecycle, FA depreciation, BTD
 │   ├── v0-4-features.test.ts                  # disposal, bad debt (DIRECT + ALLOWANCE), ASC 842, posting rules
 │   ├── qbo-mapping.test.ts                    # QBO import/export + roundtrip (v0.5)
+│   ├── netsuite-mapping.test.ts               # NS import + dim engine + roundtrip (v0.6)
 │   ├── property-based.test.ts                 # fast-check property tests
 │   └── seeded-company.test.ts                 # Northwind multi-book assertions
 └── docs/
     ├── universal-schema.md                    # CANONICAL — architecture decisions
     ├── schema-erd.md                          # mermaid ERD (core + sub-ledger diagrams)
     ├── qbo-mapping.md                         # QBO import/export + roundtrip guide (v0.5)
+    ├── netsuite-mapping.md                    # NS import + dimension engine guide (v0.6)
     ├── DESIGN.md                              # design doc
     └── accounting-notes.md                    # plain-English accounting explainer
 ```

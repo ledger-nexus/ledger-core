@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-05-21
 
-**Current state:** v0.5 just landed. QuickBooks Online mapper — the "validate by mapping" milestone from `docs/universal-schema.md`. End-to-end QBO import (Accounts, Customers, Vendors, Invoices, Bills, Payments, BillPayments, JournalEntries) with full Layer 6 lineage on every row, idempotent re-runs, paired AR/AP open-item lifecycle, AND a reverse exporter that reconstructs the original QBO JSON for roundtrip equivalence. Plus allowance-method bad debt to complete the bad-debt story.
+**Current state:** v0.6 just landed. NetSuite mapper — the "expressive ceiling" stress test of the universal schema. Layer 3 dimension engine (`Dimension` / `DimensionValue` / `DimensionSet` / `DimensionSetValue`) finally exercised on real data: 4 dimensions (CLASS, DEPARTMENT, LOCATION, custom segment), per-line dimension assignments deduplicated via stable hash, custom fields landing in `extensions JSONB`, and roundtrip equivalence preserved.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -60,21 +60,32 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] Allowance-method tests added to v0.4 features suite.
 - [x] New doc `docs/qbo-mapping.md` explains the import/export flow + the lineage roundtrip guarantee.
 
+### v0.6 — NetSuite mapping (ceiling test) + dimension engine exercise
+- [x] Sample NetSuite fixture (`prisma/fixtures/netsuite-sample.json`) modeled on SuiteScript / SuiteAnalytics export shape with classes, departments, locations, a custom segment, custom fields on transactions/customers, invoices/bills/payments with line-level dimension assignments.
+- [x] NS type definitions (`src/lib/mappers/netsuite/types.ts`).
+- [x] Dimension engine helpers (`src/lib/mappers/netsuite/dimensions.ts`): `setupDimension`, `setupDimensionValue`, `getOrCreateDimensionSet` with deterministic order-insensitive hash. The first real workout of Layer 3.
+- [x] Pure mappers (`src/lib/mappers/netsuite/mappers.ts`) covering account, customer, vendor, item, invoice, bill, customer payment, vendor payment, journal entry — each extracts line-level dimension assignments and entity-level custom fields.
+- [x] Import orchestrator (`src/lib/mappers/netsuite/import.ts`): registers custom fields, sets up dimensions, then imports accounts → parties → items → JEs → invoices+AR → bills+AP → payments. Each line gets a `dimensionSetId` via the dedup engine.
+- [x] Reverse exporter (`src/lib/mappers/netsuite/export.ts`) with the same lineage-replay pattern as QBO.
+- [x] Tests (`tests/netsuite-mapping.test.ts`): hash determinism, structural counts, sub-ledger reconciliation, dimension-engine population assertions (4 dimensions, 9 values, 5 distinct DimensionSets including the dedup case where two identical JE lines share one set), per-line dimension assignments match input, aggregation-by-department produces correct revenue totals, custom-field round-trip, idempotency, full roundtrip equivalence.
+- [x] New doc `docs/netsuite-mapping.md` — the ceiling-test companion to qbo-mapping.md.
+
 ---
 
 ## What's next
 
-### v0.6 — UI + live demo
+### v0.7 — UI + live demo
 - [ ] Initialize shadcn/ui in the repo
 - [ ] Pages: dashboard, chart of accounts, journal entries list + entry detail, all three reports + book-tax-diff
 - [ ] Multi-book switcher in the top nav
 - [ ] Deploy to Vercel + Neon (free tier)
 - [ ] Loom walkthrough + screenshots for the README
 
-### v1.0 — NetSuite mapping + consolidation
-- [ ] NetSuite mapping example (stresses dimension engine, multi-book posting rules, custom fields)
-- [ ] Multi-entity consolidation report with intercompany eliminations
+### v1.0 — Multi-entity consolidation + NetSuite Accounting Books
+- [ ] Multi-entity consolidation report with intercompany eliminations (uses `LegalEntity.parentEntityId` hierarchy)
+- [ ] NS Accounting Books support (multi-book parallel posting from one NS transaction)
 - [ ] M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
+- [ ] Cash flow statement (genuine accounting gap — third financial statement)
 
 ---
 
@@ -100,6 +111,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - **2026-05-21** — Bad debt write-off shipped with both methods. DIRECT remains the default for simplicity; ALLOWANCE is opt-in via `method: "ALLOWANCE"` and pairs with `estimateBadDebtAllowance` for full GAAP-conforming flow. Initial v0.4 plan was DIRECT-only; promoted ALLOWANCE forward in v0.5 because the schema (account 1210) was already wired.
 - **2026-05-21** — QBO Account codes get the `Q` prefix in `code` to avoid colliding with the native chart (`1000`, `2000`, …). Original QBO Id is preserved in `sourceRecordId` for roundtrip integrity. Unified-chart imports (mapping QBO → native codes) are a manual reclassification step, not part of the automatic mapper.
 - **2026-05-21** — `exportToQbo` is a lineage-replay function: it reads `sourcePayload` and reconstructs the export. No re-translation from ledger-core data because the original payload is preserved verbatim. This is the practical demonstration of why Layer 6 lineage requires the frozen raw payload (not just IDs).
+- **2026-05-21** — NS dimension engine: dedup happens at the line scope via stable hash of sorted `(dimensionCode, valueCode)` pairs. The hash is the dedup key on `DimensionSet`, so two lines with identical assignments share one row. Hashing is plain string concatenation (`dim1:val1|dim2:val2|...`) not crypto — collision risk is essentially zero at our scale and the strings remain human-readable for debugging.
+- **2026-05-21** — NS custom segments map to `Dimension` rows keyed by the uppercased internalid (`custcol_region` → `CUSTCOL_REGION`). Same engine handles built-in (CLASS/DEPARTMENT/LOCATION) and custom dimensions uniformly — no fixed columns, no schema migration needed when an NS tenant adds a 9th custom segment.
+- **2026-05-21** — `dimensionSetId` is attached to `JournalLine` rows via a post-write update (`attachDimensionSets`) because `postJournalEntry` doesn't accept it in its input shape. Adding `dimensionSetId` to the input is a v0.7 enhancement; until then the NS orchestrator owns this small denormalization.
 
 ---
 

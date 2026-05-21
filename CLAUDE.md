@@ -22,7 +22,7 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 
 4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test.
 
-## What's wired now (v0.5)
+## What's wired now (v0.6)
 
 - ✅ Layer 1 — `Account`, `JournalEntry`, `JournalLine` with three currency amounts, lineage columns, multi-book scope, GIN-indexed extensions
 - ✅ Layer 2 — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`, `PartyRole`, `Item`
@@ -41,13 +41,15 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 - ✅ Property-based tests via fast-check (`tests/property-based.test.ts`)
 - ✅ **QBO mapper (v0.5)** — `src/lib/mappers/qbo/` ships end-to-end QBO import + reverse exporter with lineage roundtrip. See `docs/qbo-mapping.md`.
 - ✅ **Allowance method (v0.5)** — `estimateBadDebtAllowance` + `writeOffArItem({ method: "ALLOWANCE" })`.
+- ✅ **NetSuite mapper + dimension engine exercise (v0.6)** — `src/lib/mappers/netsuite/` ships end-to-end NS import (4 dimensions: CLASS/DEPARTMENT/LOCATION + custom segments), per-line dimension assignments deduplicated via stable hash, custom fields in `extensions JSONB`, lineage roundtrip. See `docs/netsuite-mapping.md`.
 
-## What lands next (v0.6)
+## What lands next (v0.7)
 
 - 🚧 Next.js UI: dashboard, chart of accounts, journal entries, all reports + BTD, multi-book switcher
 - 🚧 Vercel + Neon live demo + Loom walkthrough
-- 🚧 NetSuite mapping (stresses dimension engine + multi-book posting rules — the ceiling test)
 - 🚧 Multi-entity consolidation report with intercompany eliminations
+- 🚧 NS Accounting Books (multi-book parallel posting from one NS transaction)
+- 🚧 Cash flow statement
 
 ## Stack
 
@@ -81,11 +83,17 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 - Sub-ledger lifecycle (open AR/AP, mark fixed asset disposed) is NOT part of posting rules. Rules emit GL lines only. Sub-ledger updates happen in the caller around the `postWithRules` call.
 
 ### ERP mappers (`src/lib/mappers/`)
-- One subdirectory per source system (currently just `qbo/`; NetSuite arrives v0.6).
-- Each mapper has three layers: `types.ts` (source-system shape), `mappers.ts` (pure transformations, no DB), `import.ts` (idempotent orchestrator with lineage), `export.ts` (reverse — reads frozen sourcePayload to reconstruct the source JSON).
+- One subdirectory per source system: `qbo/` (v0.5), `netsuite/` (v0.6). Future systems (SAP, Intacct, Dynamics) follow the same pattern.
+- Each mapper has these layers: `types.ts` (source-system shape), `mappers.ts` (pure transformations, no DB), `import.ts` (idempotent orchestrator with lineage), `export.ts` (reverse — reads frozen sourcePayload to reconstruct the source JSON), `dimensions.ts` (only when the source has dimensions — NS does; QBO doesn't).
 - Every imported row MUST populate `sourceSystem`, `sourceRecordType`, `sourceRecordId`, `sourcePayload` (the frozen raw original — verbatim, not a re-encoding), `mappingVersion`. The roundtrip proof depends on `sourcePayload` being preserved exactly.
-- Idempotency: before creating a row, query for an existing row with the same `(sourceSystem, sourceRecordType, sourceRecordId)`. If found, skip. The QBO orchestrator is the reference implementation; new mappers should follow the same pattern.
-- Account codes from a source ERP get prefixed to avoid collisions with the native chart (`Q` for QBO; `NS` planned for NetSuite). The original ID is preserved in `sourceRecordId`.
+- Idempotency: before creating a row, query for an existing row with the same `(sourceSystem, sourceRecordType, sourceRecordId)`. If found, skip. The QBO and NS orchestrators are reference implementations.
+- Account codes from a source ERP get prefixed to avoid collisions: `Q<id>` for QBO, `NS<internalid>` for NetSuite. New mappers pick a short prefix and stay consistent. The original ID is preserved in `sourceRecordId`.
+
+### Dimension engine (Layer 3)
+- Three first-class tables: `Dimension` (the kind: CLASS, DEPARTMENT, LOCATION, etc.), `DimensionValue` (one row per value within a kind), `DimensionSet` (a deduplicated combination of `(dimension, value)` pairs), `DimensionSetValue` (the bridge).
+- Lines reference `DimensionSet` via `JournalLine.dimensionSetId`. Two lines with identical assignments share one `DimensionSet` row (dedup via stable hash on `DimensionSet.hash`).
+- The hash is plain string `dim1:val1|dim2:val2|...` sorted by dimensionCode. Not crypto — collision risk is essentially zero at our scale.
+- `getOrCreateDimensionSet` in `src/lib/mappers/netsuite/dimensions.ts` is the canonical entry point. New mappers that need dimensions should call it directly.
 
 ### Testing
 - Any new accounting logic gets an invariant test in `tests/invariants.test.ts`.
