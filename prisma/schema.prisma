@@ -1,0 +1,129 @@
+// mini-ledger Prisma schema
+//
+// Design decisions are documented in /docs/accounting-notes.md
+// The TL;DR:
+//   - Accounts have a TYPE (Asset/Liability/Equity/Revenue/Expense)
+//     which determines their normal balance side.
+//   - Journal entries are headers; JournalLines are the debit/credit rows.
+//   - A DB-level check constraint enforces that every JournalLine has either
+//     a debit OR a credit (never both, never neither).
+//   - The application layer (src/lib/accounting/post-journal.ts) enforces
+//     that the SUM of debits equals the SUM of credits per entry, and writes
+//     are wrapped in a transaction so partial posts are impossible.
+//
+// All monetary amounts are stored as Decimal(18, 4) — never float, never integer cents.
+// Decimal(18,4) gives us 14 digits of dollars and 4 decimal places of precision,
+// which is enough for any contract you'd see at a SaaS company.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Chart of Accounts ----------
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum NormalBalance {
+  DEBIT
+  CREDIT
+}
+
+model Account {
+  id            String        @id @default(cuid())
+  // Account code is the human-readable identifier (e.g. "1000" for Cash).
+  // Convention: 1xxx Assets, 2xxx Liabilities, 3xxx Equity, 4xxx Revenue, 5xxx-9xxx Expenses.
+  code          String        @unique
+  name          String
+  type          AccountType
+  normalBalance NormalBalance
+  // Contra accounts (e.g. Accumulated Depreciation) have a normal balance OPPOSITE
+  // to their type's usual side. We track this explicitly rather than infer it.
+  isContra      Boolean       @default(false)
+  // Soft-disable accounts without deleting (audit trail integrity).
+  active        Boolean       @default(true)
+
+  lines JournalLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+}
+
+// ---------- Journal Entries ----------
+
+enum JournalSource {
+  MANUAL          // entered by a human via the UI
+  SEED            // loaded from seed data
+  SYSTEM          // posted by another module (e.g. rev rec engine)
+  AI_APPROVED     // AI suggested, human approved (used in bank-recon project)
+}
+
+model JournalEntry {
+  id          String        @id @default(cuid())
+  // entryNumber is a human-readable sequential ID (JE-00001, JE-00002, ...).
+  // Auto-assigned by the posting function.
+  entryNumber String        @unique
+  date        DateTime      @db.Date
+  memo        String
+  source      JournalSource @default(MANUAL)
+  // Once posted, an entry cannot be edited or deleted — only reversed.
+  // This is the GAAP-style audit-trail rule.
+  posted      Boolean       @default(true)
+  // If this entry reverses another one, link it. Used for corrections.
+  reversesId  String?
+  reverses    JournalEntry? @relation("Reversal", fields: [reversesId], references: [id])
+  reversedBy  JournalEntry[] @relation("Reversal")
+
+  lines JournalLine[]
+
+  createdAt DateTime @default(now())
+  createdBy String?  // user id placeholder; auth is out of scope for v1
+
+  @@index([date])
+  @@index([source])
+}
+
+model JournalLine {
+  id        String  @id @default(cuid())
+  entryId   String
+  entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id])
+
+  // Exactly one of debit/credit is non-zero on each line.
+  // The DB-level check constraint below enforces this.
+  debit  Decimal @default(0) @db.Decimal(18, 4)
+  credit Decimal @default(0) @db.Decimal(18, 4)
+
+  // Free-text description for the line (often the same as the entry memo,
+  // but can be more specific when an entry hits many accounts).
+  description String?
+
+  @@index([entryId])
+  @@index([accountId])
+}
+
+// IMPORTANT: Prisma cannot define raw CHECK constraints, so we add them via a
+// migration SQL file (prisma/migrations/0001_constraints/migration.sql) that runs
+// after the initial schema migration. The constraints are:
+//
+//   ALTER TABLE "JournalLine" ADD CONSTRAINT line_xor_check
+//     CHECK ((debit > 0 AND credit = 0) OR (debit = 0 AND credit > 0));
+//
+//   ALTER TABLE "JournalLine" ADD CONSTRAINT line_nonneg_check
+//     CHECK (debit >= 0 AND credit >= 0);
+//
+// See docs/accounting-notes.md for why we belt-and-suspender this at both
+// the application layer and the DB layer.
