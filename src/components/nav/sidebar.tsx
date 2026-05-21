@@ -34,7 +34,10 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
       { href: "/reports/balance-sheet", label: "Balance sheet" },
       { href: "/reports/cash-flow", label: "Cash flow", hint: "indirect" },
       { href: "/reports/book-tax-difference", label: "Book-tax difference", hint: "ASC 740" },
+      { href: "/reports/m3-detail", label: "M-3 detail", hint: "Form 1120" },
       { href: "/reports/ar-aging", label: "AR aging" },
+      { href: "/reports/ap-aging", label: "AP aging" },
+      { href: "/reports/consolidation", label: "Consolidation", hint: "multi-entity" },
     ],
   },
 ];
