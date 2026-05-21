@@ -61,12 +61,17 @@ model LegalEntity {
   mappingVersion   String?
   extensions       Json?
 
-  fiscalCalendars FiscalCalendar[]
-  accounts        Account[]
-  journalEntries  JournalEntry[]
-  parties         Party[]
-  items           Item[]
-  periodCloses    PeriodClose[]
+  fiscalCalendars  FiscalCalendar[]
+  accounts         Account[]
+  journalEntries   JournalEntry[]
+  parties          Party[]
+  items            Item[]
+  periodCloses     PeriodClose[]
+  fixedAssets      FixedAsset[]
+  leases           Lease[]
+  revenueContracts RevenueContract[]
+  arOpenItems      ArOpenItem[]
+  apOpenItems      ApOpenItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -88,9 +93,14 @@ model Book {
   isActive   Boolean @default(true)
   extensions Json?
 
-  journalEntries JournalEntry[]
-  periodCloses   PeriodClose[]
-  postingRules   PostingRule[]
+  journalEntries                JournalEntry[]
+  periodCloses                  PeriodClose[]
+  postingRules                  PostingRule[]
+  fixedAssetBookAttributes      FixedAssetBookAttributes[]
+  leaseBookAttributes           LeaseBookAttributes[]
+  revenueContractBookAttributes RevenueContractBookAttributes[]
+  arOpenItems                   ArOpenItem[]
+  apOpenItems                   ApOpenItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -174,13 +184,16 @@ model Currency {
   decimals Int     @default(2) // 2 for USD, 0 for JPY, etc.
   symbol   String?
 
-  fxRatesFrom        FxRate[]       @relation("FxFrom")
-  fxRatesTo          FxRate[]       @relation("FxTo")
-  entitiesFunctional LegalEntity[]  @relation("EntityFunctionalCcy")
-  booksReporting     Book[]         @relation("BookReportingCcy")
-  journalEntries     JournalEntry[] @relation("JeCurrency")
-  linesTxn           JournalLine[]  @relation("LineTxnCcy")
-  linesReporting     JournalLine[]  @relation("LineReportingCcy")
+  fxRatesFrom        FxRate[]          @relation("FxFrom")
+  fxRatesTo          FxRate[]          @relation("FxTo")
+  entitiesFunctional LegalEntity[]     @relation("EntityFunctionalCcy")
+  booksReporting     Book[]            @relation("BookReportingCcy")
+  journalEntries     JournalEntry[]    @relation("JeCurrency")
+  linesTxn           JournalLine[]     @relation("LineTxnCcy")
+  linesReporting     JournalLine[]     @relation("LineReportingCcy")
+  fixedAssets        FixedAsset[]      @relation("FixedAssetAcqCcy")
+  leases             Lease[]           @relation("LeaseCcy")
+  revenueContracts   RevenueContract[] @relation("RevContractCcy")
 
   @@map("currency")
 }
@@ -220,8 +233,13 @@ model Party {
   parent        Party?  @relation("PartyHierarchy", fields: [parentPartyId], references: [id])
   children      Party[] @relation("PartyHierarchy")
 
-  roles        PartyRole[]
-  journalLines JournalLine[]
+  roles             PartyRole[]
+  journalLines      JournalLine[]
+  vendorFixedAssets FixedAsset[]      @relation("FixedAssetVendor")
+  lessorLeases      Lease[]           @relation("LeaseLessor")
+  customerContracts RevenueContract[] @relation("ContractCustomer")
+  arOpenItems       ArOpenItem[]
+  apOpenItems       ApOpenItem[]
 
   sourceSystem     String?
   sourceRecordType String?
@@ -415,6 +433,12 @@ model JournalEntry {
   extensions       Json?
 
   lines JournalLine[]
+
+  // Sub-ledger backrefs — entries that opened or applied to sub-ledger items.
+  arOpenItemsOpened ArOpenItem[]    @relation("ArOpenedBy")
+  apOpenItemsOpened ApOpenItem[]    @relation("ApOpenedBy")
+  arApplications    ArApplication[] @relation("ArAppliedBy")
+  apApplications    ApApplication[] @relation("ApAppliedBy")
 
   createdAt DateTime @default(now())
   createdBy String?
@@ -618,6 +642,393 @@ enum CustomFieldType {
   ENUM
   REFERENCE
   JSON_VALUE
+}
+
+// =========================================================================
+// Native Sub-Ledgers — owned, not delegated to specialty tools.
+// =========================================================================
+// Per the spec's "Own sub-ledgers natively" decision: AR/AP open-item
+// lifecycles + fixed assets + leases + revenue contracts live HERE, not in
+// Sage FAS / LeaseQuery / Zuora. Each has a book-aware attributes table
+// keyed by (record_id, book_id) so the same physical asset/lease/contract
+// can carry divergent useful life / classification / recognition timing
+// across US_GAAP, US_TAX, and IFRS — the engine for book-tax differences.
+
+// ---- AR (Accounts Receivable) -------------------------------------------
+// A bill creates an AP open item; it is NOT itself AP. An invoice opens an
+// AR open item; payments APPLY to the item; full application closes it.
+// Sum of currentBalance for OPEN items per (entity, book) = AR control
+// account balance (the invariant).
+
+model ArOpenItem {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+  partyId  String      @db.Uuid
+  party    Party       @relation(fields: [partyId], references: [id])
+
+  // The JournalEntry that opened this item (typically an invoice).
+  openedByEntryId String       @db.Uuid
+  openedByEntry   JournalEntry @relation("ArOpenedBy", fields: [openedByEntryId], references: [id])
+
+  referenceNumber    String? // invoice number from the source system
+  openedDate         DateTime       @db.Date
+  dueDate            DateTime?      @db.Date
+  originalAmount     Decimal        @db.Decimal(18, 4)
+  currentBalance     Decimal        @db.Decimal(18, 4)
+  currencyId         String
+  status             OpenItemStatus @default(OPEN)
+  // Which AR control account this rolls up to (denormalized for the
+  // sum-of-open = control-balance invariant query).
+  controlAccountCode String
+
+  applications ArApplication[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entityId, bookId, partyId, status])
+  @@index([entityId, bookId, status, dueDate])
+  @@map("ar_open_item")
+}
+
+enum OpenItemStatus {
+  OPEN
+  PARTIAL
+  APPLIED
+  WRITTEN_OFF
+  REOPENED
+  VOID
+}
+
+model ArApplication {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  openItemId       String       @db.Uuid
+  openItem         ArOpenItem   @relation(fields: [openItemId], references: [id], onDelete: Cascade)
+  appliedByEntryId String       @db.Uuid
+  appliedByEntry   JournalEntry @relation("ArAppliedBy", fields: [appliedByEntryId], references: [id])
+  appliedAmount    Decimal      @db.Decimal(18, 4)
+  appliedDate      DateTime     @db.Date
+
+  createdAt DateTime @default(now())
+
+  @@index([openItemId])
+  @@map("ar_application")
+}
+
+// ---- AP (Accounts Payable) — mirror of AR -------------------------------
+
+model ApOpenItem {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+  partyId  String      @db.Uuid
+  party    Party       @relation(fields: [partyId], references: [id])
+
+  openedByEntryId String       @db.Uuid
+  openedByEntry   JournalEntry @relation("ApOpenedBy", fields: [openedByEntryId], references: [id])
+
+  referenceNumber    String?
+  openedDate         DateTime       @db.Date
+  dueDate            DateTime?      @db.Date
+  originalAmount     Decimal        @db.Decimal(18, 4)
+  currentBalance     Decimal        @db.Decimal(18, 4)
+  currencyId         String
+  status             OpenItemStatus @default(OPEN)
+  controlAccountCode String
+
+  applications ApApplication[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entityId, bookId, partyId, status])
+  @@index([entityId, bookId, status, dueDate])
+  @@map("ap_open_item")
+}
+
+model ApApplication {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  openItemId       String       @db.Uuid
+  openItem         ApOpenItem   @relation(fields: [openItemId], references: [id], onDelete: Cascade)
+  appliedByEntryId String       @db.Uuid
+  appliedByEntry   JournalEntry @relation("ApAppliedBy", fields: [appliedByEntryId], references: [id])
+  appliedAmount    Decimal      @db.Decimal(18, 4)
+  appliedDate      DateTime     @db.Date
+
+  createdAt DateTime @default(now())
+
+  @@index([openItemId])
+  @@map("ap_application")
+}
+
+// ---- Fixed Assets ------------------------------------------------------
+
+model FixedAsset {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+
+  code                  String // asset tag, e.g. "LAPTOP-001"
+  description           String
+  category              String? // e.g. "COMPUTER_EQUIPMENT"
+  vendorPartyId         String?          @db.Uuid
+  vendor                Party?           @relation("FixedAssetVendor", fields: [vendorPartyId], references: [id])
+  acquisitionDate       DateTime         @db.Date
+  acquisitionCost       Decimal          @db.Decimal(18, 4)
+  acquisitionCurrencyId String
+  acquisitionCurrency   Currency         @relation("FixedAssetAcqCcy", fields: [acquisitionCurrencyId], references: [code])
+  status                FixedAssetStatus @default(IN_SERVICE)
+  disposalDate          DateTime?        @db.Date
+  disposalProceeds      Decimal?         @db.Decimal(18, 4)
+
+  // Which gross-cost asset account on the GL holds the original cost.
+  // (Accumulated depreciation lives on the per-book attributes row.)
+  assetAccountCode String // e.g. "1500" Computer Equipment
+
+  bookAttributes FixedAssetBookAttributes[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, code])
+  @@index([entityId, status])
+  @@map("fixed_asset")
+}
+
+enum FixedAssetStatus {
+  IN_SERVICE
+  IDLE
+  DISPOSED
+  HELD_FOR_SALE
+}
+
+// Book-aware attributes. Same physical asset, divergent useful life /
+// method / accumulated depreciation across books. This is THE pattern
+// that produces book-tax differences for fixed assets.
+model FixedAssetBookAttributes {
+  assetId                 String             @db.Uuid
+  asset                   FixedAsset         @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  bookId                  String             @db.Uuid
+  book                    Book               @relation(fields: [bookId], references: [id])
+  usefulLifeMonths        Int
+  depreciationMethod      DepreciationMethod
+  inServiceDate           DateTime           @db.Date
+  salvageValue            Decimal            @default(0) @db.Decimal(18, 4)
+  accumulatedDepreciation Decimal            @default(0) @db.Decimal(18, 4)
+  lastDepreciatedThrough  DateTime?          @db.Date
+
+  // GL accounts used when the depreciation runner posts journal entries
+  // for this book.
+  depreciationExpenseAccountCode String // e.g. "8000" Depreciation Expense
+  accumDepreciationAccountCode   String // e.g. "1510" Accum Dep contra-asset
+
+  @@id([assetId, bookId])
+  @@index([bookId, lastDepreciatedThrough])
+  @@map("fixed_asset_book_attributes")
+}
+
+enum DepreciationMethod {
+  STRAIGHT_LINE
+  DOUBLE_DECLINING
+  MACRS_3_HY
+  MACRS_5_HY
+  MACRS_7_HY
+  MACRS_15_HY
+  UNITS_OF_PRODUCTION
+  NONE // for non-depreciable assets (land)
+}
+
+// ---- Leases (ASC 842 / IFRS 16) -----------------------------------------
+
+model Lease {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+
+  code                      String // "LEASE-2026-001"
+  description               String // "NYC office, 50 Hudson Yards"
+  lessorPartyId             String?               @db.Uuid
+  lessor                    Party?                @relation("LeaseLessor", fields: [lessorPartyId], references: [id])
+  leaseStartDate            DateTime              @db.Date
+  leaseEndDate              DateTime              @db.Date
+  paymentFrequency          LeasePaymentFrequency @default(MONTHLY)
+  paymentAmount             Decimal               @db.Decimal(18, 4)
+  totalUndiscountedPayments Decimal               @db.Decimal(18, 4)
+  currencyId                String
+  currency                  Currency              @relation("LeaseCcy", fields: [currencyId], references: [code])
+  status                    LeaseStatus           @default(ACTIVE)
+
+  bookAttributes LeaseBookAttributes[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, code])
+  @@map("lease")
+}
+
+enum LeasePaymentFrequency {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+enum LeaseStatus {
+  ACTIVE
+  TERMINATED
+  EXPIRED
+}
+
+enum LeaseClassification {
+  OPERATING // ASC 842 / IFRS 16 — capitalize ROU + liability
+  FINANCE // ASC 842 finance lease (formerly capital lease)
+  SHORT_TERM // ≤12 months — expense as paid
+  TAX_CASH_BASIS // US Tax: deduct cash payments, no capitalization
+  NONE
+}
+
+model LeaseBookAttributes {
+  leaseId String @db.Uuid
+  lease   Lease  @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  bookId  String @db.Uuid
+  book    Book   @relation(fields: [bookId], references: [id])
+
+  classification        LeaseClassification
+  discountRate          Decimal             @default(0) @db.Decimal(10, 6)
+  rouAssetBalance       Decimal             @default(0) @db.Decimal(18, 4)
+  leaseLiabilityBalance Decimal             @default(0) @db.Decimal(18, 4)
+  lastAmortizedThrough  DateTime?           @db.Date
+
+  // GL accounts used by the lease amortization posting.
+  rouAccountCode       String? // ROU asset account
+  liabilityAccountCode String? // lease liability account
+  expenseAccountCode   String? // lease/rent expense account
+  interestAccountCode  String? // for finance leases
+
+  @@id([leaseId, bookId])
+  @@map("lease_book_attributes")
+}
+
+// ---- Revenue Contracts (ASC 606 / IFRS 15) ------------------------------
+
+model RevenueContract {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+
+  code               String // contract number
+  description        String
+  customerPartyId    String                @db.Uuid
+  customer           Party                 @relation("ContractCustomer", fields: [customerPartyId], references: [id])
+  contractStartDate  DateTime              @db.Date
+  contractEndDate    DateTime?             @db.Date
+  totalContractValue Decimal               @db.Decimal(18, 4)
+  currencyId         String
+  currency           Currency              @relation("RevContractCcy", fields: [currencyId], references: [code])
+  status             RevenueContractStatus @default(ACTIVE)
+
+  performanceObligations PerformanceObligation[]
+  bookAttributes         RevenueContractBookAttributes[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, code])
+  @@map("revenue_contract")
+}
+
+enum RevenueContractStatus {
+  DRAFT
+  ACTIVE
+  AMENDED
+  TERMINATED
+  COMPLETED
+}
+
+enum RecognitionPattern {
+  POINT_IN_TIME
+  OVER_TIME_STRAIGHT
+  OVER_TIME_USAGE
+  OVER_TIME_MILESTONE
+}
+
+model PerformanceObligation {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contractId         String             @db.Uuid
+  contract           RevenueContract    @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  sequenceNo         Int
+  description        String
+  ssp                Decimal            @db.Decimal(18, 4) // standalone selling price (allocated)
+  recognitionPattern RecognitionPattern
+  startDate          DateTime           @db.Date
+  endDate            DateTime?          @db.Date
+  recognizedToDate   Decimal            @default(0) @db.Decimal(18, 4)
+
+  // GL accounts the rev-rec engine posts to when recognizing this PO.
+  revenueAccountCode  String // e.g. "4000"
+  deferredAccountCode String // e.g. "2200"
+
+  @@unique([contractId, sequenceNo])
+  @@map("performance_obligation")
+}
+
+model RevenueContractBookAttributes {
+  contractId String          @db.Uuid
+  contract   RevenueContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  bookId     String          @db.Uuid
+  book       Book            @relation(fields: [bookId], references: [id])
+
+  // GAAP/IFRS use ACCRUAL (ASC 606). Tax may use CASH for certain entities.
+  recognitionBasis     RecognitionBasis @default(ACCRUAL)
+  cumulativeRecognized Decimal          @default(0) @db.Decimal(18, 4)
+
+  @@id([contractId, bookId])
+  @@map("revenue_contract_book_attributes")
+}
+
+enum RecognitionBasis {
+  ACCRUAL
+  CASH
 }
 
 // =========================================================================
