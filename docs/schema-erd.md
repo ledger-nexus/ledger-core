@@ -152,8 +152,8 @@ erDiagram
         string hash UK "dedup combo"
     }
     DimensionSetValue {
-        uuid dimensionSetId PK_FK "CASCADE"
-        uuid dimensionId PK_FK
+        uuid dimensionSetId PK "composite PK and FK"
+        uuid dimensionId PK
         uuid dimensionValueId FK
     }
 
