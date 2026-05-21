@@ -32,7 +32,9 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
       { href: "/reports/trial-balance", label: "Trial balance" },
       { href: "/reports/income-statement", label: "Income statement" },
       { href: "/reports/balance-sheet", label: "Balance sheet" },
+      { href: "/reports/cash-flow", label: "Cash flow", hint: "indirect" },
       { href: "/reports/book-tax-difference", label: "Book-tax difference", hint: "ASC 740" },
+      { href: "/reports/ar-aging", label: "AR aging" },
     ],
   },
 ];

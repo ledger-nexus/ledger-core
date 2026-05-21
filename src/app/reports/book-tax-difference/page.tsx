@@ -2,6 +2,7 @@
 // URL search params. Highlights the timing differences (TEMPORARY) that
 // feed ASC 740 deferred-tax calculations.
 
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getBookTaxDifference } from "@/lib/accounting/reports/book-tax-difference";
@@ -45,7 +46,8 @@ export default async function BookTaxDifferencePage({
             {scope.entityCode} · {bookFrom} (book) vs {bookTo} (tax) · {formatDate(new Date(from))} → {formatDate(new Date(to))}
           </p>
         </div>
-        <form method="GET" className="flex items-end gap-2">
+        <div className="flex items-end gap-2">
+          <form method="GET" className="flex items-end gap-2">
           <div>
             <Label htmlFor="bookFrom">Book</Label>
             <Select name="bookFrom" id="bookFrom" defaultValue={bookFrom}>
@@ -80,7 +82,14 @@ export default async function BookTaxDifferencePage({
           >
             Run
           </button>
-        </form>
+          </form>
+          <Link
+            href={`/api/reports/book-tax-difference/csv?bookFrom=${bookFrom}&bookTo=${bookTo}&from=${from}&to=${to}`}
+            className="h-9 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-700 hover:bg-ink-50"
+          >
+            Download CSV
+          </Link>
+        </div>
       </div>
 
       {/* Summary KPIs */}

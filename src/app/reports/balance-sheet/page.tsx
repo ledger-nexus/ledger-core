@@ -1,6 +1,7 @@
 // Balance sheet. As-of date via URL search param. Shows A = L + E
 // invariant verification at the bottom.
 
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getBalanceSheet } from "@/lib/accounting/reports";
@@ -28,18 +29,26 @@ export default async function BalanceSheetPage({
             {scope.entityCode} / {scope.bookCode} · as of {formatDate(new Date(asOf))}
           </p>
         </div>
-        <form method="GET" className="flex items-end gap-2">
-          <div>
-            <Label htmlFor="asOf">As of</Label>
-            <Input type="date" name="asOf" id="asOf" defaultValue={asOf} />
-          </div>
-          <button
-            type="submit"
-            className="h-9 rounded-md bg-ink-900 px-4 text-sm font-medium text-white hover:bg-ink-800"
+        <div className="flex items-end gap-2">
+          <form method="GET" className="flex items-end gap-2">
+            <div>
+              <Label htmlFor="asOf">As of</Label>
+              <Input type="date" name="asOf" id="asOf" defaultValue={asOf} />
+            </div>
+            <button
+              type="submit"
+              className="h-9 rounded-md bg-ink-900 px-4 text-sm font-medium text-white hover:bg-ink-800"
+            >
+              Run
+            </button>
+          </form>
+          <Link
+            href={`/api/reports/balance-sheet/csv?asOf=${asOf}`}
+            className="h-9 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-700 hover:bg-ink-50"
           >
-            Run
-          </button>
-        </form>
+            Download CSV
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

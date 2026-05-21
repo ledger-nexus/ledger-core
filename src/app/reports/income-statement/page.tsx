@@ -1,5 +1,6 @@
 // Income statement. Period start + end via URL search params.
 
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getIncomeStatement } from "@/lib/accounting/reports";
@@ -27,22 +28,30 @@ export default async function IncomeStatementPage({
             {scope.entityCode} / {scope.bookCode} · {formatDate(new Date(from))} → {formatDate(new Date(to))}
           </p>
         </div>
-        <form method="GET" className="flex items-end gap-2">
-          <div>
-            <Label htmlFor="from">From</Label>
-            <Input type="date" name="from" id="from" defaultValue={from} />
-          </div>
-          <div>
-            <Label htmlFor="to">To</Label>
-            <Input type="date" name="to" id="to" defaultValue={to} />
-          </div>
-          <button
-            type="submit"
-            className="h-9 rounded-md bg-ink-900 px-4 text-sm font-medium text-white hover:bg-ink-800"
+        <div className="flex items-end gap-2">
+          <form method="GET" className="flex items-end gap-2">
+            <div>
+              <Label htmlFor="from">From</Label>
+              <Input type="date" name="from" id="from" defaultValue={from} />
+            </div>
+            <div>
+              <Label htmlFor="to">To</Label>
+              <Input type="date" name="to" id="to" defaultValue={to} />
+            </div>
+            <button
+              type="submit"
+              className="h-9 rounded-md bg-ink-900 px-4 text-sm font-medium text-white hover:bg-ink-800"
+            >
+              Run
+            </button>
+          </form>
+          <Link
+            href={`/api/reports/income-statement/csv?from=${from}&to=${to}`}
+            className="h-9 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-700 hover:bg-ink-50"
           >
-            Run
-          </button>
-        </form>
+            Download CSV
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
