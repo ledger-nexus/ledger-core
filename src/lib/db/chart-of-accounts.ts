@@ -18,28 +18,35 @@ export interface SeedAccount {
   type: AccountType;
   normalBalance: NormalBalance;
   isContra?: boolean;
+  isControlAccount?: boolean;
+  isBank?: boolean;
+  subtype?: string;
 }
 
+// Shared chart (entityId = null at seed time). Mark control accounts and bank
+// accounts so sub-ledger consumers (AR/AP open items in the next batch) can
+// find their roll-up targets without string matching.
 export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   // ---- Assets ----
-  { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT" },
-  { code: "1010", name: "Cash — Payroll", type: "ASSET", normalBalance: "DEBIT" },
-  { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT" },
-  { code: "1400", name: "Prepaid Expenses", type: "ASSET", normalBalance: "DEBIT" },
-  { code: "1500", name: "Computer Equipment", type: "ASSET", normalBalance: "DEBIT" },
+  { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
+  { code: "1010", name: "Cash — Payroll", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
+  { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, subtype: "AR_TRADE" },
+  { code: "1400", name: "Prepaid Expenses", type: "ASSET", normalBalance: "DEBIT", subtype: "PREPAID" },
+  { code: "1500", name: "Computer Equipment", type: "ASSET", normalBalance: "DEBIT", subtype: "FIXED_ASSET" },
   {
     code: "1510",
     name: "Accumulated Depreciation — Equipment",
     type: "ASSET",
     normalBalance: "CREDIT", // contra
     isContra: true,
+    subtype: "ACCUM_DEPR",
   },
 
   // ---- Liabilities ----
-  { code: "2000", name: "Accounts Payable", type: "LIABILITY", normalBalance: "CREDIT" },
-  { code: "2100", name: "Accrued Expenses", type: "LIABILITY", normalBalance: "CREDIT" },
-  { code: "2200", name: "Deferred Revenue", type: "LIABILITY", normalBalance: "CREDIT" },
-  { code: "2300", name: "Sales Tax Payable", type: "LIABILITY", normalBalance: "CREDIT" },
+  { code: "2000", name: "Accounts Payable", type: "LIABILITY", normalBalance: "CREDIT", isControlAccount: true, subtype: "AP_TRADE" },
+  { code: "2100", name: "Accrued Expenses", type: "LIABILITY", normalBalance: "CREDIT", subtype: "ACCRUED" },
+  { code: "2200", name: "Deferred Revenue", type: "LIABILITY", normalBalance: "CREDIT", subtype: "DEFERRED_REV" },
+  { code: "2300", name: "Sales Tax Payable", type: "LIABILITY", normalBalance: "CREDIT", subtype: "TAX_PAYABLE" },
 
   // ---- Equity ----
   { code: "3000", name: "Common Stock", type: "EQUITY", normalBalance: "CREDIT" },

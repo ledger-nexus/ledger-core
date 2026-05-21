@@ -1,19 +1,32 @@
-// mini-ledger Prisma schema
+// ledger-core — Universal accounting substrate (Prisma schema)
 //
-// Design decisions are documented in /docs/accounting-notes.md
-// The TL;DR:
-//   - Accounts have a TYPE (Asset/Liability/Equity/Revenue/Expense)
-//     which determines their normal balance side.
-//   - Journal entries are headers; JournalLines are the debit/credit rows.
-//   - A DB-level check constraint enforces that every JournalLine has either
-//     a debit OR a credit (never both, never neither).
-//   - The application layer (src/lib/accounting/post-journal.ts) enforces
-//     that the SUM of debits equals the SUM of credits per entry, and writes
-//     are wrapped in a transaction so partial posts are impossible.
+// This schema implements Layers 1, 2, and the empty seams for Layers 3-6 of
+// the universal accounting schema documented in docs/universal-schema.md.
 //
-// All monetary amounts are stored as Decimal(18, 4) — never float, never integer cents.
-// Decimal(18,4) gives us 14 digits of dollars and 4 decimal places of precision,
-// which is enough for any contract you'd see at a SaaS company.
+//   Layer 1 — Posting substrate: Account, JournalEntry, JournalLine.
+//             Identical for every source system.
+//   Layer 2 — Master data: LegalEntity, Book, FiscalCalendar, Period,
+//             Currency, FxRate, Party, PartyRole, Item.
+//   Layer 3 — Dimension engine: Dimension, DimensionValue, DimensionSet,
+//             DimensionSetValue. Tables exist, no values seeded.
+//   Layer 4 — Document layer: PostingRule table only. Document tables
+//             (invoice, bill, etc.) live in consumer repos (recon, revenue-rec).
+//   Layer 5 — Custom fields: `extensions Json` on every entity + a
+//             CustomFieldDefinition registry. No EAV.
+//   Layer 6 — Lineage: source_system / source_record_id / source_payload /
+//             mapping_version on every imported row. Wired from day one.
+//
+// LOCKED DECISIONS (do not re-litigate; see docs/universal-schema.md):
+//   - Multi-book is committed. Pattern 2 (full parallel ledgers).
+//   - book_id is on JournalEntry; period close is per (entity, book, period).
+//   - No fixed dimension columns on JournalLine — use the dimension engine.
+//   - Customers/Vendors/Employees collapse into one Party + party_role.
+//   - Surrogate keys are generated UUIDs; source-system IDs live in lineage.
+//   - Three currency amounts per line: transaction, functional, reporting.
+//
+// Prisma model names stay accountant-friendly (Account, JournalEntry,
+// JournalLine). The @@map directives align SQL table names with the
+// universal-schema vocabulary so direct Postgres queries match the spec.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,7 +37,319 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ---------- Chart of Accounts ----------
+// =========================================================================
+// Layer 2 — Master Data
+// =========================================================================
+
+model LegalEntity {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code           String        @unique
+  name           String
+  parentEntityId String?       @db.Uuid
+  parent         LegalEntity?  @relation("EntityHierarchy", fields: [parentEntityId], references: [id])
+  children       LegalEntity[] @relation("EntityHierarchy")
+
+  // The currency this entity reports in. Each book may override for reporting.
+  functionalCurrencyId String
+  functionalCurrency   Currency @relation("EntityFunctionalCcy", fields: [functionalCurrencyId], references: [code])
+
+  // Lineage — null for natively-created entities; populated on ERP import.
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  fiscalCalendars FiscalCalendar[]
+  accounts        Account[]
+  journalEntries  JournalEntry[]
+  parties         Party[]
+  items           Item[]
+  periodCloses    PeriodClose[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("legal_entity")
+}
+
+model Book {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                String    @unique // e.g. "US_GAAP", "US_TAX", "IFRS", "MGMT"
+  name                String
+  // The accounting basis. Drives default behavior in posting rules + reports.
+  basis               BookBasis
+  // Reporting currency for THIS book. Functional currency lives on LegalEntity.
+  // Permits e.g. a US entity with a USD functional ledger but an EUR-reported IFRS book.
+  reportingCurrencyId String
+  reportingCurrency   Currency  @relation("BookReportingCcy", fields: [reportingCurrencyId], references: [code])
+
+  isActive   Boolean @default(true)
+  extensions Json?
+
+  journalEntries JournalEntry[]
+  periodCloses   PeriodClose[]
+  postingRules   PostingRule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("book")
+}
+
+enum BookBasis {
+  US_GAAP
+  US_TAX
+  IFRS
+  MGMT
+  STATUTORY
+}
+
+model FiscalCalendar {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId        String          @db.Uuid
+  entity          LegalEntity     @relation(fields: [entityId], references: [id])
+  code            String // e.g. "STANDARD_2026"
+  name            String
+  periodFrequency PeriodFrequency @default(MONTHLY)
+
+  periods Period[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([entityId, code])
+  @@map("fiscal_calendar")
+}
+
+enum PeriodFrequency {
+  MONTHLY
+  QUARTERLY
+  WEEKLY_4_4_5
+  WEEKLY_4_5_4
+  WEEKLY_5_4_4
+  CUSTOM
+}
+
+model Period {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  calendarId String         @db.Uuid
+  calendar   FiscalCalendar @relation(fields: [calendarId], references: [id])
+  code       String // e.g. "2026-01", "2026-Q1"
+  ordinal    Int // 1..12 for monthly, 1..52 for weekly
+  startsOn   DateTime       @db.Date
+  endsOn     DateTime       @db.Date
+
+  journalEntries JournalEntry[]
+  closes         PeriodClose[]
+
+  @@unique([calendarId, code])
+  @@unique([calendarId, ordinal])
+  @@index([startsOn, endsOn])
+  @@map("period")
+}
+
+// Close locks are per (entity, book, period) — GAAP April can be closed while
+// Tax April stays open. The posting function refuses writes against closed
+// (entity, book, period) tuples.
+model PeriodClose {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+  periodId String      @db.Uuid
+  period   Period      @relation(fields: [periodId], references: [id])
+  closedAt DateTime    @default(now())
+  closedBy String?
+
+  @@unique([entityId, bookId, periodId])
+  @@map("period_close")
+}
+
+model Currency {
+  // ISO 4217 code is the primary key — these are stable.
+  code     String  @id // "USD", "EUR", "JPY"
+  name     String
+  decimals Int     @default(2) // 2 for USD, 0 for JPY, etc.
+  symbol   String?
+
+  fxRatesFrom        FxRate[]       @relation("FxFrom")
+  fxRatesTo          FxRate[]       @relation("FxTo")
+  entitiesFunctional LegalEntity[]  @relation("EntityFunctionalCcy")
+  booksReporting     Book[]         @relation("BookReportingCcy")
+  journalEntries     JournalEntry[] @relation("JeCurrency")
+  linesTxn           JournalLine[]  @relation("LineTxnCcy")
+  linesReporting     JournalLine[]  @relation("LineReportingCcy")
+
+  @@map("currency")
+}
+
+model FxRate {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fromCurrencyId String
+  toCurrencyId   String
+  fromCurrency   Currency   @relation("FxFrom", fields: [fromCurrencyId], references: [code])
+  toCurrency     Currency   @relation("FxTo", fields: [toCurrencyId], references: [code])
+  asOf           DateTime   @db.Date
+  rate           Decimal    @db.Decimal(20, 10)
+  rateType       FxRateType @default(SPOT)
+
+  @@unique([fromCurrencyId, toCurrencyId, asOf, rateType])
+  @@index([asOf])
+  @@map("fx_rate")
+}
+
+enum FxRateType {
+  SPOT
+  AVG // period-average rate (used for revenue/expense translation)
+  CLOSE // period-close rate (used for balance-sheet translation)
+  HISTORICAL // rate at a specific point (used for equity translation)
+}
+
+model Party {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId    String?      @db.Uuid // null = shared across entities
+  entity      LegalEntity? @relation(fields: [entityId], references: [id])
+  code        String // human-readable, often source-system code
+  displayName String
+
+  // Customer:Job / Project / WBS / Sage Job all collapse to one Party with parent.
+  // Per spec anti-pattern list: do NOT model jobs as a kind of customer.
+  parentPartyId String? @db.Uuid
+  parent        Party?  @relation("PartyHierarchy", fields: [parentPartyId], references: [id])
+  children      Party[] @relation("PartyHierarchy")
+
+  roles        PartyRole[]
+  journalLines JournalLine[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, code])
+  @@map("party")
+}
+
+model PartyRole {
+  id       String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partyId  String        @db.Uuid
+  party    Party         @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  role     PartyRoleKind
+  startsOn DateTime?     @db.Date
+  endsOn   DateTime?     @db.Date
+
+  @@unique([partyId, role])
+  @@map("party_role")
+}
+
+enum PartyRoleKind {
+  CUSTOMER
+  VENDOR
+  EMPLOYEE
+  OTHER
+}
+
+model Item {
+  id                          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityId                    String?        @db.Uuid
+  entity                      LegalEntity?   @relation(fields: [entityId], references: [id])
+  code                        String
+  name                        String
+  itemType                    ItemType       @default(SERVICE)
+  costingMethod               CostingMethod?
+  defaultIncomeAccountCode    String?
+  defaultExpenseAccountCode   String?
+  defaultInventoryAccountCode String?
+
+  journalLines JournalLine[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, code])
+  @@map("item")
+}
+
+enum ItemType {
+  INVENTORY
+  NON_INVENTORY
+  SERVICE
+  KIT
+  ASSEMBLY
+  FIXED_ASSET
+}
+
+enum CostingMethod {
+  FIFO
+  LIFO
+  AVERAGE
+  STANDARD
+  SPECIFIC
+}
+
+// =========================================================================
+// Layer 1 — Posting Substrate
+// =========================================================================
+
+model Account {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // entityId null = shared across all entities (consolidated chart).
+  // Set to a value = entity-specific account.
+  entityId String?      @db.Uuid
+  entity   LegalEntity? @relation(fields: [entityId], references: [id])
+
+  // Human-readable code (e.g. "1000" for Cash). NOT a source-system primary key.
+  // Convention: 1xxx Assets, 2xxx Liabilities, 3xxx Equity, 4xxx Revenue, 5xxx-9xxx Expenses.
+  code             String
+  name             String
+  type             AccountType
+  normalBalance    NormalBalance
+  subtype          String? // e.g. "CASH", "AR_TRADE", "INVENTORY_RAW"
+  isContra         Boolean       @default(false)
+  isControlAccount Boolean       @default(false) // true for AR/AP control accounts
+  isBank           Boolean       @default(false)
+
+  parentAccountId String?   @db.Uuid
+  parent          Account?  @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
+  children        Account[] @relation("AccountHierarchy")
+
+  // Books this account applies to. Empty = applies to all books.
+  // e.g. ["US_TAX"] for a tax-only account; empty for a normal account.
+  bookScope String[] @default([])
+
+  active Boolean @default(true)
+
+  lines JournalLine[]
+
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+  sourcePayload    Json?
+  mappingVersion   String?
+  extensions       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, code])
+  @@index([type])
+  @@map("account")
+}
 
 enum AccountType {
   ASSET
@@ -39,91 +364,271 @@ enum NormalBalance {
   CREDIT
 }
 
-model Account {
-  id            String        @id @default(cuid())
-  // Account code is the human-readable identifier (e.g. "1000" for Cash).
-  // Convention: 1xxx Assets, 2xxx Liabilities, 3xxx Equity, 4xxx Revenue, 5xxx-9xxx Expenses.
-  code          String        @unique
-  name          String
-  type          AccountType
-  normalBalance NormalBalance
-  // Contra accounts (e.g. Accumulated Depreciation) have a normal balance OPPOSITE
-  // to their type's usual side. We track this explicitly rather than infer it.
-  isContra      Boolean       @default(false)
-  // Soft-disable accounts without deleting (audit trail integrity).
-  active        Boolean       @default(true)
+// One row per posted document. Posts to exactly ONE (entity, book).
+// Multi-book postings of a single source event create N JournalEntry rows
+// (one per book), all sharing the same source_record_id in lineage.
+model JournalEntry {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // entryNumber is a human-readable sequential ID, unique per (entity, book).
+  // Format: ENTITY-BOOK-NNNNN (e.g. NORTHWIND-US_GAAP-00001).
+  entryNumber String @unique
+
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+
+  // periodId is resolved at posting time from the document/posting date and
+  // the entity's fiscal calendar. Null only allowed for entries dated before
+  // any defined period (historical pre-go-live data).
+  periodId String? @db.Uuid
+  period   Period? @relation(fields: [periodId], references: [id])
+
+  // Document date = when the transaction is dated (invoice date).
+  // Posting date = when it hit the ledger (often same; can differ for backdated entries).
+  documentDate DateTime @db.Date
+  postingDate  DateTime @db.Date
+
+  memo String
+
+  // Header currency = the transaction's natural currency. fxRate translates
+  // it to the book's reporting currency. Per-line currency is allowed in
+  // edge cases (intercompany) but defaults to the header.
+  currencyId String
+  currency   Currency @relation("JeCurrency", fields: [currencyId], references: [code])
+  fxRate     Decimal  @default(1) @db.Decimal(20, 10)
+
+  source JournalSource @default(MANUAL)
+  status EntryStatus   @default(POSTED)
+
+  reversalOfId String?        @db.Uuid
+  reversalOf   JournalEntry?  @relation("Reversal", fields: [reversalOfId], references: [id])
+  reversedBy   JournalEntry[] @relation("Reversal")
+
+  // Lineage — non-negotiable per spec. Populated on every ERP import.
+  sourceSystem     String? // "QBO", "NETSUITE", "INTACCT", ...
+  sourceRecordType String? // "Invoice", "Bill", "JournalEntry", ...
+  sourceRecordId   String? // the source system's ID (NEVER reused as our PK)
+  sourcePayload    Json? // frozen raw original
+  mappingVersion   String?
+  extensions       Json?
 
   lines JournalLine[]
+
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  @@index([entityId, bookId, documentDate])
+  @@index([entityId, bookId, periodId])
+  @@index([sourceSystem, sourceRecordType, sourceRecordId])
+  @@map("gl_entry_header")
+}
+
+enum JournalSource {
+  MANUAL // entered by a human via the UI
+  SEED // loaded from seed data
+  SYSTEM // posted by another module (e.g. rev rec engine)
+  AI_APPROVED // AI suggested, human approved (used in recon project)
+  IMPORT // ERP import (companion to source_system lineage)
+}
+
+enum EntryStatus {
+  DRAFT
+  POSTED
+  VOID
+  REVERSED
+}
+
+model JournalLine {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entryId   String       @db.Uuid
+  entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  lineNo    Int // 1-based, position within entry
+  accountId String       @db.Uuid
+  account   Account      @relation(fields: [accountId], references: [id])
+
+  // Sub-ledger keys — nullable. When populated, the entry contributes to a
+  // sub-ledger lifecycle (e.g. partyId set on an AR line opens/applies an
+  // AR open item). The open-item tables themselves arrive in the next batch.
+  partyId String? @db.Uuid
+  party   Party?  @relation(fields: [partyId], references: [id])
+  itemId  String? @db.Uuid
+  item    Item?   @relation(fields: [itemId], references: [id])
+
+  // Layer 3 — dimension engine. Nullable until the first ERP import that
+  // carries class/department/location dimensions.
+  dimensionSetId String?       @db.Uuid
+  dimensionSet   DimensionSet? @relation(fields: [dimensionSetId], references: [id])
+
+  // taxCodeId — slot. TaxCode table arrives with the document layer in a
+  // consumer repo. String form here to avoid a meaningless empty table now.
+  taxCodeId String?
+
+  // The canonical debit/credit pair in the BOOK's reporting currency.
+  // XOR constraint enforced at the DB layer (migration SQL).
+  debit  Decimal @default(0) @db.Decimal(18, 4)
+  credit Decimal @default(0) @db.Decimal(18, 4)
+
+  // Transaction-currency view (signed: debit positive, credit negative).
+  // = (debit - credit) for single-currency. Diverges when the line is in
+  // a non-functional currency (intercompany, FX gains/losses).
+  transactionAmount     Decimal   @default(0) @db.Decimal(18, 4)
+  transactionCurrencyId String?
+  transactionCurrency   Currency? @relation("LineTxnCcy", fields: [transactionCurrencyId], references: [code])
+
+  // Reporting-currency view (signed). Equals functional when the book's
+  // reporting currency = the entity's functional currency.
+  reportingAmount     Decimal   @default(0) @db.Decimal(18, 4)
+  reportingCurrencyId String?
+  reportingCurrency   Currency? @relation("LineReportingCcy", fields: [reportingCurrencyId], references: [code])
+
+  description String?
+  extensions  Json?
+
+  @@unique([entryId, lineNo])
+  @@index([entryId])
+  @@index([accountId])
+  @@index([partyId])
+  @@map("gl_entry_line")
+}
+
+// =========================================================================
+// Layer 3 — Dimension Engine
+// =========================================================================
+// Tables defined; no values seeded in v1. Adding a value here is free —
+// no schema change. This is why fixed dimension columns on JournalLine are
+// an anti-pattern.
+
+model Dimension {
+  id                    String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                  String  @unique // "DEPARTMENT", "CLASS", "LOCATION", "PROJECT"
+  name                  String
+  isRequired            Boolean @default(false)
+  // JSON array of AccountType strings this dimension applies to.
+  // e.g. ["REVENUE", "EXPENSE"] for P&L-only dimensions.
+  appliesToAccountTypes Json    @default("[]")
+
+  values  DimensionValue[]
+  bridges DimensionSetValue[]
+
+  createdAt DateTime @default(now())
+
+  @@map("dimension")
+}
+
+model DimensionValue {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dimensionId String    @db.Uuid
+  dimension   Dimension @relation(fields: [dimensionId], references: [id])
+  code        String
+  name        String
+
+  bridges DimensionSetValue[]
+
+  @@unique([dimensionId, code])
+  @@map("dimension_value")
+}
+
+// A deduplicated combination of dimension values. Each JournalLine references
+// one DimensionSet. Two lines with identical (Department=ENG, Class=R&D)
+// share the same DimensionSet row.
+model DimensionSet {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Stable hash of sorted (dimensionId, dimensionValueId) pairs. Used for
+  // dedup lookups during posting.
+  hash String @unique
+
+  values       DimensionSetValue[]
+  journalLines JournalLine[]
+
+  createdAt DateTime @default(now())
+
+  @@map("dimension_set")
+}
+
+model DimensionSetValue {
+  dimensionSetId   String         @db.Uuid
+  dimensionId      String         @db.Uuid
+  dimensionValueId String         @db.Uuid
+  dimensionSet     DimensionSet   @relation(fields: [dimensionSetId], references: [id], onDelete: Cascade)
+  dimension        Dimension      @relation(fields: [dimensionId], references: [id])
+  dimensionValue   DimensionValue @relation(fields: [dimensionValueId], references: [id])
+
+  @@id([dimensionSetId, dimensionId])
+  @@map("dimension_set_value")
+}
+
+// =========================================================================
+// Layer 4 — Posting Rules (table only; no rules registered in v1)
+// =========================================================================
+// A source event (e.g. NetSuite "Customer Invoice") maps to N GL-line
+// templates, one per applicable book. With no rules registered, the posting
+// function falls back to "post identically to every active book."
+
+model PostingRule {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceEventType String // e.g. "QBO_INVOICE"
+  bookId          String  @db.Uuid
+  book            Book    @relation(fields: [bookId], references: [id])
+  ruleVersion     Int     @default(1)
+  // GL-line template — accounts, signs, dimension mappings, etc.
+  // Schema TBD when the first rule is authored.
+  template        Json
+  isActive        Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([type])
+  @@unique([sourceEventType, bookId, ruleVersion])
+  @@map("posting_rule")
 }
 
-// ---------- Journal Entries ----------
+// =========================================================================
+// Layer 5 — Custom Field Metadata
+// =========================================================================
+// The JSON content lives in `extensions` on each entity. THIS table just
+// describes what's inside those JSON blobs so a UI can render forms and
+// queries can use GIN indexes intelligently.
 
-enum JournalSource {
-  MANUAL          // entered by a human via the UI
-  SEED            // loaded from seed data
-  SYSTEM          // posted by another module (e.g. rev rec engine)
-  AI_APPROVED     // AI suggested, human approved (used in bank-recon project)
-}
-
-model JournalEntry {
-  id          String        @id @default(cuid())
-  // entryNumber is a human-readable sequential ID (JE-00001, JE-00002, ...).
-  // Auto-assigned by the posting function.
-  entryNumber String        @unique
-  date        DateTime      @db.Date
-  memo        String
-  source      JournalSource @default(MANUAL)
-  // Once posted, an entry cannot be edited or deleted — only reversed.
-  // This is the GAAP-style audit-trail rule.
-  posted      Boolean       @default(true)
-  // If this entry reverses another one, link it. Used for corrections.
-  reversesId  String?
-  reverses    JournalEntry? @relation("Reversal", fields: [reversesId], references: [id])
-  reversedBy  JournalEntry[] @relation("Reversal")
-
-  lines JournalLine[]
+model CustomFieldDefinition {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Which entity type this field attaches to ("party", "account", "item",
+  // "gl_entry_header", "gl_entry_line", "invoice", ...).
+  targetEntityType String
+  fieldKey         String // key inside the extensions JSON
+  label            String
+  fieldType        CustomFieldType
+  validation       Json? // e.g. { min: 0, max: 100 } or { regex: "^[A-Z]{2}$" }
+  defaultValue     Json?
+  sourceErpField   String? // original ERP field code (for round-trip)
 
   createdAt DateTime @default(now())
-  createdBy String?  // user id placeholder; auth is out of scope for v1
 
-  @@index([date])
-  @@index([source])
+  @@unique([targetEntityType, fieldKey])
+  @@map("custom_field_definition")
 }
 
-model JournalLine {
-  id        String  @id @default(cuid())
-  entryId   String
-  entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  accountId String
-  account   Account @relation(fields: [accountId], references: [id])
-
-  // Exactly one of debit/credit is non-zero on each line.
-  // The DB-level check constraint below enforces this.
-  debit  Decimal @default(0) @db.Decimal(18, 4)
-  credit Decimal @default(0) @db.Decimal(18, 4)
-
-  // Free-text description for the line (often the same as the entry memo,
-  // but can be more specific when an entry hits many accounts).
-  description String?
-
-  @@index([entryId])
-  @@index([accountId])
+enum CustomFieldType {
+  STRING
+  NUMBER
+  BOOLEAN
+  DATE
+  DATETIME
+  ENUM
+  REFERENCE
+  JSON_VALUE
 }
 
-// IMPORTANT: Prisma cannot define raw CHECK constraints, so we add them via a
-// migration SQL file (prisma/migrations/0001_constraints/migration.sql) that runs
-// after the initial schema migration. The constraints are:
+// =========================================================================
+// DB-level invariants live in prisma/migrations/0001_constraints/migration.sql
+// =========================================================================
 //
-//   ALTER TABLE "JournalLine" ADD CONSTRAINT line_xor_check
-//     CHECK ((debit > 0 AND credit = 0) OR (debit = 0 AND credit > 0));
+//   - JournalLine: (debit > 0 AND credit = 0) OR (debit = 0 AND credit > 0)
+//   - JournalLine: debit >= 0 AND credit >= 0
+//   - JournalEntry: a POSTED entry must reference a non-CLOSED PeriodClose
+//     (enforced in posting function; DB check is per-(entity,book,period)
+//     and requires a deferrable trigger; out of scope for the first commit).
 //
-//   ALTER TABLE "JournalLine" ADD CONSTRAINT line_nonneg_check
-//     CHECK (debit >= 0 AND credit >= 0);
-//
-// See docs/accounting-notes.md for why we belt-and-suspender this at both
-// the application layer and the DB layer.
+// See docs/universal-schema.md for the architectural rationale and the
+// remaining layers' build plan.

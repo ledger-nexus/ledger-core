@@ -1,8 +1,8 @@
 {
-  "name": "mini-ledger",
-  "version": "0.1.0",
+  "name": "ledger-core",
+  "version": "0.2.0",
   "private": true,
-  "description": "A double-entry general ledger that enforces accounting invariants as unit tests.",
+  "description": "Universal accounting substrate — Layers 1 & 2 of a multi-book general ledger, exercised on QBO-grade SaaS data, schema-compatible with NetSuite/Intacct.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

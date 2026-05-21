@@ -5,12 +5,43 @@
 // (thousands of lines) this is plenty fast and dramatically simpler.
 //
 // Design principle: reports are pure functions of the ledger state on a given
-// date. Given the same ledger and the same date, you get the same report —
-// always. No "as of last sync" — always "as of right now".
+// (entity, book, date). Same inputs → same outputs, always.
+//
+// Multi-book note: every report is scoped to ONE (entity, book). Cross-book
+// comparison (e.g. ASC 740 book-tax difference) is a separate report that
+// diffs two single-book report results — not a fourth book-agnostic report.
 
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { AccountType, signFor } from "./types";
+
+const DEFAULT_BOOK = "US_GAAP";
+
+// Internal helper: resolve (entityCode, bookCode) -> ids in one query.
+async function resolveEntityBook(
+  prisma: PrismaClient,
+  entityCode: string,
+  bookCode: string
+): Promise<{ entityId: string; bookId: string }> {
+  const [entity, book] = await Promise.all([
+    prisma.legalEntity.findUnique({
+      where: { code: entityCode },
+      select: { id: true },
+    }),
+    prisma.book.findUnique({
+      where: { code: bookCode },
+      select: { id: true },
+    }),
+  ]);
+  if (!entity) throw new Error(`Unknown entity: ${entityCode}`);
+  if (!book) throw new Error(`Unknown book: ${bookCode}`);
+  return { entityId: entity.id, bookId: book.id };
+}
+
+export interface ReportScope {
+  entityCode: string;
+  bookCode?: string;            // default "US_GAAP"
+}
 
 export interface TrialBalanceRow {
   accountCode: string;
@@ -19,19 +50,31 @@ export interface TrialBalanceRow {
   debit: Decimal;   // sum of all debit lines on/before asOf
   credit: Decimal;  // sum of all credit lines on/before asOf
   // Net balance, expressed on the account's normal side.
-  // For an Asset: debit - credit. For a Liability: credit - debit.
   balance: Decimal;
 }
 
 export async function getTrialBalance(
   prisma: PrismaClient,
+  scope: ReportScope,
   asOf: Date
 ): Promise<{ rows: TrialBalanceRow[]; totalDebit: Decimal; totalCredit: Decimal }> {
+  const { entityId, bookId } = await resolveEntityBook(
+    prisma,
+    scope.entityCode,
+    scope.bookCode ?? DEFAULT_BOOK
+  );
+
+  // Pull lines for the (entity, book) on/before asOf, grouped by account.
   const accounts = await prisma.account.findMany({
-    where: { active: true },
+    where: {
+      active: true,
+      OR: [{ entityId: null }, { entityId }],
+    },
     include: {
       lines: {
-        where: { entry: { date: { lte: asOf } } },
+        where: {
+          entry: { entityId, bookId, documentDate: { lte: asOf } },
+        },
         select: { debit: true, credit: true },
       },
     },
@@ -52,7 +95,6 @@ export async function getTrialBalance(
     totalDebit = totalDebit.plus(debit);
     totalCredit = totalCredit.plus(credit);
 
-    // Balance expressed on the account's normal side.
     const normal = signFor(acct.type as AccountType, acct.isContra);
     const balance = normal === 1 ? debit.minus(credit) : credit.minus(debit);
 
@@ -70,6 +112,7 @@ export async function getTrialBalance(
 }
 
 export interface IncomeStatement {
+  scope: { entityCode: string; bookCode: string };
   periodStart: Date;
   periodEnd: Date;
   revenue: { code: string; name: string; amount: Decimal }[];
@@ -81,18 +124,27 @@ export interface IncomeStatement {
 
 export async function getIncomeStatement(
   prisma: PrismaClient,
+  scope: ReportScope,
   periodStart: Date,
   periodEnd: Date
 ): Promise<IncomeStatement> {
+  const bookCode = scope.bookCode ?? DEFAULT_BOOK;
+  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
+
   const accounts = await prisma.account.findMany({
     where: {
       active: true,
       type: { in: ["REVENUE", "EXPENSE"] },
+      OR: [{ entityId: null }, { entityId }],
     },
     include: {
       lines: {
         where: {
-          entry: { date: { gte: periodStart, lte: periodEnd } },
+          entry: {
+            entityId,
+            bookId,
+            documentDate: { gte: periodStart, lte: periodEnd },
+          },
         },
         select: { debit: true, credit: true },
       },
@@ -113,8 +165,6 @@ export async function getIncomeStatement(
       credit = credit.plus(new Decimal(line.credit.toString()));
     }
 
-    // Revenue normal balance is CREDIT, so revenue amount = credit - debit.
-    // Expense normal balance is DEBIT, so expense amount = debit - credit.
     if (acct.type === "REVENUE") {
       const amount = credit.minus(debit);
       revenue.push({ code: acct.code, name: acct.name, amount });
@@ -127,6 +177,7 @@ export async function getIncomeStatement(
   }
 
   return {
+    scope: { entityCode: scope.entityCode, bookCode },
     periodStart,
     periodEnd,
     revenue,
@@ -138,6 +189,7 @@ export async function getIncomeStatement(
 }
 
 export interface BalanceSheet {
+  scope: { entityCode: string; bookCode: string };
   asOf: Date;
   assets: { code: string; name: string; amount: Decimal }[];
   liabilities: { code: string; name: string; amount: Decimal }[];
@@ -147,24 +199,28 @@ export interface BalanceSheet {
   totalEquity: Decimal;          // includes current-period net income via retained earnings calc
   retainedEarnings: Decimal;     // YTD net income, computed not stored
   totalLiabilitiesAndEquity: Decimal;
-  // The invariant: totalAssets === totalLiabilitiesAndEquity.
-  // We return this so callers (and tests) can assert it.
-  balances: boolean;
+  balances: boolean;             // totalAssets === totalLiabilitiesAndEquity
 }
 
 export async function getBalanceSheet(
   prisma: PrismaClient,
+  scope: ReportScope,
   asOf: Date
 ): Promise<BalanceSheet> {
-  // Get permanent-account balances as of `asOf`.
+  const bookCode = scope.bookCode ?? DEFAULT_BOOK;
+  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
+
   const accounts = await prisma.account.findMany({
     where: {
       active: true,
       type: { in: ["ASSET", "LIABILITY", "EQUITY"] },
+      OR: [{ entityId: null }, { entityId }],
     },
     include: {
       lines: {
-        where: { entry: { date: { lte: asOf } } },
+        where: {
+          entry: { entityId, bookId, documentDate: { lte: asOf } },
+        },
         select: { debit: true, credit: true },
       },
     },
@@ -201,13 +257,17 @@ export async function getBalanceSheet(
     }
   }
 
-  // Retained earnings = all P&L activity from "the beginning of time" through asOf.
-  // In a real system you'd close periods and roll P&L into retained earnings explicitly;
-  // here we compute it on the fly, which is simpler and equivalent.
-  const pnl = await getIncomeStatement(prisma, new Date("1900-01-01"), asOf);
+  // Retained earnings = all P&L activity for this (entity, book) from the
+  // beginning of time through asOf. Computed on the fly; production would
+  // close periods and roll P&L into RE explicitly.
+  const pnl = await getIncomeStatement(
+    prisma,
+    { entityCode: scope.entityCode, bookCode },
+    new Date("1900-01-01"),
+    asOf
+  );
   const retainedEarnings = pnl.netIncome;
 
-  // Add retained earnings into equity as a synthetic line.
   equity.push({
     code: "RE",
     name: "Retained Earnings (computed)",
@@ -218,6 +278,7 @@ export async function getBalanceSheet(
   const totalLiabilitiesAndEquity = totalLiabilities.plus(totalEquity);
 
   return {
+    scope: { entityCode: scope.entityCode, bookCode },
     asOf,
     assets,
     liabilities,

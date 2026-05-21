@@ -29,20 +29,56 @@ export function signFor(type: AccountType, isContra: boolean): 1 | -1 {
   return effective === "DEBIT" ? 1 : -1;
 }
 
-// A line as it's passed INTO the posting function — accountCode + debit/credit.
-// We accept Decimal | string | number; the posting function normalizes them.
+// A line as it's passed INTO the posting function.
+// `accountCode` is resolved against the (entity, code) unique pair, falling
+// back to the shared chart (entityId = null) if no entity-specific account.
+//
+// Sub-ledger keys (partyCode, itemCode) and dimension data are nullable;
+// the schema slots are present, but v1 callers don't need to populate them.
 export interface JournalLineInput {
   accountCode: string;
   debit?: Decimal | string | number;
   credit?: Decimal | string | number;
   description?: string;
+
+  // Sub-ledger keys — when set, the line contributes to a sub-ledger
+  // lifecycle (open-item tracking arrives in the next batch).
+  partyCode?: string;
+  itemCode?: string;
+
+  // Three-currency view. v1 callers can omit; the posting function fills in
+  // transactionAmount/reportingAmount = (debit - credit) and the line's
+  // currency = the header currency.
+  transactionAmount?: Decimal | string | number;
+  reportingAmount?: Decimal | string | number;
+
+  extensions?: Record<string, unknown>;
 }
 
+// Input shape for postJournalEntry.
+//
+// Required keys (entityCode, bookCode, currencyCode) are LOAD-BEARING.
+// The schema cannot have a balanced trial balance without knowing which
+// (entity, book) the lines belong to.
 export interface JournalEntryInput {
-  date: Date;
+  entityCode: string;
+  bookCode?: string;                // default "US_GAAP"
+  currencyCode?: string;            // default = entity's functional currency
+  fxRate?: Decimal | string | number; // default 1
+  documentDate: Date;
+  postingDate?: Date;               // default = documentDate
   memo: string;
-  source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED";
+  source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
+
   lines: JournalLineInput[];
+
+  // Lineage — populated on ERP import. v1 native callers leave null.
+  sourceSystem?: string;
+  sourceRecordType?: string;
+  sourceRecordId?: string;
+  sourcePayload?: unknown;
+  mappingVersion?: string;
+  extensions?: Record<string, unknown>;
 }
 
 // Custom error types so the API layer can produce useful messages.
@@ -66,5 +102,33 @@ export class UnknownAccountError extends Error {
   constructor(public accountCode: string) {
     super(`No active account found with code "${accountCode}"`);
     this.name = "UnknownAccountError";
+  }
+}
+
+export class UnknownEntityError extends Error {
+  constructor(public entityCode: string) {
+    super(`No entity found with code "${entityCode}"`);
+    this.name = "UnknownEntityError";
+  }
+}
+
+export class UnknownBookError extends Error {
+  constructor(public bookCode: string) {
+    super(`No active book found with code "${bookCode}"`);
+    this.name = "UnknownBookError";
+  }
+}
+
+export class PeriodClosedError extends Error {
+  constructor(public entityCode: string, public bookCode: string, public periodCode: string) {
+    super(`Period ${periodCode} is closed for (${entityCode}, ${bookCode})`);
+    this.name = "PeriodClosedError";
+  }
+}
+
+export class AccountBookScopeError extends Error {
+  constructor(public accountCode: string, public bookCode: string) {
+    super(`Account ${accountCode} is not in scope for book ${bookCode}`);
+    this.name = "AccountBookScopeError";
   }
 }
