@@ -1,51 +1,51 @@
 # ledger-core
 
-> The universal accounting substrate. Layers 1 & 2 of a multi-book general ledger, exercised on QBO-grade SaaS data, schema-compatible with NetSuite/Intacct.
+> The universal accounting substrate. A multi-book general ledger with native sub-ledgers, exercised on QBO-grade SaaS data, schema-compatible with NetSuite/Intacct.
 
-The boring, critical foundation that every accounting system sits on top of. A correct double-entry general ledger with multi-entity, multi-book, three-currency, dimension-engine, and ERP-lineage support — exercised on a single-entity SaaS company today, designed to absorb a tier-1 ERP tomorrow.
+The boring, critical foundation every accounting system sits on top of. Correct double-entry posting, multi-entity, multi-book (Pattern 2 — full parallel ledgers), three-currency, native sub-ledgers (AR / AP / fixed assets / leases / revenue contracts), dimension engine, ERP-lineage, and a book-tax-difference report that diffs two books' trial balances and surfaces ASC 740 timing differences.
 
-The headline feature: **accounting invariants enforced as unit tests** that fail loudly if debits ever don't equal credits, if a balance sheet doesn't balance, if retained earnings doesn't reconcile with cumulative net income, or if a transaction posted to US_GAAP leaks into US_TAX.
+Northwind Cloud (the seeded SaaS company) posts to **US_GAAP, US_TAX, and IFRS in parallel**. Depreciation diverges per book (36-month SL vs 60-month SL → $1,600 temporary difference). Globex's $60k prepay defers under GAAP / IFRS and recognizes immediately under cash-basis tax. The book-tax-difference report surfaces all of it.
 
-**Architecture reference: [docs/universal-schema.md](docs/universal-schema.md)** — the design decisions, in full.
+**Architecture canon: [docs/universal-schema.md](docs/universal-schema.md)** · **Visual map: [docs/schema-erd.md](docs/schema-erd.md)**
 
 ---
 
 ## Why this exists
 
-Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Numeric, Puzzle, Digits, Campfire) — is built on top of a double-entry ledger. The ledger is where bugs become misstatements and misstatements become restatements. Most "vibe-coded" finance projects skip it and stack a UI on top of a flat transaction table, which works until you try to produce a balance sheet that balances.
+Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Numeric, Puzzle, Digits, Campfire) — is built on top of a double-entry ledger. The ledger is where bugs become misstatements and misstatements become restatements. Most "vibe-coded" finance projects skip it and stack a UI on top of a flat transaction table, which works until you try to produce a balance sheet that balances *across three books* with a real fixed-asset book-tax difference.
 
-`ledger-core` does the unglamorous foundational work and does it against the universal schema, not a QBO-grade subset. The posting substrate, master data, dimension engine, and lineage layer are all present from commit 1. Sub-ledgers (AR/AP open items, fixed assets, leases, revenue contracts) and the posting-rules engine land next. Document tables (invoice, bill, PO) live in the consumer repos (`recon`, `revenue-rec`).
+`ledger-core` does the unglamorous foundational work and does it against the universal schema, not a QBO-grade subset. Layers 1+2 of the universal schema, native sub-ledgers, and the book-tax-difference engine are all present today. Document tables (`invoice`, `bill`, `purchase_order`) live in the consumer repos (`recon`, `revenue-rec`) — they're consumers of the substrate, not part of it.
 
-## What's wired now (v0.2)
+## What's wired (v0.3)
 
-- ✅ Layer 1 — Posting substrate (`Account`, `JournalEntry`, `JournalLine`) with debits=credits, three-currency amounts, XOR debit/credit, atomic writes, all enforced at app + DB layers
-- ✅ Layer 2 — Master data: `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`, `PartyRole`, `Item`
-- ✅ Layer 3 — Dimension engine tables (`Dimension`, `DimensionValue`, `DimensionSet`, `DimensionSetValue`) — defined, no values yet
-- ✅ Layer 4 — `PostingRule` table — defined, no rules yet
-- ✅ Layer 5 — `extensions Json` on every entity + `CustomFieldDefinition` registry + GIN indexes
-- ✅ Layer 6 — Source-system / source-record-id / source-payload / mapping-version on every entity; wired from day one
-- ✅ Multi-book scoped reports (Trial Balance, Income Statement, Balance Sheet) per `(entity, book)`
-- ✅ Invariant tests including multi-book isolation
-- ✅ Northwind Cloud seed (6 months, single book today)
+- ✅ **Layer 1 posting substrate** — `Account`, `JournalEntry`, `JournalLine` with debits=credits, three-currency amounts, XOR debit/credit, atomic writes, sub-ledger keys, lineage. Enforced at app + DB layers.
+- ✅ **Layer 2 master data** — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`+`PartyRole`, `Item`.
+- ✅ **Layer 3 dimension engine** — tables defined; values populated when needed.
+- ✅ **Layer 4 posting rules** — table defined; rules registered in v0.4.
+- ✅ **Layer 5 custom fields** — `extensions Json` on every entity + `CustomFieldDefinition` + GIN indexes.
+- ✅ **Layer 6 lineage** — source-system / record-id / payload on every importable entity.
+- ✅ **Sub-ledgers (v0.3)** — AR / AP open-item lifecycle, FixedAsset + book-aware depreciation, Lease + ASC 842 classification slots, RevenueContract + PerformanceObligation + per-book recognition basis.
+- ✅ **Reports** — Trial Balance, Income Statement, Balance Sheet, **Book-Tax Difference** — all scoped per `(entity, book)`.
+- ✅ **Multi-book parallel posting** — Northwind seed exercises Pattern 2 end-to-end with divergent depreciation + cash-basis tax recognition.
+- ✅ **Invariant tests** — TB/BS balance per book, AR/AP open-item = control account, fixed asset NBV divergence, BTD classification.
 
-## What lands next
+## What lands next (v0.4 → v1.0)
 
-- 🚧 Sub-ledgers: `ArOpenItem`, `ApOpenItem` lifecycle, `FixedAsset` + `FixedAssetBookAttributes`, `Lease` + `LeaseBookAttributes`, `RevenueContract` + `RevenueContractBookAttributes`
-- 🚧 Posting rules engine — multi-book parallel posting from one source event
-- 🚧 Book-tax difference report (ASC 740 / M-1 / M-3 inputs)
-- 🚧 The Next.js UI on top of the substrate
-- 🚧 ERP mapping examples (QBO floor, NetSuite ceiling)
-- 🚧 Vercel + Neon live demo
+- 🚧 Posting-rules engine implementation (replace explicit fan-out with table-driven divergence)
+- 🚧 Full ASC 842 ROU asset + lease liability roll-forward (current v0.3 is a straight-line stub)
+- 🚧 Property-based tests via `fast-check` against the posting boundary
+- 🚧 Next.js UI + Vercel + Neon live demo + Loom walkthrough
+- 🚧 QBO and NetSuite end-to-end mapping examples (the "validate by mapping" step in `docs/universal-schema.md`)
 
 ## Tech stack
 
 | Layer | Choice | Why |
 |---|---|---|
 | Database | Postgres | CHECK constraints + GIN indexes enforce accounting rules at the schema |
-| ORM | Prisma | Type-safe, generates a clean TS client, `@@map` keeps SQL names spec-aligned |
+| ORM | Prisma | Type-safe; `@@map` keeps SQL names aligned with universal-schema vocabulary |
 | Money math | decimal.js | JS `Number` can't represent money correctly. Don't try. |
-| Tests | Vitest | Fast, ESM-native, good DX |
-| Frontend | Next.js 14 (App Router) | Standard at target companies (deferred until sub-ledgers land) |
+| Tests | Vitest | Fast, ESM-native, good DX; runs against real Postgres (not mocks) |
+| Frontend | Next.js 14 (App Router) | Deferred until v0.5 — sub-ledgers and BTD report need data plumbing first |
 
 ## Quick start
 
@@ -57,45 +57,72 @@ cp .env.example .env
 # Edit .env: point DATABASE_URL at any Postgres (Neon free tier is easiest)
 
 pnpm db:push      # create schema
-pnpm db:seed      # load Northwind Cloud demo data
+pnpm db:seed      # load Northwind Cloud — 6 months across 3 books
 pnpm test         # run the invariant suite
+```
+
+Once seeded, you can poke at the book-tax-difference report directly:
+
+```ts
+import { PrismaClient } from "@prisma/client";
+import { getBookTaxDifference } from "./src/lib/accounting/reports/book-tax-difference";
+
+const btd = await getBookTaxDifference(new PrismaClient(), {
+  entityCode: "NORTHWIND",
+  fromBookCode: "US_GAAP",
+  toBookCode: "US_TAX",
+  periodStart: new Date("2026-01-01"),
+  periodEnd: new Date("2026-06-30"),
+});
+// btd.totalDelta ≈ -$41,600 (tax net income > book net income)
+// btd.pnlRows[…depreciation expense…].classification === "TEMPORARY"
 ```
 
 ## How AI is (and isn't) used
 
-This project deliberately uses **no AI at runtime**. The ledger is deterministic. Decisions about what to debit and credit are made by the human entering the transaction (or, in the consumer projects, by code with explicit logic).
+This project deliberately uses **no AI at runtime**. The ledger is deterministic. Decisions about what to debit and credit are made by the human entering the transaction (or, in the consumer projects, by explicit logic).
 
-AI was used to *build* this project — Claude Code wrote most of the schema and tests. The accounting logic, schema decisions, the universal-schema spec, and invariant definitions are mine.
+AI was used to *build* this project — Claude Code wrote most of the schema, sub-ledger implementations, and tests. The accounting logic, the universal-schema spec, and the invariant definitions are mine. See [`AI_COLLABORATION.md`](AI_COLLABORATION.md) for the honest record.
 
-The companion projects (`recon`, `revenue-rec`) *do* use AI at runtime — but only for suggestion, ranking, and explanation. **AI never posts to the ledger directly.** Every AI-influenced entry flows through `postJournalEntry` with `source: "AI_APPROVED"`, after explicit human review. That distinction is the security model.
+The companion projects (`recon`, `revenue-rec`) *do* use AI at runtime — but only for suggestion, ranking, and explanation. **AI never posts to the ledger directly.** Every AI-influenced entry flows through `postJournalEntry` with `source: "AI_APPROVED"` after explicit human review. That distinction is the security model.
 
 ## Project structure
 
 ```
 ledger-core/
 ├── prisma/
-│   ├── schema.prisma            # Layers 1+2 + seams for 3-6
-│   ├── migrations/              # SQL CHECK + GIN indexes
-│   └── seed.ts                  # Northwind Cloud — 6 months of activity
+│   ├── schema.prisma                          # Layers 1+2+3 + sub-ledgers + posting rules
+│   ├── migrations/                            # SQL CHECK + GIN indexes
+│   └── seed.ts                                # Northwind — Pattern 2 across 3 books
 ├── src/lib/
 │   ├── accounting/
-│   │   ├── post-journal.ts      # THE function. Read this first.
-│   │   ├── reports.ts           # TB, IS, BS — all per (entity, book)
-│   │   └── types.ts             # domain types + custom errors
-│   └── db/chart-of-accounts.ts  # shared chart of accounts
+│   │   ├── post-journal.ts                    # THE function. Read this first.
+│   │   ├── reports.ts                         # TB, IS, BS per (entity, book)
+│   │   ├── reports/book-tax-difference.ts     # GAAP vs TAX diff with classification
+│   │   ├── sub-ledgers/
+│   │   │   ├── ar.ts                          # open/apply/write-off + aging
+│   │   │   ├── ap.ts                          # mirror of AR
+│   │   │   ├── fixed-assets.ts                # createFixedAsset + runDepreciation
+│   │   │   ├── leases.ts                      # createLease + runLeaseStraightLineExpense
+│   │   │   └── revenue-contracts.ts           # createRevenueContract + recognition runner
+│   │   └── types.ts                           # domain types + custom errors
+│   └── db/chart-of-accounts.ts                # shared chart
 ├── tests/
-│   ├── invariants.test.ts       # the headline test suite
-│   └── seeded-company.test.ts   # tests against the Northwind seed
+│   ├── invariants.test.ts                     # Layer 1 invariants
+│   ├── sub-ledgers.test.ts                    # AR/AP lifecycle, FA depreciation, BTD
+│   └── seeded-company.test.ts                 # Northwind multi-book assertions
 └── docs/
-    ├── universal-schema.md      # CANONICAL — the architecture reference
-    ├── DESIGN.md                # design doc (being rewritten for v1)
-    └── accounting-notes.md      # plain-English accounting explainer
+    ├── universal-schema.md                    # CANONICAL — architecture decisions
+    ├── schema-erd.md                          # mermaid ERD (core + sub-ledger diagrams)
+    ├── DESIGN.md                              # design doc
+    └── accounting-notes.md                    # plain-English accounting explainer
 ```
 
-If you only read three files:
+If you only read four files:
 1. `docs/universal-schema.md` — what's being built and why
-2. `prisma/schema.prisma` — the data model
+2. `docs/schema-erd.md` — the visual map
 3. `src/lib/accounting/post-journal.ts` — the posting boundary
+4. `src/lib/accounting/reports/book-tax-difference.ts` — the v0.3 payoff
 
 ## About the project
 

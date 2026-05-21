@@ -129,6 +129,62 @@ The `reversesId` field links a reversal back to the entry it cancels. Correction
 
 ---
 
+## Multi-book accounting: one set of facts, several "books"
+
+The single biggest concept v0.3 adds is **multi-book**. A real-world company runs not one ledger but several, each representing a different *accounting basis*:
+
+- **US GAAP** — what shareholders, banks, and audited financial statements use.
+- **US Federal Tax** — what the IRS uses, governed by the Internal Revenue Code. Often diverges from GAAP on timing.
+- **IFRS** — what international investors and some non-US subsidiaries use.
+- **Management** — internal book sometimes adjusted for executive reporting (excluding stock-based comp, normalizing for one-time items, etc.).
+
+The same economic event posts *differently* to each book. Example: $24,000 of laptops bought in January 2026.
+
+| Book | Useful life | Monthly depreciation | YTD by 6/30/2026 |
+|---|---|---|---|
+| US GAAP | 36 months | $666.67 | $4,000.02 |
+| IFRS | 36 months | $666.67 | $4,000.02 |
+| US Tax | 60 months | $400.00 | $2,400.00 |
+
+The asset is the same. The cost is the same. But the *policy* — how fast to depreciate — is different per book. That's the **book-tax difference**: tax shows $1,600 less expense than GAAP, which means tax shows $1,600 *more* income, which (in this case) is a *temporary* difference because tax will eventually catch up over the asset's life.
+
+### Why "Pattern 2" matters
+
+You could keep one ledger and store the "tax adjustments" separately, applying them at query time. That's Pattern 1. It looks attractive — less data, less duplication.
+
+It breaks. The moment a tax adjustment in March affects a posting in October, and someone reverses the March entry, the October state silently becomes wrong. The schema chooses Pattern 2: **post in full to every book** so each book's trial balance is independently correct at any point in time, no recomputation required. The cost (3x the journal entries) is small; the correctness gain is large.
+
+### The book-tax-difference report
+
+`getBookTaxDifference` does the obvious thing: it pulls a trial balance for each book, diffs them, and classifies the deltas as **permanent** or **temporary**. Permanent differences (e.g. tax-exempt municipal bond interest) never reverse. Temporary differences (e.g. depreciation timing) reverse over time — and they're what feeds ASC 740's deferred tax calculation.
+
+v0.3 classifies via a heuristic on account code + subtype. A production version would use a `tax_sensitivity` attribute on each account, populated by the tax analyst.
+
+---
+
+## Sub-ledgers: the detail behind the control account
+
+The GL has **control accounts** — Accounts Receivable, Accounts Payable, Inventory. Each control account has a balance, but the balance is the sum of many smaller items. Those items live in a **sub-ledger**:
+
+- **AR sub-ledger**: one row per open customer invoice. Sum of open balances should equal the AR control account.
+- **AP sub-ledger**: one row per open vendor bill.
+- **Fixed asset sub-ledger**: one row per asset, with its own depreciation schedule per book.
+- **Inventory sub-ledger**: lot-level cost layers.
+
+The spec rule is sharp: "A bill creates an AP open item; it is not itself AP." That is, posting a journal entry that credits the AP control account *also* opens an AP open item — the open item is the detail-level lifecycle (created → partially paid → fully paid → written off → maybe reopened). The JE just moves the balance.
+
+**The headline sub-ledger invariant:**
+
+> Sum of `currentBalance` for items in status `(OPEN, PARTIAL, REOPENED)` per `(entity, book)` = control account balance from the trial balance.
+
+If those numbers don't match, your sub-ledger has lost touch with the GL. The tests in `tests/sub-ledgers.test.ts` enforce this on every operation.
+
+### Why per-book sub-ledgers?
+
+`ArOpenItem` has `bookId` because in cash-basis tax shops, the tax book may have zero AR (revenue recognized when cash arrives) while the GAAP book has $30k of open invoices. Different lifecycles per book → per-book records. Yes, this means one invoice spawns three `ArOpenItem` rows in our Northwind seed. The redundancy is the price of correctness.
+
+---
+
 ## Further reading
 
 If this document made you want to understand accounting more deeply, the best resources I've found:

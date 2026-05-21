@@ -22,24 +22,27 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 
 4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test.
 
-## What's wired now (v0.2 — first commit after rearchitecture)
+## What's wired now (v0.3)
 
 - ✅ Layer 1 — `Account`, `JournalEntry`, `JournalLine` with three currency amounts, lineage columns, multi-book scope, GIN-indexed extensions
 - ✅ Layer 2 — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`, `PartyRole`, `Item`
 - ✅ Layer 3 — Dimension engine tables (no values seeded yet)
-- ✅ Layer 4 — `PostingRule` table (no rules registered yet)
+- ✅ Layer 4 — `PostingRule` table (no rules registered yet; engine lands v0.4)
 - ✅ Layer 5 — `extensions Json` + `CustomFieldDefinition` registry
 - ✅ Layer 6 — Source-system / source-record-id lineage columns
-- ✅ Northwind Cloud seed (US_GAAP book only for v1; multi-book seed lands next)
-- ✅ Invariant tests including multi-book isolation
+- ✅ Native sub-ledgers: AR open items + applications, AP open items + applications, FixedAsset + book-aware attributes + `runDepreciation`, Lease + book-aware classification, RevenueContract + PerformanceObligation + book-aware recognition basis
+- ✅ Book-Tax-Difference report (`src/lib/accounting/reports/book-tax-difference.ts`)
+- ✅ Northwind Cloud seed posts to all three books in parallel (Pattern 2). Depreciation diverges per book (36-mo SL vs 60-mo SL). Globex prepay diverges (accrual defer vs cash-basis immediate recognition).
+- ✅ Invariant tests: multi-book isolation, AR/AP lifecycle, fixed asset divergence, BTD classification.
 
-## What lands next
+## What lands next (v0.4)
 
-- 🚧 Sub-ledgers: `ArOpenItem` / `ApOpenItem` lifecycle, `FixedAsset` + book-aware attributes, `Lease`, `RevenueContract`
-- 🚧 Multi-book parallel posting in seed (post-to-all-three with divergent posting rules)
-- 🚧 Book-tax difference report
+- 🚧 Posting-rules engine implementation (replace explicit `postToBooks` fan-out with table-driven rules)
+- 🚧 Full ASC 842 ROU asset + lease liability roll-forward (v0.3 is a SL stub)
+- 🚧 Disposal flow for fixed assets
+- 🚧 Property-based tests via `fast-check`
 - 🚧 Document layer in consumer repos (`recon`, `revenue-rec`)
-- 🚧 Doc rewrite: `docs/DESIGN.md`, `docs/accounting-notes.md`, `PROJECT_STATUS.md`, `AI_COLLABORATION.md`
+- 🚧 UI + Vercel + Neon live demo (v0.5)
 
 ## Stack
 
@@ -62,9 +65,10 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 - New columns on `Account`, `JournalEntry`, `JournalLine` must respect the anti-patterns list in `docs/universal-schema.md` (no fixed dimension columns, no source-system PKs, no widening megatables).
 
 ### Multi-book discipline
-- Every `postJournalEntry` call targets ONE `(entity, book)`. To post to N books for a single source event, call N times — the future posting-rules engine will automate this.
-- Reports always scope to `(entity, book)`. There is no book-agnostic report; cross-book views are computed by diffing two scoped reports.
+- Every `postJournalEntry` call targets ONE `(entity, book)`. To post to N books for a single source event, call N times. Until the posting-rules engine lands (v0.4), the seed's `postToBooks(books, base)` helper is the canonical pattern.
+- Reports always scope to `(entity, book)`. There is no book-agnostic report; cross-book views are computed by diffing two scoped reports (see `getBookTaxDifference`).
 - `bookId="PRIMARY"` is NOT a thing in this schema. Real book codes are `US_GAAP`, `US_TAX`, `IFRS`, etc.
+- Sub-ledger records (AR/AP open items, FixedAssetBookAttributes, etc.) are per-book. One physical asset → one `FixedAsset` row + N `FixedAssetBookAttributes` rows. Same for leases and revenue contracts.
 
 ### Testing
 - Any new accounting logic gets an invariant test in `tests/invariants.test.ts`.
