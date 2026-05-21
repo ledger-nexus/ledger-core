@@ -307,6 +307,168 @@ export async function runDepreciation(
   return { entriesPosted, totalDepreciation, perAsset };
 }
 
+// Dispose of a fixed asset. For each book the asset has attributes in:
+//   - Run depreciation up through the disposal date (catch-up posting)
+//   - Compute remaining NBV (cost - accumulated depreciation)
+//   - Compute gain/loss = proceeds - NBV
+//   - Post a disposal JE:
+//       Dr Cash (proceeds, if any)
+//       Dr Accumulated Depreciation (zero out)
+//       Cr Equipment (gross cost)
+//       Dr Loss on Disposal or Cr Gain on Disposal (the balancing line)
+//   - Mark asset DISPOSED + record proceeds + disposalDate.
+//
+// The same physical asset disposes simultaneously in every book, but the
+// gain/loss differs per book (different accum dep balances → different NBV).
+// This is one of the cleaner book-tax-difference demonstrations: at disposal,
+// a temporary timing difference flips to a permanent one (no further reversal).
+export interface DisposeFixedAssetInput {
+  entityCode: string;
+  assetCode: string;
+  disposalDate: Date;
+  disposalProceeds?: Decimal | string | number; // default 0
+  proceedsCashAccountCode?: string; // default "1000"
+  gainLossAccountCode?: string; // default "8100"
+  source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
+}
+
+export interface DisposalResult {
+  bookCode: string;
+  entryNumber: string;
+  proceeds: Decimal;
+  nbvAtDisposal: Decimal;
+  gainLoss: Decimal; // positive = gain, negative = loss
+}
+
+export async function disposeFixedAsset(
+  prisma: PrismaClient,
+  input: DisposeFixedAssetInput
+): Promise<DisposalResult[]> {
+  const asset = await prisma.fixedAsset.findFirstOrThrow({
+    where: {
+      code: input.assetCode,
+      entity: { code: input.entityCode },
+    },
+    include: {
+      bookAttributes: {
+        include: { book: { select: { code: true, reportingCurrencyId: true } } },
+      },
+    },
+  });
+  if (asset.status === "DISPOSED") {
+    throw new Error(`Asset ${input.assetCode} is already DISPOSED`);
+  }
+
+  const proceeds = toDecimal(input.disposalProceeds ?? 0);
+  const cashAccount = input.proceedsCashAccountCode ?? "1000";
+  const gainLossAccount = input.gainLossAccountCode ?? "8100";
+  const cost = toDecimal(asset.acquisitionCost);
+
+  // First, run depreciation through the disposal date for every book so
+  // the disposal JE captures the up-to-date accumulated depreciation.
+  for (const attrs of asset.bookAttributes) {
+    await runDepreciation(prisma, {
+      entityCode: input.entityCode,
+      bookCode: attrs.book.code,
+      throughDate: input.disposalDate,
+      source: input.source ?? "SYSTEM",
+    });
+  }
+
+  // Re-read after catch-up depreciation so accumulatedDepreciation is current.
+  const refreshed = await prisma.fixedAsset.findFirstOrThrow({
+    where: { id: asset.id },
+    include: {
+      bookAttributes: {
+        include: { book: { select: { code: true, reportingCurrencyId: true } } },
+      },
+    },
+  });
+
+  const results: DisposalResult[] = [];
+  for (const attrs of refreshed.bookAttributes) {
+    const accumDep = toDecimal(attrs.accumulatedDepreciation);
+    const nbv = cost.minus(accumDep);
+    const gainLoss = proceeds.minus(nbv); // positive = gain, negative = loss
+
+    const lines: any[] = [];
+    if (proceeds.greaterThan(0)) {
+      lines.push({
+        accountCode: cashAccount,
+        debit: proceeds.toFixed(4),
+        description: `Proceeds — ${refreshed.code}`,
+      });
+    }
+    // Debit accumulated depreciation to zero it out (contra-asset with
+    // credit normal balance; debiting reduces it).
+    if (accumDep.greaterThan(0)) {
+      lines.push({
+        accountCode: attrs.accumDepreciationAccountCode,
+        debit: accumDep.toFixed(4),
+        description: `Reverse accum dep — ${refreshed.code}`,
+      });
+    }
+    // Credit the gross-cost asset account.
+    lines.push({
+      accountCode: refreshed.assetAccountCode,
+      credit: cost.toFixed(4),
+      description: `Remove cost — ${refreshed.code}`,
+    });
+    // Balancing line: gain (Cr) or loss (Dr) on disposal.
+    if (gainLoss.greaterThan(0)) {
+      lines.push({
+        accountCode: gainLossAccount,
+        credit: gainLoss.toFixed(4),
+        description: `Gain on disposal — ${refreshed.code}`,
+      });
+    } else if (gainLoss.lessThan(0)) {
+      lines.push({
+        accountCode: gainLossAccount,
+        debit: gainLoss.abs().toFixed(4),
+        description: `Loss on disposal — ${refreshed.code}`,
+      });
+    }
+
+    const result = await postJournalEntry(prisma, {
+      entityCode: input.entityCode,
+      bookCode: attrs.book.code,
+      currencyCode: attrs.book.reportingCurrencyId,
+      documentDate: input.disposalDate,
+      memo: `Disposal — ${refreshed.code} (proceeds ${proceeds.toFixed(2)}, NBV ${nbv.toFixed(2)})`,
+      source: input.source ?? "SYSTEM",
+      sourceRecordType: "FixedAssetDisposal",
+      sourceRecordId: refreshed.id,
+      extensions: {
+        assetCode: refreshed.code,
+        proceeds: proceeds.toFixed(2),
+        nbvAtDisposal: nbv.toFixed(2),
+        gainLoss: gainLoss.toFixed(2),
+      },
+      lines,
+    });
+
+    results.push({
+      bookCode: attrs.book.code,
+      entryNumber: result.entryNumber,
+      proceeds,
+      nbvAtDisposal: nbv,
+      gainLoss,
+    });
+  }
+
+  // Mark asset disposed.
+  await prisma.fixedAsset.update({
+    where: { id: refreshed.id },
+    data: {
+      status: "DISPOSED",
+      disposalDate: input.disposalDate,
+      disposalProceeds: proceeds.toFixed(4),
+    },
+  });
+
+  return results;
+}
+
 // Net book value per (entity, book) = sum of acquisitionCost - accumDep across in-service assets.
 export async function netBookValue(
   prisma: PrismaClient,

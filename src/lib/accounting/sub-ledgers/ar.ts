@@ -11,6 +11,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
+import { postJournalEntry } from "../post-journal";
 
 function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
   if (v === undefined || v === null) return new Decimal(0);
@@ -136,33 +137,86 @@ export async function applyArPayment(
   });
 }
 
+// Direct write-off of an AR open item. Posts the paired GL entry
+// (Dr Bad Debt Expense, Cr AR control) so the AR-control-account =
+// sum-of-open invariant holds afterward, then marks the item WRITTEN_OFF.
+//
+// v0.4 uses the direct method. The allowance method (estimate + apply
+// against an allowance account) is more sophisticated and is what most
+// public companies use; it lands when a customer engagement asks for it.
+export interface WriteOffArInput {
+  openItemId: string;
+  writeOffDate: Date;
+  badDebtAccountCode?: string; // default "7500"
+  source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
+}
+
 export async function writeOffArItem(
   prisma: PrismaClient,
-  openItemId: string,
-  appliedByEntryId: string,
-  asOfDate: Date
-): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    const item = await tx.arOpenItem.findUniqueOrThrow({
-      where: { id: openItemId },
-      select: { currentBalance: true, status: true },
-    });
-    if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
-      throw new Error(`Cannot write off AR item in ${item.status} state`);
-    }
-    await tx.arApplication.create({
-      data: {
-        openItemId,
-        appliedByEntryId,
-        appliedAmount: item.currentBalance,
-        appliedDate: asOfDate,
-      },
-    });
-    await tx.arOpenItem.update({
-      where: { id: openItemId },
-      data: { currentBalance: "0.0000", status: "WRITTEN_OFF" },
-    });
+  input: WriteOffArInput
+): Promise<{ entryNumber: string; amount: Decimal }> {
+  const item = await prisma.arOpenItem.findUniqueOrThrow({
+    where: { id: input.openItemId },
+    include: {
+      entity: { select: { code: true } },
+      book: { select: { code: true } },
+      party: { select: { code: true } },
+    },
   });
+  if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
+    throw new Error(`Cannot write off AR item in ${item.status} state`);
+  }
+
+  const amount = toDecimal(item.currentBalance);
+  const badDebtAccount = input.badDebtAccountCode ?? "7500";
+
+  // Post the paired JE first so if it fails, the open item is untouched.
+  const entry = await postJournalEntry(prisma, {
+    entityCode: item.entity.code,
+    bookCode: item.book.code,
+    currencyCode: item.currencyId,
+    documentDate: input.writeOffDate,
+    memo: `Bad debt write-off — ${item.referenceNumber ?? item.id}`,
+    source: input.source ?? "SYSTEM",
+    sourceRecordType: "BadDebtWriteOff",
+    sourceRecordId: item.id,
+    extensions: {
+      openItemId: item.id,
+      partyCode: item.party.code,
+      writeOffAmount: amount.toFixed(2),
+    },
+    lines: [
+      {
+        accountCode: badDebtAccount,
+        debit: amount.toFixed(4),
+        description: `Bad debt — ${item.party.code}`,
+      },
+      {
+        accountCode: item.controlAccountCode,
+        credit: amount.toFixed(4),
+        partyCode: item.party.code,
+        description: `Write off AR — ${item.referenceNumber ?? item.id}`,
+      },
+    ],
+  });
+
+  // Then update the open item lifecycle.
+  await prisma.$transaction([
+    prisma.arApplication.create({
+      data: {
+        openItemId: item.id,
+        appliedByEntryId: entry.id,
+        appliedAmount: amount.toFixed(4),
+        appliedDate: input.writeOffDate,
+      },
+    }),
+    prisma.arOpenItem.update({
+      where: { id: item.id },
+      data: { currentBalance: "0.0000", status: "WRITTEN_OFF" },
+    }),
+  ]);
+
+  return { entryNumber: entry.entryNumber, amount };
 }
 
 // Sum of open + partial item balances for a (entity, book). Should equal

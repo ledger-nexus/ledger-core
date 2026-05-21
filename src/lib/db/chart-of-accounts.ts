@@ -31,6 +31,17 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
   { code: "1010", name: "Cash — Payroll", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
   { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, subtype: "AR_TRADE" },
+  // Allowance for Doubtful Accounts (contra-AR). Bad debt write-offs credit
+  // AR direct in v0.4-alpha; full allowance-method accounting (estimate + apply)
+  // lands when a customer engagement asks for it.
+  {
+    code: "1210",
+    name: "Allowance for Doubtful Accounts",
+    type: "ASSET",
+    normalBalance: "CREDIT",
+    isContra: true,
+    subtype: "ALLOWANCE_DOUBTFUL",
+  },
   { code: "1400", name: "Prepaid Expenses", type: "ASSET", normalBalance: "DEBIT", subtype: "PREPAID" },
   { code: "1500", name: "Computer Equipment", type: "ASSET", normalBalance: "DEBIT", subtype: "FIXED_ASSET" },
   {
@@ -41,12 +52,17 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
     isContra: true,
     subtype: "ACCUM_DEPR",
   },
+  // Right-of-Use asset (ASC 842 operating leases). Tax book never uses
+  // this account because TAX_CASH_BASIS doesn't capitalize leases.
+  { code: "1600", name: "Right-of-Use Asset — Leases", type: "ASSET", normalBalance: "DEBIT", subtype: "ROU_ASSET" },
 
   // ---- Liabilities ----
   { code: "2000", name: "Accounts Payable", type: "LIABILITY", normalBalance: "CREDIT", isControlAccount: true, subtype: "AP_TRADE" },
   { code: "2100", name: "Accrued Expenses", type: "LIABILITY", normalBalance: "CREDIT", subtype: "ACCRUED" },
   { code: "2200", name: "Deferred Revenue", type: "LIABILITY", normalBalance: "CREDIT", subtype: "DEFERRED_REV" },
   { code: "2300", name: "Sales Tax Payable", type: "LIABILITY", normalBalance: "CREDIT", subtype: "TAX_PAYABLE" },
+  // Lease liability (ASC 842 operating + finance). Paired with the ROU asset.
+  { code: "2600", name: "Lease Liability — Current", type: "LIABILITY", normalBalance: "CREDIT", subtype: "LEASE_LIABILITY" },
 
   // ---- Equity ----
   { code: "3000", name: "Common Stock", type: "EQUITY", normalBalance: "CREDIT" },
@@ -66,5 +82,14 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   { code: "7100", name: "Marketing", type: "EXPENSE", normalBalance: "DEBIT" },
   { code: "7200", name: "Professional Fees", type: "EXPENSE", normalBalance: "DEBIT" },
   { code: "7300", name: "Office & General", type: "EXPENSE", normalBalance: "DEBIT" },
-  { code: "8000", name: "Depreciation Expense", type: "EXPENSE", normalBalance: "DEBIT" },
+  { code: "7400", name: "Lease Expense — Operating", type: "EXPENSE", normalBalance: "DEBIT", subtype: "LEASE_EXPENSE" },
+  { code: "7500", name: "Bad Debt Expense", type: "EXPENSE", normalBalance: "DEBIT", subtype: "BAD_DEBT" },
+  { code: "8000", name: "Depreciation Expense", type: "EXPENSE", normalBalance: "DEBIT", subtype: "DEPRECIATION" },
+  // Gain/loss on disposal of fixed assets. Single account for both directions
+  // (sign indicates gain or loss); separate accounts can be added later if
+  // financial statement presentation requires it.
+  { code: "8100", name: "Gain/Loss on Disposal of Assets", type: "EXPENSE", normalBalance: "DEBIT", subtype: "DISPOSAL_GAIN_LOSS" },
+  // Interest expense — used by ASC 842 finance leases. Operating leases
+  // combine interest + amortization into the lease expense line (7400).
+  { code: "8200", name: "Interest Expense", type: "EXPENSE", normalBalance: "DEBIT", subtype: "INTEREST" },
 ];
