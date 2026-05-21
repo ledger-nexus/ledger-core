@@ -16,7 +16,7 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 
 `ledger-core` does the unglamorous foundational work and does it against the universal schema, not a QBO-grade subset. Layers 1+2 of the universal schema, native sub-ledgers, and the book-tax-difference engine are all present today. Document tables (`invoice`, `bill`, `purchase_order`) live in the consumer repos (`recon`, `revenue-rec`) — they're consumers of the substrate, not part of it.
 
-## What's wired (v0.9)
+## What's wired (v1.0)
 
 - ✅ **Layer 1 posting substrate** — `Account`, `JournalEntry`, `JournalLine` with debits=credits, three-currency amounts, XOR debit/credit, atomic writes, sub-ledger keys, lineage. Enforced at app + DB layers.
 - ✅ **Layer 2 master data** — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`+`PartyRole`, `Item`.
@@ -35,14 +35,16 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 - ✅ **Next.js UI (v0.7)** — read-only surface on top of the substrate. Sidebar nav + multi-book switcher (cookie-backed via Server Action) + dashboard with KPIs + chart of accounts + journal entries list/detail (with frozen `sourcePayload` lineage on display) + all four reports (Trial Balance, Income Statement, Balance Sheet, Book-Tax Difference). Vercel + Neon deployment guide in [docs/deployment.md](docs/deployment.md).
 - ✅ **Interactive UI (v0.8)** — `/journal-entries/new` form with live Σ Dr / Σ Cr / Δ balance indicator, dynamic add/remove lines, side selector per line, account + party dropdowns; submit button gates on balanced+complete. `/ar` and `/ap` pages list open items with inline apply-payment forms (cash account picker, amount default = current balance, date). `POST /api/admin/reset` endpoint behind `ADMIN_TOKEN` resets Northwind transactional data + reseeds in one call. Seed refactored into `src/lib/seed/northwind.ts` for reuse.
 - ✅ **Cash Flow + AR Aging + CSV exports (v0.9)** — Cash Flow Statement (indirect method, classification heuristic, reconciliation tie-out with self-audit `uncategorized` panel). AR Aging report with bucket KPIs (Current / 1-30 / 31-60 / 61-90 / Over 90). CSV downloads on all six reports via dedicated `/api/reports/.../csv` route handlers.
+- ✅ **Multi-entity consolidation + AP aging + M-1/M-3 detail (v1.0)** — `getConsolidatedTrialBalance()` walks `LegalEntity.parentEntityId` and rolls up per-entity TBs with intercompany elimination of DUE_FROM/DUE_TO_AFFILIATE + INTERCOMPANY_REV/EXP. Seed bundles an Acme Group + 2 subs demo. M-3 detail report groups BTD deltas by IRS Form 1120 Schedule M-3 line (Depreciation, Bad debt, Lease, Deferred revenue, etc.). AP aging mirrors AR aging.
 
-## What lands next (v1.0)
+## v1.0 is the portfolio milestone — what's beyond is polish
 
-- 🚧 Multi-entity consolidation report with intercompany eliminations
-- 🚧 AP aging page (mirror of AR aging)
+- 🚧 Account autocomplete on the new-entry form
+- 🚧 Keyboard shortcuts (Tab to add line)
+- 🚧 Recurring journal entry templates
+- 🚧 Multi-currency revaluation + FX gain/loss
 - 🚧 NS Accounting Books (multi-book parallel posting from one NS transaction)
-- 🚧 M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
-- 🚧 ASC 842 cash flow presentation polish
+- 🚧 ASC 842 cash flow presentation refinement
 
 ## Tech stack
 

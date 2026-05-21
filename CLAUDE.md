@@ -22,7 +22,7 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 
 4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test.
 
-## What's wired now (v0.9)
+## What's wired now (v1.0)
 
 - ✅ Layer 1 — `Account`, `JournalEntry`, `JournalLine` with three currency amounts, lineage columns, multi-book scope, GIN-indexed extensions
 - ✅ Layer 2 — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`, `PartyRole`, `Item`
@@ -45,14 +45,11 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 - ✅ **Next.js UI (v0.7)** — read-only surface in `src/app/`. Sidebar nav + multi-book switcher (cookie-backed via `setScopeAction` Server Action), dashboard, chart of accounts, journal entries list + detail (with frozen lineage payload), all four reports including BTD. Deployment guide at `docs/deployment.md`.
 - ✅ **Interactive UI + demo reset (v0.8)** — `/journal-entries/new` with live debit/credit balance indicator, `/ar` and `/ap` with inline apply-payment forms, `POST /api/admin/reset` gated by `ADMIN_TOKEN`. Seed extracted to `src/lib/seed/northwind.ts` so the CLI and the reset endpoint share one code path.
 - ✅ **Cash Flow + AR Aging + CSV exports (v0.9)** — `getCashFlowStatement()` (indirect method) with classification heuristic + reconciliation tie-out + `uncategorized` self-audit panel. `/reports/cash-flow` and `/reports/ar-aging` pages. CSV route handlers under `/api/reports/.../csv` for all six reports, with Download buttons on each page.
+- ✅ **Multi-entity consolidation + AP aging + M-3 detail (v1.0)** — `getConsolidatedTrialBalance()` walks the `LegalEntity.parentEntityId` hierarchy + eliminates intercompany subtype accounts (DUE_FROM/DUE_TO_AFFILIATE, INTERCOMPANY_REV/EXP). `seedConsolidationDemo()` ships an Acme Group + 2 subs hierarchy so the page renders out of the box. `getM3Detail()` groups BTD deltas by Form 1120 Schedule M-3 line. `apAging()` mirrors `arAging()`. Three new report pages + CSVs.
 
-## What lands next (v1.0)
+## v1.0 is the portfolio milestone
 
-- 🚧 Multi-entity consolidation report with intercompany eliminations
-- 🚧 AP aging page (needs `apAging()` helper first)
-- 🚧 NS Accounting Books (multi-book parallel posting from one NS transaction)
-- 🚧 M-1 / M-3 detail report
-- 🚧 ASC 842 cash flow polish
+The roadmap from v0.2 (universal substrate scaffolding) to v1.0 (full multi-entity, multi-book, dual-mapper, three-statement, tax-provision-aware portfolio) is complete. Beyond v1.0 is polish (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) — not new architecture.
 
 ## Stack
 

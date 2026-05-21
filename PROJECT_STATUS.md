@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-05-21
 
-**Current state:** v0.9 just landed. The Cash Flow Statement — the third financial statement — using the indirect method with classification heuristics that surface any unclassified BS account in an `uncategorized` panel. AR Aging report page wired from the existing `arAging()` function. CSV exports for all six reports via dedicated `/api/reports/.../csv` route handlers, with download buttons on every report page. Reconciliation invariant tests verify the cash flow report ties out to actual Δ cash on controlled fixtures.
+**Current state:** **v1.0 just landed.** Multi-entity consolidation report with intercompany elimination, AP aging report, M-1/M-3 detail report grouping BTD deltas by IRS Form 1120 Schedule M-3 lines. The portfolio's headline architecture is now complete: substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. Consolidation demo seed (Acme Group + 2 subs) ships with the Northwind seed so the report has data to render out of the box.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -106,16 +106,33 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] Sidebar nav gains Cash flow and AR aging.
 - [x] Tests (`tests/cash-flow.test.ts`): capital infusion only, all-AR no-collection (NI offsets Δ AR), capex + cash sale, depreciation add-back. All assertions verify `reconciles === true`.
 
+### v1.0 — Multi-entity consolidation + AP aging + M-1/M-3 detail
+- [x] `apAging()` function in `src/lib/accounting/sub-ledgers/ap.ts` (mirror of `arAging`).
+- [x] `/reports/ap-aging` page + `/api/reports/ap-aging/csv` route — bucket KPI cards + detail with days-overdue badges, link out to `/ap` for paying bills.
+- [x] Four new intercompany accounts in the chart: `1300 Due from Affiliates`, `2400 Due to Affiliates`, `4900 Intercompany Revenue`, `5900 Intercompany Expense` — with subtypes (DUE_FROM_AFFILIATE / DUE_TO_AFFILIATE / INTERCOMPANY_REV / INTERCOMPANY_EXP) that the consolidation engine recognizes for elimination.
+- [x] `seedConsolidationDemo()` in `src/lib/seed/consolidation-demo.ts` — sets up ACME_GROUP parent + ACME_US + ACME_UK subs with capital, external revenue, and a $3k intercompany sale. Bundled into `pnpm db:seed`.
+- [x] `getConsolidatedTrialBalance()` in `src/lib/accounting/reports/consolidation.ts` — walks `LegalEntity.parentEntityId` hierarchy, aggregates per-entity TBs, eliminates intercompany subtype accounts. Returns per-entity contributions + elimination summary + post-elim totals + `netIcImbalance` (non-zero = one side recorded without its counterparty).
+- [x] `/reports/consolidation` page + `/api/reports/consolidation/csv` — per-entity contribution columns, IC elimination summary, consolidated TB with sign-corrected balances.
+- [x] `getM3Detail()` in `src/lib/accounting/reports/m3-detail.ts` — wraps `getBookTaxDifference` and groups deltas by Form 1120 Schedule M-3 line (Depreciation, Bad debt, Lease accounting, Deferred revenue, Accrued liabilities, Inventory, Stock comp, Meals, State tax, Charitable, Other timing, Other permanent, Unclassified). Subtype-driven so QBO/NS imports work without code changes.
+- [x] `/reports/m3-detail` page + `/api/reports/m3-detail/csv` — Permanent / Temporary / Unclassified summary cards, per-M3-line group cards with row detail.
+- [x] Sidebar nav updated with Consolidation, AP aging, M-3 detail links.
+- [x] Tests (`tests/consolidation.test.ts`): aggregation across subs, IC elimination (DUE_FROM + DUE_TO + IC Rev + IC Exp all cancel), IC imbalance detection, non-IC accounts pass through unchanged.
+
+**Deliberately deferred (post-v1.0):**
+- NS Accounting Books (multi-book parallel posting from one NS transaction) — niche refinement; deferred because it requires fixture + mapper expansion with low portfolio payoff.
+- ASC 842 cash flow presentation polish — the indirect method shows the right total but mis-classifies lease principal. Real-world refinement, not a portfolio differentiator.
+
 ---
 
-## What's next
+## v1.0 is the portfolio milestone. Beyond:
 
-### v1.0 — Multi-entity consolidation + ASC 842 cash flow polish
-- [ ] Multi-entity consolidation report with intercompany eliminations (uses `LegalEntity.parentEntityId` hierarchy)
-- [ ] AP aging page (needs an `apAging()` function in ap.ts first)
-- [ ] NS Accounting Books support (multi-book parallel posting from one NS transaction)
-- [ ] M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
-- [ ] ASC 842 cash flow polish — reclassify operating-lease principal payments out of WC into a dedicated line per GAAP presentation
+### v1.1+ — ergonomics + polish
+- [ ] Account autocomplete on the new-entry form
+- [ ] Keyboard shortcut for "+ Add line"
+- [ ] Recurring journal entry templates
+- [ ] AR / AP aging with sortable columns
+- [ ] Multi-currency revaluation
+- [ ] FX gain/loss accounts wired into journal lines properly
 
 ---
 

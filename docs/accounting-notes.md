@@ -304,6 +304,42 @@ The intuition: net income knows revenue was earned, but doesn't care whether the
 
 ---
 
+## Multi-entity consolidation
+
+Once a company has subsidiaries, the parent reports financial statements for **the whole group** — as if the subs and parent were one entity. Two layers of work:
+
+1. **Aggregate** — sum the trial balances of every entity in the hierarchy.
+2. **Eliminate intercompany** — when Sub A sold $3k of services to Sub B, that's revenue/expense to each sub individually but **does nothing for the group** (the group sold to itself). The IC AR on Sub A's books and the IC AP on Sub B's books also need to be erased — they're not real receivables/payables from the group's perspective.
+
+Intercompany detection here is subtype-driven. Four reserved subtypes:
+
+| Subtype | Account purpose |
+|---|---|
+| `DUE_FROM_AFFILIATE` | Sub A's receivable from Sub B |
+| `DUE_TO_AFFILIATE` | Sub B's payable to Sub A |
+| `INTERCOMPANY_REV` | Sub A's revenue from Sub B |
+| `INTERCOMPANY_EXP` | Sub B's expense paid to Sub A |
+
+Any account tagged with one of these subtypes gets its consolidated balance forced to zero. If the IC bookings are mirrored correctly across entities, the eliminations net out cleanly. If one side was booked without the other (FX drift, missing entry), the `netIcImbalance` field on the report flags it.
+
+**Caveat for v1.0**: this implementation handles two-party IC via subtype tags. Three-way IC chains, intercompany inventory in transit (where the IC profit must be eliminated until the inventory is sold to a third party), and FX-driven IC imbalances are real-world refinements not modeled here.
+
+---
+
+## M-1 / M-3: the tax provision input
+
+US C-corporations file Form 1120 every year. Schedule M-3 reconciles **book net income** (from GAAP financial statements) to **taxable income** (what the IRS taxes). Every line of M-3 represents a specific reason book and tax differ — depreciation timing (assets depreciate faster for tax than book under MACRS), deferred revenue (book defers; tax sometimes recognizes immediately), bad debt expense (book accrues an allowance; tax mostly waits for actual write-offs), stock-based compensation (book expenses; tax often deducts on exercise), and so on.
+
+The M-3 detail report wraps the book-tax-difference report and re-groups deltas by M-3 line so a tax preparer doesn't have to re-classify them manually. For a Northwind-style entity at year-end:
+
+- The depreciation timing difference ($1,600 in Northwind H1 2026) shows on the "Depreciation and amortization" M-3 line.
+- The Globex deferred-revenue / cash-basis-tax difference ($40k in deferred + $40k revenue recognition timing) shows on the "Deferred revenue / advance payments" M-3 line.
+- The lease ROU/liability balances (when present) show on the "Lease accounting (ASC 842)" line.
+
+Each line also carries a classification badge (`PERMANENT` / `TEMPORARY` / `MIXED` / `UNCLASSIFIED`). Temporary differences feed the deferred-tax computation (ASC 740); permanent differences just affect the current-year tax bill.
+
+---
+
 ## Lineage-replay exports (and why Layer 6 needs the frozen payload)
 
 The spec rule for Layer 6:
