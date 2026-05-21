@@ -22,7 +22,7 @@ import {
   createRevenueContract,
   runStraightLineRecognition,
 } from "../src/lib/accounting/sub-ledgers/revenue-contracts";
-import { createLease, runLeaseStraightLineExpense } from "../src/lib/accounting/sub-ledgers/leases";
+import { createLease, runLeaseAccounting } from "../src/lib/accounting/sub-ledgers/leases";
 
 const prisma = new PrismaClient();
 
@@ -270,11 +270,13 @@ async function setupRevenueContract() {
 }
 
 async function setupLease() {
-  console.log("Creating NYC office lease (illustrative — straight-line all books)...");
-  // 24-month lease, $5k/mo, starting 2026-03-01.
-  // GAAP/IFRS classification = OPERATING, TAX = TAX_CASH_BASIS. Both books
-  // expense $5k/mo straight-line in v0.3; the ASC 842 ROU asset + lease
-  // liability mechanics arrive in v0.4 (or in the consumer repo).
+  console.log("Creating NYC office lease (ASC 842 operating for GAAP/IFRS, cash basis for TAX)...");
+  // 24-month lease, $5k/mo, 6% annual rate, starting 2026-03-01.
+  // GAAP/IFRS OPERATING: PV ≈ $112,814 → Dr ROU $112,814, Cr Lease Liability $112,814 at commencement.
+  //   Each month: combined JE Dr Lease Expense $5,000 / Cr ROU (amort) / Cr Lease Liability (interest).
+  //   Then cash payment Dr Lease Liability $5,000 / Cr Cash $5,000.
+  // US_TAX TAX_CASH_BASIS: no ROU, no liability. Monthly Dr Lease Expense $5k / Cr Cash $5k.
+  // → Substantial BS divergence: GAAP/IFRS show ROU + lease liability, TAX shows neither.
   await createLease(prisma, {
     entityCode: ENTITY_CODE,
     code: "NYC-2026",
@@ -290,22 +292,26 @@ async function setupLease() {
         bookCode: "US_GAAP",
         classification: "OPERATING",
         discountRate: 0.06,
-        expenseAccountCode: "7300",
+        rouAccountCode: "1600",
+        liabilityAccountCode: "2600",
+        expenseAccountCode: "7400",
       },
       {
         bookCode: "IFRS",
         classification: "OPERATING",
         discountRate: 0.06,
-        expenseAccountCode: "7300",
+        rouAccountCode: "1600",
+        liabilityAccountCode: "2600",
+        expenseAccountCode: "7400",
       },
       {
         bookCode: "US_TAX",
         classification: "TAX_CASH_BASIS",
-        expenseAccountCode: "7300",
+        expenseAccountCode: "7400",
       },
     ],
   });
-  console.log("  ✓ lease record created (3 book-attributes rows)");
+  console.log("  ✓ lease record created (3 book-attributes rows; ASC 842 operating vs cash-basis tax)");
 }
 
 // ---- Journal entries (Pattern 2 parallel posting) ----------------------
@@ -615,8 +621,8 @@ async function runMonthEndRunners() {
           source: "SEED",
         });
       }
-      // Lease amortization — all books book straight-line expense in v0.3.
-      await runLeaseStraightLineExpense(prisma, {
+      // Lease accounting — ASC 842 operating for GAAP/IFRS, cash basis for TAX.
+      await runLeaseAccounting(prisma, {
         entityCode: ENTITY_CODE,
         bookCode,
         throughDate,
