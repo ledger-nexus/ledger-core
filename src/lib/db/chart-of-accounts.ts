@@ -31,6 +31,9 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
   { code: "1010", name: "Cash — Payroll", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
   { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, subtype: "AR_TRADE" },
+  // Intercompany receivable (sub-A's "Due from Sub-B"). Eliminated at
+  // consolidation; subtype = DUE_FROM_AFFILIATE triggers the rule.
+  { code: "1300", name: "Due from Affiliates", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, subtype: "DUE_FROM_AFFILIATE" },
   // Allowance for Doubtful Accounts (contra-AR). Bad debt write-offs credit
   // AR direct in v0.4-alpha; full allowance-method accounting (estimate + apply)
   // lands when a customer engagement asks for it.
@@ -61,6 +64,8 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   { code: "2100", name: "Accrued Expenses", type: "LIABILITY", normalBalance: "CREDIT", subtype: "ACCRUED" },
   { code: "2200", name: "Deferred Revenue", type: "LIABILITY", normalBalance: "CREDIT", subtype: "DEFERRED_REV" },
   { code: "2300", name: "Sales Tax Payable", type: "LIABILITY", normalBalance: "CREDIT", subtype: "TAX_PAYABLE" },
+  // Intercompany payable (sub-B's "Due to Sub-A"). Eliminated at consolidation.
+  { code: "2400", name: "Due to Affiliates", type: "LIABILITY", normalBalance: "CREDIT", isControlAccount: true, subtype: "DUE_TO_AFFILIATE" },
   // Lease liability (ASC 842 operating + finance). Paired with the ROU asset.
   { code: "2600", name: "Lease Liability — Current", type: "LIABILITY", normalBalance: "CREDIT", subtype: "LEASE_LIABILITY" },
 
@@ -71,10 +76,14 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   // ---- Revenue ----
   { code: "4000", name: "Subscription Revenue", type: "REVENUE", normalBalance: "CREDIT" },
   { code: "4100", name: "Professional Services Revenue", type: "REVENUE", normalBalance: "CREDIT" },
+  // Intercompany revenue/expense — eliminated at consolidation so the group
+  // doesn't show revenue it earned from itself.
+  { code: "4900", name: "Intercompany Revenue", type: "REVENUE", normalBalance: "CREDIT", subtype: "INTERCOMPANY_REV" },
 
   // ---- Expenses ----
   { code: "5000", name: "Cost of Revenue — Hosting", type: "EXPENSE", normalBalance: "DEBIT" },
   { code: "5100", name: "Cost of Revenue — Support", type: "EXPENSE", normalBalance: "DEBIT" },
+  { code: "5900", name: "Intercompany Expense", type: "EXPENSE", normalBalance: "DEBIT", subtype: "INTERCOMPANY_EXP" },
   { code: "6000", name: "Salaries & Wages", type: "EXPENSE", normalBalance: "DEBIT" },
   { code: "6100", name: "Payroll Taxes", type: "EXPENSE", normalBalance: "DEBIT" },
   { code: "6200", name: "Benefits", type: "EXPENSE", normalBalance: "DEBIT" },

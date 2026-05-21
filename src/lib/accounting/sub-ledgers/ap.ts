@@ -150,3 +150,54 @@ export async function openApBalance(
   });
   return rows.reduce((acc, r) => acc.plus(toDecimal(r.currentBalance)), new Decimal(0));
 }
+
+// Aging buckets — mirror of arAging. Useful for the AP aging report.
+export interface ApAgingBucket {
+  bucket: "CURRENT" | "1_30" | "31_60" | "61_90" | "OVER_90";
+  totalBalance: Decimal;
+  itemCount: number;
+}
+
+export async function apAging(
+  prisma: PrismaClient,
+  entityCode: string,
+  bookCode: string,
+  asOf: Date
+): Promise<ApAgingBucket[]> {
+  const items = await prisma.apOpenItem.findMany({
+    where: {
+      entity: { code: entityCode },
+      book: { code: bookCode },
+      status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
+    },
+    select: { currentBalance: true, dueDate: true, openedDate: true },
+  });
+
+  const buckets = {
+    CURRENT: { total: new Decimal(0), count: 0 },
+    "1_30": { total: new Decimal(0), count: 0 },
+    "31_60": { total: new Decimal(0), count: 0 },
+    "61_90": { total: new Decimal(0), count: 0 },
+    OVER_90: { total: new Decimal(0), count: 0 },
+  };
+  for (const item of items) {
+    const refDate = item.dueDate ?? item.openedDate;
+    const daysOverdue = Math.floor(
+      (asOf.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    const bal = toDecimal(item.currentBalance);
+    let key: keyof typeof buckets;
+    if (daysOverdue <= 0) key = "CURRENT";
+    else if (daysOverdue <= 30) key = "1_30";
+    else if (daysOverdue <= 60) key = "31_60";
+    else if (daysOverdue <= 90) key = "61_90";
+    else key = "OVER_90";
+    buckets[key].total = buckets[key].total.plus(bal);
+    buckets[key].count += 1;
+  }
+  return (Object.keys(buckets) as (keyof typeof buckets)[]).map((k) => ({
+    bucket: k,
+    totalBalance: buckets[k].total,
+    itemCount: buckets[k].count,
+  }));
+}
