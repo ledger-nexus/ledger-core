@@ -16,26 +16,27 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 
 `ledger-core` does the unglamorous foundational work and does it against the universal schema, not a QBO-grade subset. Layers 1+2 of the universal schema, native sub-ledgers, and the book-tax-difference engine are all present today. Document tables (`invoice`, `bill`, `purchase_order`) live in the consumer repos (`recon`, `revenue-rec`) — they're consumers of the substrate, not part of it.
 
-## What's wired (v0.3)
+## What's wired (v0.4)
 
 - ✅ **Layer 1 posting substrate** — `Account`, `JournalEntry`, `JournalLine` with debits=credits, three-currency amounts, XOR debit/credit, atomic writes, sub-ledger keys, lineage. Enforced at app + DB layers.
 - ✅ **Layer 2 master data** — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`+`PartyRole`, `Item`.
 - ✅ **Layer 3 dimension engine** — tables defined; values populated when needed.
-- ✅ **Layer 4 posting rules** — table defined; rules registered in v0.4.
+- ✅ **Layer 4 posting-rules engine** — minimal `$.path` DSL; rules registered per `(sourceEventType, bookId)` drive multi-book divergence declaratively (v0.4).
 - ✅ **Layer 5 custom fields** — `extensions Json` on every entity + `CustomFieldDefinition` + GIN indexes.
 - ✅ **Layer 6 lineage** — source-system / record-id / payload on every importable entity.
-- ✅ **Sub-ledgers (v0.3)** — AR / AP open-item lifecycle, FixedAsset + book-aware depreciation, Lease + ASC 842 classification slots, RevenueContract + PerformanceObligation + per-book recognition basis.
+- ✅ **Sub-ledgers** — AR / AP open-item lifecycle (with paired bad-debt write-off in v0.4); FixedAsset + book-aware depreciation + disposal flow (gain/loss recognized per book); Lease with full ASC 842 mechanics (commencement → amortization → cash payment) in v0.4; RevenueContract + PerformanceObligation + per-book recognition basis.
 - ✅ **Reports** — Trial Balance, Income Statement, Balance Sheet, **Book-Tax Difference** — all scoped per `(entity, book)`.
-- ✅ **Multi-book parallel posting** — Northwind seed exercises Pattern 2 end-to-end with divergent depreciation + cash-basis tax recognition.
-- ✅ **Invariant tests** — TB/BS balance per book, AR/AP open-item = control account, fixed asset NBV divergence, BTD classification.
+- ✅ **Multi-book parallel posting** — Northwind seed exercises Pattern 2 end-to-end with divergent depreciation, cash-basis tax recognition, and ASC 842 leases (GAAP/IFRS capitalize; TAX cash-basis).
+- ✅ **Invariant tests** — TB/BS balance per book, AR/AP open-item = control account, fixed asset NBV divergence, BTD classification, disposal gain/loss math, ASC 842 commencement + amortization, posting-rules engine end-to-end.
+- ✅ **Property-based tests** via fast-check — balanced entries always accepted; unbalanced always rejected; arbitrary entry sequences leave BS balanced; AR open-item invariant survives arbitrary application sequences.
 
-## What lands next (v0.4 → v1.0)
+## What lands next (v0.5 → v1.0)
 
-- 🚧 Posting-rules engine implementation (replace explicit fan-out with table-driven divergence)
-- 🚧 Full ASC 842 ROU asset + lease liability roll-forward (current v0.3 is a straight-line stub)
-- 🚧 Property-based tests via `fast-check` against the posting boundary
 - 🚧 Next.js UI + Vercel + Neon live demo + Loom walkthrough
 - 🚧 QBO and NetSuite end-to-end mapping examples (the "validate by mapping" step in `docs/universal-schema.md`)
+- 🚧 Allowance method for bad debt (estimate + apply via Allowance for Doubtful Accounts)
+- 🚧 M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
+- 🚧 Consolidation report across multiple legal entities
 
 ## Tech stack
 
@@ -99,17 +100,20 @@ ledger-core/
 │   │   ├── post-journal.ts                    # THE function. Read this first.
 │   │   ├── reports.ts                         # TB, IS, BS per (entity, book)
 │   │   ├── reports/book-tax-difference.ts     # GAAP vs TAX diff with classification
+│   │   ├── posting-rules.ts                   # rules engine + minimal $.path DSL (v0.4)
 │   │   ├── sub-ledgers/
-│   │   │   ├── ar.ts                          # open/apply/write-off + aging
+│   │   │   ├── ar.ts                          # open/apply/write-off + aging + bad-debt JE
 │   │   │   ├── ap.ts                          # mirror of AR
-│   │   │   ├── fixed-assets.ts                # createFixedAsset + runDepreciation
-│   │   │   ├── leases.ts                      # createLease + runLeaseStraightLineExpense
+│   │   │   ├── fixed-assets.ts                # createFixedAsset + runDepreciation + disposeFixedAsset
+│   │   │   ├── leases.ts                      # createLease + runLeaseAccounting (full ASC 842)
 │   │   │   └── revenue-contracts.ts           # createRevenueContract + recognition runner
 │   │   └── types.ts                           # domain types + custom errors
 │   └── db/chart-of-accounts.ts                # shared chart
 ├── tests/
 │   ├── invariants.test.ts                     # Layer 1 invariants
 │   ├── sub-ledgers.test.ts                    # AR/AP lifecycle, FA depreciation, BTD
+│   ├── v0-4-features.test.ts                  # disposal, bad debt, ASC 842, posting rules
+│   ├── property-based.test.ts                 # fast-check property tests
 │   └── seeded-company.test.ts                 # Northwind multi-book assertions
 └── docs/
     ├── universal-schema.md                    # CANONICAL — architecture decisions

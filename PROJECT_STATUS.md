@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-05-21
 
-**Current state:** v0.3 just landed. Sub-ledgers (AR / AP / Fixed Assets / Leases / Revenue Contracts) now exist as native tables with book-aware attribute joins. Northwind seed posts to all three books in parallel (Pattern 2). Book-tax-difference report is wired. ~30 invariant tests cover the multi-book divergence.
+**Current state:** v0.4 just landed. Posting-rules engine, full ASC 842 operating lease mechanics (ROU + liability + interest accretion), fixed asset disposal with gain/loss recognition, AR bad debt write-off posting paired JE, and property-based tests via fast-check. Northwind seed now uses the full ASC 842 mechanics — GAAP/IFRS get ROU asset + lease liability on the BS while US_TAX (cash basis) shows neither.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -41,16 +41,17 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] Sub-ledger reconciliation invariants (sum of open = control account balance)
 - [x] Schema ERD updated to two diagrams (core + sub-ledgers)
 
+### v0.4 — Posting-rules engine + full ASC 842 + disposal + bad debt + fast-check
+- [x] Posting-rules engine (`src/lib/accounting/posting-rules.ts`) with minimal `$.path` DSL, `${$.path}` interpolation, and `registerUniformRule` for the common multi-book case. Engine looks up the latest active rule per (sourceEventType, bookId), applies the template, and posts via `postJournalEntry`.
+- [x] Full ASC 842 mechanics in `runLeaseAccounting`: lease commencement (Dr ROU, Cr Lease Liability at PV of payments), monthly amortization (combined JE Dr Lease Expense / Cr ROU / Cr Lease Liability), and cash payment (Dr Lease Liability / Cr Cash). Finance + cash-basis-tax classifications handled in the same function.
+- [x] Fixed asset disposal flow (`disposeFixedAsset`) — catches up depreciation through disposal date, posts paired JE (Dr Cash, Dr Accum Dep, Cr Asset gross, Dr/Cr Gain-Loss), marks asset DISPOSED. Gain/loss diverges per book due to different accumulated depreciation balances.
+- [x] AR bad debt write-off (`writeOffArItem`) now posts the paired JE (Dr Bad Debt Expense, Cr AR) so the AR-control = sum-of-open invariant holds after write-off.
+- [x] Property-based tests via fast-check (`tests/property-based.test.ts`) covering: balanced entries always accepted with balancing TB; unbalanced entries always rejected; arbitrary sequences leave BS balanced; AR open-item invariant survives arbitrary application sequences.
+- [x] New accounts wired: 1210 Allowance for Doubtful Accounts (contra-AR), 1600 ROU Asset, 2600 Lease Liability, 7400 Lease Expense — Operating, 7500 Bad Debt Expense, 8100 Gain/Loss on Disposal, 8200 Interest Expense.
+
 ---
 
 ## What's next
-
-### v0.4 — Posting-rules engine + full ASC 842
-- [ ] Posting-rules engine implementation: lookup `(sourceEventType, bookId)` in `PostingRule`, apply template at posting time, replace explicit `postToBooks` fanout
-- [ ] Full ASC 842 ROU asset + lease liability roll-forward (replace the v0.3 straight-line stub)
-- [ ] Disposal flow for fixed assets (gain/loss on disposal, write off accum dep)
-- [ ] Bad debt write-off flow for AR (`writeOffArItem` is wired; needs paired allowance JE)
-- [ ] Property-based tests using `fast-check` against the posting boundary
 
 ### v0.5 — UI + live demo
 - [ ] Initialize shadcn/ui in the repo
@@ -69,7 +70,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Open decisions
 
-- **PostingRule template schema** — TBD when authoring the first rule. Likely JSON shape `{ lines: [{ accountCodeFn, debitFn, creditFn, dimensionRefs }] }` with simple expressions.
+- **PostingRule template schema** — v0.4 ships a minimal `$.path` DSL. Resolved at the level needed for the seed; an expression sublanguage with arithmetic (`$.a + $.b * 0.1`) is a v0.5 candidate when QBO/NetSuite mapping needs it.
 - **Cash flow statement** — deferred. Indirect method is the lift; direct method is non-trivial too. Probably v0.6.
 - **Audit log with hash chaining** — out of scope until a real customer asks for it. The `JournalEntry.status = REVERSED` + immutability rule covers GAAP-level audit trail.
 - **Auth** — still nothing. Portfolio demo gates discussion until UI lands.
@@ -85,6 +86,8 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - **2026-05-21** — Surrogate keys are UUIDs (`gen_random_uuid()`), not cuid. Currency PK is the ISO 4217 code (stable across systems).
 - **2026-05-21** — v0.3 sub-ledger expansion: AR/AP open items are keyed per (entity, book). Cash-basis tax customers need per-book open-item lifecycles even when GAAP and TAX are usually identical.
 - **2026-05-21** — Revenue recognition math: month-based, not day-based. Day-based drifts by pennies per period and breaks clean BTD demos.
+- **2026-05-21** — Posting-rules engine DSL is intentionally minimal: `$.path` lookups + `${$.path}` interpolation. Arithmetic and conditionals are OUT. If a rule needs them, author it in TS directly. The rules engine exists to make ERP-event → GL mapping declarative + auditable, not to be a general-purpose computation language.
+- **2026-05-21** — Bad debt write-off uses the DIRECT method (Dr Bad Debt Expense, Cr AR). Allowance method (estimate + apply against a contra-AR allowance account) is more sophisticated and accurate but adds complexity; deferred until a customer engagement asks for it.
 
 ---
 

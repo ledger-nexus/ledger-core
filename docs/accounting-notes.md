@@ -185,6 +185,54 @@ If those numbers don't match, your sub-ledger has lost touch with the GL. The te
 
 ---
 
+## ASC 842 operating leases (the "two books, same lease, different balance sheet" story)
+
+ASC 842 — issued by the FASB in 2016, effective 2019 — changed lease accounting in a way that still trips up engineers and accountants alike. Before ASC 842, only **capital leases** showed up on the balance sheet. Operating leases — the kind most companies use for offices, equipment, vehicles — were footnote disclosures with one-line P&L expense. Now operating leases also produce a **Right-of-Use (ROU) asset** and a **Lease Liability**, but the P&L treatment stays straight-line.
+
+For our Northwind NYC office lease ($5k/mo for 24 months at 6% annual):
+
+**At commencement** (March 2026):
+
+| Step | Dr | Cr | Amount |
+|---|---|---|---|
+| 1. Capitalize | ROU Asset (1600) | Lease Liability (2600) | ~$112,814 (PV of payments) |
+
+**Each month-end**:
+
+| Step | Dr | Cr | Amount |
+|---|---|---|---|
+| 2. Lease expense (combined) | Lease Expense (7400) | ROU Asset (1600) | $5,000 − interest = ~$4,436 (March) |
+| | | Lease Liability (2600) | interest = $112,814 × 0.5% = $564 (March) |
+| 3. Pay rent | Lease Liability (2600) | Cash (1000) | $5,000 |
+
+Total expense each month is constant ($5,000 — that's the "straight-line" piece). But ROU and liability both decrease by ~$4,436/month, in lockstep. Over 24 months they amortize to zero.
+
+The arithmetic is the same dance every period: interest accretes the liability, the cash payment pays it down, and ROU amortization is the residual.
+
+**Tax book** (US_TAX, classification = `TAX_CASH_BASIS`):
+
+| Step | Dr | Cr | Amount |
+|---|---|---|---|
+| Each month-end | Lease Expense (7400) | Cash (1000) | $5,000 |
+
+No ROU, no liability. Cash basis = deduct what you pay.
+
+**Bottom line**: same lease, same monthly cash, same P&L impact ($5k/mo) — but the GAAP balance sheet shows a six-figure ROU asset and matching liability while the tax balance sheet shows neither. This is one of the cleanest demonstrations of why per-book sub-ledger attributes matter, and why the book-tax-difference report needs to look at both P&L AND balance sheet diffs.
+
+---
+
+## Posting-rules engine — the declarative path
+
+v0.4 adds a posting-rules engine. The schema has had a `PostingRule` table since v0.2; v0.4 finally implements the function that consumes it.
+
+**The idea**: instead of hardcoding the GL impact of every ERP event in TypeScript, register a `PostingRule` row keyed by `(source_event_type, book_id)` with a JSON template. When an event happens, `postWithRules` looks up the rules for each active book and posts the right entries.
+
+**Why it matters**: this is what NetSuite calls "Accounting Rules," what SAP calls "account determination," and what every tier-1 ERP has some version of. It moves the GL mapping from imperative code into auditable data — you can ask "what's the rule for Customer Invoice in the US Tax book?" by querying a table.
+
+**Why the DSL is minimal**: `$.path` lookups + `${$.path}` string interpolation, no arithmetic. If a rule needs to compute "amount × tax rate", you do it in the caller and pass the result in the payload. The rules engine is a *mapping* tool, not a *computation* tool. Keeping the DSL boring keeps it auditable.
+
+---
+
 ## Further reading
 
 If this document made you want to understand accounting more deeply, the best resources I've found:
