@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-05-21
 
-**Current state:** v0.8 just landed. The UI is now read-write: interactive multi-line journal entry form with live debit/credit balance indicator, per-row apply-payment forms on the new `/ar` and `/ap` pages, and a token-gated `POST /api/admin/reset` endpoint that clears the Northwind transactional data and re-seeds in one call. The seed is now a callable module (`src/lib/seed/northwind.ts`) shared by the CLI script and the reset endpoint.
+**Current state:** v0.9 just landed. The Cash Flow Statement — the third financial statement — using the indirect method with classification heuristics that surface any unclassified BS account in an `uncategorized` panel. AR Aging report page wired from the existing `arAging()` function. CSV exports for all six reports via dedicated `/api/reports/.../csv` route handlers, with download buttons on every report page. Reconciliation invariant tests verify the cash flow report ties out to actual Δ cash on controlled fixtures.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -95,22 +95,27 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] Sidebar nav extended with "New entry", "Open AR", "Open AP" links.
 - [x] `docs/deployment.md` and `.env.example` updated for `ADMIN_TOKEN` usage + Vercel Cron schedule example.
 
+### v0.9 — Cash Flow Statement + AR Aging + CSV exports
+- [x] `getCashFlowStatement()` in `src/lib/accounting/reports/cash-flow.ts` — indirect method. Classification heuristic via account subtype + type: OPERATING_NONCASH (depreciation, amortization), OPERATING_WC (AR, AP, inventory, prepaid, accrued, deferred revenue, allowance, sales tax), INVESTING (fixed asset cost, accum dep contra, intangible, ROU), FINANCING (equity, lease liability, debt). Anything the heuristic can't place surfaces in an `uncategorized` array.
+- [x] Reconciliation tie-out: computed netCashFlow vs actual Δ cash from the BS. `reconciles` boolean + `reconcilingDifference` decimal in the result. Mismatches surface in the page's badge + the uncategorized panel.
+- [x] `/reports/cash-flow` page with Operating / Investing / Financing sections, reconciliation strip at the top, uncategorized panel when relevant.
+- [x] `/reports/ar-aging` page using existing `arAging()` function. Bucket KPI cards + detail table with per-row days-overdue + bucket badges. Links to `/ar` for apply-payment.
+- [x] CSV utility (`toCsv` in `src/lib/utils/csv.ts`) — RFC 4180-ish escaping for cells with commas / quotes / newlines.
+- [x] CSV route handlers for all six reports: `/api/reports/{trial-balance,income-statement,balance-sheet,book-tax-difference,cash-flow,ar-aging}/csv?<params>`. Use the same scope cookie and search params as the corresponding pages.
+- [x] "Download CSV" link on every report page.
+- [x] Sidebar nav gains Cash flow and AR aging.
+- [x] Tests (`tests/cash-flow.test.ts`): capital infusion only, all-AR no-collection (NI offsets Δ AR), capex + cash sale, depreciation add-back. All assertions verify `reconciles === true`.
+
 ---
 
 ## What's next
 
-### v0.9 — UX polish + the cash flow statement
-- [ ] Cash flow statement (indirect method): start from net income, adjust for non-cash items (depreciation, working-capital changes)
-- [ ] Account autocomplete on the new-entry form (the 35+ account dropdown gets long)
-- [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
-- [ ] AR aging report (the function exists in `arAging`; just needs a page)
-- [ ] CSV export on every report
-
-### v1.0 — Multi-entity consolidation + NetSuite Accounting Books
+### v1.0 — Multi-entity consolidation + ASC 842 cash flow polish
 - [ ] Multi-entity consolidation report with intercompany eliminations (uses `LegalEntity.parentEntityId` hierarchy)
+- [ ] AP aging page (needs an `apAging()` function in ap.ts first)
 - [ ] NS Accounting Books support (multi-book parallel posting from one NS transaction)
 - [ ] M-1 / M-3 detail report (sub-classifying BTD by IRS form line)
-- [ ] Cash flow statement (genuine accounting gap — third financial statement)
+- [ ] ASC 842 cash flow polish — reclassify operating-lease principal payments out of WC into a dedicated line per GAAP presentation
 
 ---
 
@@ -145,6 +150,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - **2026-05-21** — The new-entry form serializes its dynamic lines array to a single hidden `linesJson` input on every keystroke. Alternative was `name="lines[0][accountCode]"` style FormData, which requires more parsing logic in the Server Action and doesn't survive `FormData.getAll` ordering. JSON serialization is one line in the client, one parse in the action — net simpler.
 - **2026-05-21** — `POST /api/admin/reset` fails closed when `ADMIN_TOKEN` is unset (503, not 401). Reasoning: a 401 implies the endpoint is operational but the token is wrong; 503 communicates "this endpoint is intentionally disabled in this deployment." Helps debug a missing env var faster.
 - **2026-05-21** — Seed extracted to `src/lib/seed/northwind.ts` with `prisma` passed as a parameter. The script wrapper at `prisma/seed.ts` is the same shape as before — just 30 lines instead of 670. The reset endpoint imports the same module so there's exactly one Northwind definition.
+- **2026-05-21** — Cash flow classification uses subtype-driven heuristics, not hard-coded account codes, so QBO/NS-imported charts work without code changes. The `uncategorized` panel is the safety net — any BS change the heuristic can't place surfaces in the UI with a note pointing at `src/lib/accounting/reports/cash-flow.ts` for the fix. Trade-off: classification is best-effort, not authoritative.
+- **2026-05-21** — Decided NOT to add a `cashFlowCategory` enum column to `Account`. Reason: would either be redundant with `subtype` (which already drives this) or would require constant tuning per ERP import. Heuristic on `subtype + type + isBank` covers ~95% of normal accounts; the `uncategorized` panel handles the long tail explicitly.
+- **2026-05-21** — Cash flow tests use controlled fixtures (capital infusion only / all-AR no collection / capex + sale / depreciation add-back) rather than the full Northwind seed because Northwind has the ASC 842 lease complications. The fixtures isolate one mechanic at a time and assert `reconciles === true` on each.
 
 ---
 

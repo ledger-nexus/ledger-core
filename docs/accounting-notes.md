@@ -270,6 +270,40 @@ The schema and functions support both methods. `writeOffArItem({ method: "DIRECT
 
 ---
 
+## The cash flow statement (indirect method)
+
+The third financial statement reconciles **net income** (from the P&L) to the **change in cash** (from the BS) by removing the non-cash items and the working-capital effects that distort the picture.
+
+The structure:
+
+```
+Net Income                          ← from P&L (which mixes cash + non-cash + accrual)
+  + Depreciation / Amortization     ← P&L expenses that didn't consume cash, add back
+  ± Working capital changes         ← Δ AR, Δ AP, Δ Inventory, Δ Prepaid, Δ Accrued, Δ Deferred Rev
+= Cash from operating activities
+
+  - Capital expenditures            ← bought equipment / intangibles
+  + Disposal proceeds               ← sold equipment
+= Cash from investing activities
+
+  + Equity contributions / debt     ← financing inflows
+  - Repayments / dividends          ← financing outflows
+= Cash from financing activities
+
+Net change in cash = Σ of all three sections
+        Must equal endingCash − beginningCash (from the BS).
+```
+
+The intuition: net income knows revenue was earned, but doesn't care whether the customer paid. The cash flow statement fixes that by subtracting Δ AR (asset increase = cash use) and adding Δ deferred revenue (liability increase = cash source). Same idea on every working-capital line.
+
+**Classification by account subtype.** v0.9 uses a heuristic on `Account.subtype + type + isBank` to put each BS-changing account in the right section. Depreciation-related subtypes (DEPRECIATION, AMORTIZATION) get added back to net income. Working-capital subtypes (AR_TRADE, AP_TRADE, INVENTORY, PREPAID, ACCRUED, DEFERRED_REV) land in operating. Fixed-asset / ROU subtypes land in investing. Equity + lease liability + debt subtypes land in financing. Anything the heuristic can't place surfaces in an `uncategorized` array — visible in the report's UI, so missing classifications fix themselves over time as you encounter new account subtypes.
+
+**Reconciliation as a self-audit.** The report computes both the **indirect** net cash flow (Σ of the three sections) and the **actual** Δ cash (just `endingCash − beginningCash` from the BS). If they don't tie out within a penny, the report shows a warning badge and the `uncategorized` panel tells you exactly which account moved without being categorized. The tests in `tests/cash-flow.test.ts` assert `reconciles === true` on controlled fixtures.
+
+**ASC 842 caveat.** Operating leases create a non-cash initial recognition (Dr ROU / Cr Lease Liability) that doesn't appear in the cash flow as either an investing or a financing event under GAAP — instead the cash payments belong in operating. v0.9 categorizes ROU as investing and lease liability as financing, which mechanically reconciles but isn't the canonical ASC 842 presentation. Polish is a v1.0 task.
+
+---
+
 ## Lineage-replay exports (and why Layer 6 needs the frozen payload)
 
 The spec rule for Layer 6:
