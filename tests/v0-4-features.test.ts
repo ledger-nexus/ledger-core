@@ -11,7 +11,12 @@ import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getBalanceSheet, getIncomeStatement } from "../src/lib/accounting/reports";
-import { openArItem, openArBalance, writeOffArItem } from "../src/lib/accounting/sub-ledgers/ar";
+import {
+  openArItem,
+  openArBalance,
+  writeOffArItem,
+  estimateBadDebtAllowance,
+} from "../src/lib/accounting/sub-ledgers/ar";
 import {
   createFixedAsset,
   runDepreciation,
@@ -396,6 +401,89 @@ describe("AR bad debt write-off", () => {
         writeOffDate: new Date("2026-07-01"),
       })
     ).rejects.toThrow(/Cannot write off AR item in WRITTEN_OFF/);
+  });
+
+  // ---- v0.5: Allowance method ----
+
+  it("allowance method: estimate builds the allowance; write-off uses it (no double-counted expense)", async () => {
+    // Period 1: estimate $1,500 of bad debt. Post Dr Bad Debt $1,500 / Cr Allowance $1,500.
+    await estimateBadDebtAllowance(prisma, {
+      entityCode: ENTITY,
+      bookCode: "US_GAAP",
+      asOfDate: new Date("2026-03-31"),
+      amount: 1_500,
+      source: "SEED",
+    });
+
+    // Bad debt expense is on the books at $1,500.
+    const pnlAfterEstimate = await getIncomeStatement(
+      prisma,
+      GAAP,
+      new Date("2026-01-01"),
+      new Date("2026-03-31")
+    );
+    const badDebtAfterEstimate = pnlAfterEstimate.expenses.find((e) => e.code === "7500");
+    expect(badDebtAfterEstimate?.amount.toNumber() ?? 0).toBe(1_500);
+
+    // Then a specific $500 invoice goes bad. Write off via the allowance method:
+    // Dr Allowance $500 / Cr AR $500. Does NOT touch Bad Debt Expense.
+    const invoice = await postJournalEntry(prisma, {
+      ...GAAP,
+      documentDate: new Date("2026-04-01"),
+      memo: "Invoice that will go bad",
+      source: "SEED",
+      lines: [
+        { accountCode: "1200", debit: 500, partyCode: "TEST_CUSTOMER" },
+        { accountCode: "4000", credit: 500 },
+      ],
+    });
+    const item = await openArItem(prisma, {
+      entityCode: ENTITY,
+      bookCode: "US_GAAP",
+      partyCode: "TEST_CUSTOMER",
+      openedByEntryId: invoice.id,
+      openedDate: new Date("2026-04-01"),
+      amount: 500,
+      currencyCode: "USD",
+      controlAccountCode: "1200",
+    });
+    const result = await writeOffArItem(prisma, {
+      openItemId: item.id,
+      writeOffDate: new Date("2026-06-30"),
+      method: "ALLOWANCE",
+      source: "SEED",
+    });
+    expect(result.method).toBe("ALLOWANCE");
+
+    // Bad Debt Expense stays at $1,500 (the estimate); it does NOT increase
+    // when we apply the allowance to a specific item.
+    const pnlAfterWriteOff = await getIncomeStatement(
+      prisma,
+      GAAP,
+      new Date("2026-01-01"),
+      new Date("2026-12-31")
+    );
+    const badDebtAfterWriteOff = pnlAfterWriteOff.expenses.find((e) => e.code === "7500");
+    expect(badDebtAfterWriteOff?.amount.toNumber() ?? 0).toBe(1_500);
+
+    // Allowance (1210) decreased by $500 → from $1,500 credit to $1,000 credit.
+    // It's a contra-asset, so it shows on the BS assets side as a negative.
+    const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-12-31"));
+    const allowance = bs.assets.find((a) => a.code === "1210");
+    expect(allowance).toBeDefined();
+    expect(allowance!.amount.toNumber()).toBe(-1_000); // contra: $1,500 estimated - $500 applied
+  });
+
+  it("allowance estimate must be positive", async () => {
+    await expect(
+      estimateBadDebtAllowance(prisma, {
+        entityCode: ENTITY,
+        bookCode: "US_GAAP",
+        asOfDate: new Date("2026-03-31"),
+        amount: -100,
+        source: "SEED",
+      })
+    ).rejects.toThrow(/must be positive/);
   });
 });
 

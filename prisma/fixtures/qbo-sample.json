@@ -1,0 +1,219 @@
+{
+  "_meta": {
+    "sourceSystem": "QBO",
+    "companyName": "Acme Demo Co.",
+    "exportedAt": "2026-04-30T00:00:00Z",
+    "fiscalYearStart": "2026-01-01",
+    "functionalCurrency": "USD",
+    "comment": "Hand-rolled fixture modeled on the QuickBooks Online API. Field names match QBO's JSON shape (Id, DocNumber, TxnDate, Line[], etc.) so the mapper exercises real-world structure. Round-tripping this file through importFromQbo() then exportToQbo() should produce equivalent data."
+  },
+  "Account": [
+    {
+      "Id": "1",
+      "Name": "Checking",
+      "AccountType": "Bank",
+      "AccountSubType": "Checking",
+      "Active": true,
+      "Classification": "Asset"
+    },
+    {
+      "Id": "2",
+      "Name": "Accounts Receivable (A/R)",
+      "AccountType": "Accounts Receivable",
+      "AccountSubType": "AccountsReceivable",
+      "Active": true,
+      "Classification": "Asset"
+    },
+    {
+      "Id": "3",
+      "Name": "Accounts Payable (A/P)",
+      "AccountType": "Accounts Payable",
+      "AccountSubType": "AccountsPayable",
+      "Active": true,
+      "Classification": "Liability"
+    },
+    {
+      "Id": "4",
+      "Name": "Opening Balance Equity",
+      "AccountType": "Equity",
+      "AccountSubType": "OpeningBalanceEquity",
+      "Active": true,
+      "Classification": "Equity"
+    },
+    {
+      "Id": "5",
+      "Name": "Subscription Revenue",
+      "AccountType": "Income",
+      "AccountSubType": "SalesOfProductIncome",
+      "Active": true,
+      "Classification": "Revenue"
+    },
+    {
+      "Id": "6",
+      "Name": "Professional Fees",
+      "AccountType": "Expense",
+      "AccountSubType": "LegalProfessionalFees",
+      "Active": true,
+      "Classification": "Expense"
+    }
+  ],
+  "Customer": [
+    {
+      "Id": "100",
+      "DisplayName": "Acme Corp",
+      "CompanyName": "Acme Corp",
+      "Active": true,
+      "Balance": 5000.00,
+      "PrimaryEmailAddr": { "Address": "ar@acme.example" }
+    },
+    {
+      "Id": "101",
+      "DisplayName": "Globex Corporation",
+      "CompanyName": "Globex Corporation",
+      "Active": true,
+      "Balance": 0.00
+    }
+  ],
+  "Vendor": [
+    {
+      "Id": "200",
+      "DisplayName": "Smith & Co Legal",
+      "CompanyName": "Smith & Co LLP",
+      "Active": true,
+      "Balance": 0.00
+    }
+  ],
+  "Invoice": [
+    {
+      "Id": "5001",
+      "DocNumber": "INV-2026-001",
+      "TxnDate": "2026-03-15",
+      "DueDate": "2026-04-14",
+      "CustomerRef": { "value": "100", "name": "Acme Corp" },
+      "TotalAmt": 5000.00,
+      "Balance": 5000.00,
+      "CurrencyRef": { "value": "USD" },
+      "Line": [
+        {
+          "Amount": 5000.00,
+          "DetailType": "SalesItemLineDetail",
+          "Description": "Subscription — March",
+          "SalesItemLineDetail": {
+            "ItemRef": { "value": "subscription", "name": "Subscription Service" },
+            "Qty": 1,
+            "UnitPrice": 5000.00
+          }
+        }
+      ],
+      "ARAccountRef": { "value": "2", "name": "Accounts Receivable (A/R)" },
+      "IncomeAccountRef": { "value": "5", "name": "Subscription Revenue" }
+    },
+    {
+      "Id": "5002",
+      "DocNumber": "INV-2026-002",
+      "TxnDate": "2026-04-15",
+      "DueDate": "2026-05-15",
+      "CustomerRef": { "value": "100", "name": "Acme Corp" },
+      "TotalAmt": 5000.00,
+      "Balance": 0.00,
+      "CurrencyRef": { "value": "USD" },
+      "Line": [
+        {
+          "Amount": 5000.00,
+          "DetailType": "SalesItemLineDetail",
+          "Description": "Subscription — April",
+          "SalesItemLineDetail": {
+            "ItemRef": { "value": "subscription", "name": "Subscription Service" },
+            "Qty": 1,
+            "UnitPrice": 5000.00
+          }
+        }
+      ],
+      "ARAccountRef": { "value": "2" },
+      "IncomeAccountRef": { "value": "5" }
+    }
+  ],
+  "Bill": [
+    {
+      "Id": "6001",
+      "DocNumber": "BILL-LEGAL-001",
+      "TxnDate": "2026-04-10",
+      "DueDate": "2026-05-10",
+      "VendorRef": { "value": "200", "name": "Smith & Co Legal" },
+      "TotalAmt": 8500.00,
+      "Balance": 0.00,
+      "CurrencyRef": { "value": "USD" },
+      "APAccountRef": { "value": "3", "name": "Accounts Payable (A/P)" },
+      "Line": [
+        {
+          "Amount": 8500.00,
+          "DetailType": "AccountBasedExpenseLineDetail",
+          "Description": "Legal review",
+          "AccountBasedExpenseLineDetail": {
+            "AccountRef": { "value": "6", "name": "Professional Fees" }
+          }
+        }
+      ]
+    }
+  ],
+  "Payment": [
+    {
+      "Id": "7001",
+      "TxnDate": "2026-05-01",
+      "CustomerRef": { "value": "100", "name": "Acme Corp" },
+      "TotalAmt": 5000.00,
+      "DepositToAccountRef": { "value": "1", "name": "Checking" },
+      "CurrencyRef": { "value": "USD" },
+      "Line": [
+        {
+          "Amount": 5000.00,
+          "LinkedTxn": [{ "TxnId": "5002", "TxnType": "Invoice" }]
+        }
+      ]
+    }
+  ],
+  "BillPayment": [
+    {
+      "Id": "8001",
+      "TxnDate": "2026-05-10",
+      "VendorRef": { "value": "200", "name": "Smith & Co Legal" },
+      "TotalAmt": 8500.00,
+      "PayType": "Check",
+      "CheckPayment": { "BankAccountRef": { "value": "1", "name": "Checking" } },
+      "Line": [
+        {
+          "Amount": 8500.00,
+          "LinkedTxn": [{ "TxnId": "6001", "TxnType": "Bill" }]
+        }
+      ]
+    }
+  ],
+  "JournalEntry": [
+    {
+      "Id": "9001",
+      "DocNumber": "JE-OBE",
+      "TxnDate": "2026-01-02",
+      "PrivateNote": "Founders contribute $500k seed capital",
+      "Line": [
+        {
+          "Amount": 500000.00,
+          "DetailType": "JournalEntryLineDetail",
+          "Description": "Opening cash",
+          "JournalEntryLineDetail": {
+            "PostingType": "Debit",
+            "AccountRef": { "value": "1", "name": "Checking" }
+          }
+        },
+        {
+          "Amount": 500000.00,
+          "DetailType": "JournalEntryLineDetail",
+          "Description": "Opening balance equity",
+          "JournalEntryLineDetail": {
+            "PostingType": "Credit",
+            "AccountRef": { "value": "4", "name": "Opening Balance Equity" }
+          }
+        }
+      ]
+    }
+  ]
+}
