@@ -1,0 +1,150 @@
+// Layer 3 dimension engine helpers.
+//
+// The first real exercise of the Dimension / DimensionValue / DimensionSet
+// / DimensionSetValue tables. NetSuite ships with three built-in
+// dimensions (Class, Department, Location) plus arbitrary custom
+// segments. The NS mapper builds a Dimension row per kind, a
+// DimensionValue row per NS internal id, and a deduplicated DimensionSet
+// per unique combination assigned to a transaction line.
+//
+// The dedup key is a stable hash of sorted (dimensionCode, valueCode)
+// pairs. Two transaction lines with identical assignments share the same
+// DimensionSet row.
+
+import { PrismaClient } from "@prisma/client";
+
+// Sort assignments + concatenate. The hash is the dedup key for
+// DimensionSet — every line with the same (dim, value) combo shares one
+// DimensionSet row, which is the entire point of the engine.
+export function dimensionSetHash(
+  assignments: { dimensionCode: string; valueCode: string }[]
+): string {
+  const sorted = [...assignments].sort((a, b) =>
+    a.dimensionCode.localeCompare(b.dimensionCode)
+  );
+  return sorted.map((a) => `${a.dimensionCode}:${a.valueCode}`).join("|");
+}
+
+export interface SetupDimensionInput {
+  code: string;                       // "CLASS", "DEPARTMENT", "LOCATION", "REGION"
+  name: string;
+  isRequired?: boolean;
+  appliesToAccountTypes?: ("ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE")[];
+}
+
+export async function setupDimension(
+  prisma: PrismaClient,
+  input: SetupDimensionInput
+): Promise<{ id: string }> {
+  const applies = input.appliesToAccountTypes ?? [];
+  return await prisma.dimension.upsert({
+    where: { code: input.code },
+    create: {
+      code: input.code,
+      name: input.name,
+      isRequired: input.isRequired ?? false,
+      appliesToAccountTypes: applies as unknown as any,
+    },
+    update: {
+      name: input.name,
+      isRequired: input.isRequired ?? false,
+      appliesToAccountTypes: applies as unknown as any,
+    },
+    select: { id: true },
+  });
+}
+
+export interface SetupDimensionValueInput {
+  dimensionCode: string;
+  code: string;
+  name: string;
+}
+
+export async function setupDimensionValue(
+  prisma: PrismaClient,
+  input: SetupDimensionValueInput
+): Promise<{ id: string }> {
+  const dimension = await prisma.dimension.findUniqueOrThrow({
+    where: { code: input.dimensionCode },
+    select: { id: true },
+  });
+  return await prisma.dimensionValue.upsert({
+    where: {
+      dimensionId_code: { dimensionId: dimension.id, code: input.code },
+    },
+    create: {
+      dimensionId: dimension.id,
+      code: input.code,
+      name: input.name,
+    },
+    update: { name: input.name },
+    select: { id: true },
+  });
+}
+
+// Look up or create a DimensionSet matching the given assignments.
+// Returns the DimensionSet id. Assignments missing from input are NOT
+// considered part of the set — a line tagged Class+Dept matches an
+// existing set with Class+Dept exactly, NOT one with Class+Dept+Location.
+export async function getOrCreateDimensionSet(
+  prisma: PrismaClient,
+  assignments: { dimensionCode: string; valueCode: string }[]
+): Promise<string> {
+  if (assignments.length === 0) {
+    throw new Error("Cannot build a DimensionSet with zero assignments");
+  }
+
+  const hash = dimensionSetHash(assignments);
+
+  // Fast path: existing set.
+  const existing = await prisma.dimensionSet.findUnique({
+    where: { hash },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  // Resolve dimension + dimension-value ids.
+  const dimCodes = Array.from(new Set(assignments.map((a) => a.dimensionCode)));
+  const dims = await prisma.dimension.findMany({
+    where: { code: { in: dimCodes } },
+    select: { id: true, code: true },
+  });
+  const dimByCode = new Map(dims.map((d) => [d.code, d.id]));
+
+  const resolved: { dimensionId: string; dimensionValueId: string }[] = [];
+  for (const a of assignments) {
+    const dimensionId = dimByCode.get(a.dimensionCode);
+    if (!dimensionId) {
+      throw new Error(`Dimension ${a.dimensionCode} not set up. Call setupDimension first.`);
+    }
+    const value = await prisma.dimensionValue.findUnique({
+      where: { dimensionId_code: { dimensionId, code: a.valueCode } },
+      select: { id: true },
+    });
+    if (!value) {
+      throw new Error(
+        `Dimension value ${a.dimensionCode}.${a.valueCode} not set up. Call setupDimensionValue first.`
+      );
+    }
+    resolved.push({ dimensionId, dimensionValueId: value.id });
+  }
+
+  // Create the set + its value bridges atomically. There's a small race
+  // window between the findUnique above and create here; in the rare case
+  // two callers race for the same hash, Prisma's unique constraint on
+  // `hash` will reject the second one. Catching that and re-reading is a
+  // v0.7 task.
+  const created = await prisma.dimensionSet.create({
+    data: {
+      hash,
+      values: {
+        create: resolved.map((r) => ({
+          dimensionId: r.dimensionId,
+          dimensionValueId: r.dimensionValueId,
+        })),
+      },
+    },
+    select: { id: true },
+  });
+  return created.id;
+}
