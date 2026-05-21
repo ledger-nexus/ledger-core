@@ -152,13 +152,15 @@ The repo targets Next.js 14. Make sure `next` is installed via `pnpm install` be
 
 ## Loom walkthrough script
 
-When you record the demo (the README links to it), hit these beats in order:
+When you record the demo (the README links to it), hit these beats in order. v1.1 script — 8 beats, ~3 minutes total. Adjust to taste.
 
-1. **Open the dashboard.** Point at the KPI grid, mention the BTD KPI is the result of three books posting in parallel.
+1. **Open the dashboard.** Point at the KPI grid; mention the BTD KPI is the result of three books posting in parallel.
 2. **Switch book** to `US_TAX` in the top-right card. Show that Net Income changes (because Globex revenue recognizes immediately on cash basis).
-3. **Trial balance** with the book switched, mention every TB balances per (entity, book).
-4. **Balance sheet** in US_GAAP. Point at Lease Liability (account 2600) and ROU Asset (1600) — ASC 842 capitalization. Switch to US_TAX, both vanish (cash basis doesn't capitalize).
-5. **Book-Tax Difference**. The total delta around −$41,600. Click into the depreciation row, mention it's classified TEMPORARY (timing difference, reverses).
-6. **A journal entry detail.** Open one with `sourceSystem = QBO` or `NETSUITE`. Scroll to the bottom to show the frozen `sourcePayload` — explain Layer 6 lineage and roundtrip guarantee.
+3. **Trial balance** with the book switched; mention every TB balances per (entity, book).
+4. **Balance sheet** in US_GAAP. Point at Lease Liability (account 2600) and ROU Asset (1600) — ASC 842 capitalization. Switch to US_TAX; both vanish (cash basis doesn't capitalize).
+5. **Book-Tax Difference.** Total delta around −$41,600. Click into the depreciation row, mention it's classified TEMPORARY (timing difference, reverses).
+6. **A journal entry detail.** Open one with `sourceSystem = QBO` or `NETSUITE`. Scroll to the bottom to show the frozen `sourcePayload` — explain Layer 6 lineage and the roundtrip guarantee.
+7. **Consolidation.** Switch the entity to `ACME_GROUP` in the top-right (or open `/reports/consolidation` directly). Show the $3k IC sale: per-entity columns show Sub-A's IC AR ($3k Dr in 1300) and Sub-B's IC AP ($3k Cr in 2400). The **Consolidated** column shows both as zero — the elimination did its job. Group net income excludes the IC revenue ($3k) and IC expense ($3k), so the group never appears to have earned money from itself.
+8. **M-3 detail.** Open `/reports/m3-detail`. Point out the "Depreciation and amortization" line — $1,600 TEMPORARY delta, the exact ASC 740 deferred-tax input. Mention each M-3 line is auto-classified by account subtype so a tax preparer doesn't have to re-bucket BTD rows by IRS form line.
 
-That covers the headline differentiators in about 2 minutes.
+That covers the headline differentiators (multi-book substrate, lineage roundtrip, multi-entity consolidation, ASC 740 tax provision input) in about 3 minutes.

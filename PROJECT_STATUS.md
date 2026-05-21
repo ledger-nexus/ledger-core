@@ -126,9 +126,12 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## v1.0 is the portfolio milestone. Beyond:
 
-### v1.1+ — ergonomics + polish
-- [ ] Account autocomplete on the new-entry form
-- [ ] Keyboard shortcut for "+ Add line"
+### v1.1 — Loom script + autocomplete polish (shipped 2026-05-21)
+- [x] `docs/deployment.md` Loom walkthrough updated to 8 beats — adds the consolidation IC elimination demo (beat 7) and the M-3 depreciation grouping (beat 8). Total run time still ~3 minutes.
+- [x] Account autocomplete on `/journal-entries/new` via native `<datalist>` (no new deps). Same datalist pattern for the party selector. User types code OR name and the browser filters; no need to scroll a 35-account dropdown.
+
+### v1.2+ — ergonomics + polish (deferred)
+- [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
 - [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
 - [ ] Multi-currency revaluation

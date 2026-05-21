@@ -101,6 +101,24 @@ export function NewEntryForm({
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
+      {/* Datalists for autocomplete. The browser matches typed text
+          against option value AND label, so a user can type "1000" or
+          "Cash" and see the matching choices. Rendered invisible. */}
+      <datalist id="lc-accounts-list">
+        {accounts.map((a) => (
+          <option key={a.code} value={a.code}>
+            {a.name}
+          </option>
+        ))}
+      </datalist>
+      <datalist id="lc-parties-list">
+        {parties.map((p) => (
+          <option key={p.code} value={p.code}>
+            {p.displayName}
+          </option>
+        ))}
+      </datalist>
+
       <Card>
         <CardHeader>
           <CardTitle>Entry header</CardTitle>
@@ -172,32 +190,28 @@ export function NewEntryForm({
                     </Select>
                   </TD>
                   <TD>
-                    <Select
+                    {/* Autocomplete via native <datalist>. User can type
+                        the account code (e.g. "1000") or any word from the
+                        name (e.g. "Cash") — the browser filters options
+                        and offers selection. No third-party combobox dep. */}
+                    <Input
+                      list="lc-accounts-list"
                       value={line.accountCode}
                       onChange={(e) => updateLine(line.uid, { accountCode: e.target.value })}
-                      className="min-w-[260px]"
-                    >
-                      <option value="">— select —</option>
-                      {accounts.map((a) => (
-                        <option key={a.code} value={a.code}>
-                          {a.code} — {a.name}
-                        </option>
-                      ))}
-                    </Select>
+                      placeholder="Type code or name"
+                      className="min-w-[260px] font-mono"
+                      autoComplete="off"
+                    />
                   </TD>
                   <TD>
-                    <Select
+                    <Input
+                      list="lc-parties-list"
                       value={line.partyCode ?? ""}
                       onChange={(e) => updateLine(line.uid, { partyCode: e.target.value })}
-                      className="min-w-[180px]"
-                    >
-                      <option value="">—</option>
-                      {parties.map((p) => (
-                        <option key={p.code} value={p.code}>
-                          {p.code}
-                        </option>
-                      ))}
-                    </Select>
+                      placeholder="Party (optional)"
+                      className="min-w-[180px] font-mono"
+                      autoComplete="off"
+                    />
                   </TD>
                   <TD>
                     <Input
