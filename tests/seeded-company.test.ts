@@ -1,19 +1,28 @@
 // Invariant tests against the full Northwind Cloud seed.
 //
-// These tests assume `pnpm db:seed` has been run. They verify that the
-// 6-month dataset balances at every month-end and that the basic financial
-// shape is sensible.
+// Assumes `pnpm db:seed` has been run. Verifies the 6-month dataset
+// balances at every month-end (per book) and that the multi-book
+// divergence (depreciation + Globex cash-basis tax recognition) shows up
+// correctly in the book-tax-difference report.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { Decimal } from "decimal.js";
 import {
   getTrialBalance,
   getBalanceSheet,
   getIncomeStatement,
 } from "../src/lib/accounting/reports";
+import { getBookTaxDifference } from "../src/lib/accounting/reports/book-tax-difference";
+import { openArBalance } from "../src/lib/accounting/sub-ledgers/ar";
+import { openApBalance } from "../src/lib/accounting/sub-ledgers/ap";
+import { netBookValue } from "../src/lib/accounting/sub-ledgers/fixed-assets";
 
 const prisma = new PrismaClient();
-const SCOPE = { entityCode: "NORTHWIND", bookCode: "US_GAAP" };
+const ENTITY = "NORTHWIND";
+const GAAP = { entityCode: ENTITY, bookCode: "US_GAAP" };
+const TAX = { entityCode: ENTITY, bookCode: "US_TAX" };
+const IFRS = { entityCode: ENTITY, bookCode: "IFRS" };
 
 beforeAll(async () => {
   const count = await prisma.journalEntry.count();
@@ -37,69 +46,165 @@ const MONTH_ENDS = [
   new Date("2026-06-30"),
 ];
 
-describe("Northwind Cloud: balance sheet balances at every month-end (US_GAAP)", () => {
-  for (const date of MONTH_ENDS) {
-    it(`balances on ${date.toISOString().slice(0, 10)}`, async () => {
-      const bs = await getBalanceSheet(prisma, SCOPE, date);
-      expect(bs.balances).toBe(true);
-      expect(bs.totalAssets.equals(bs.totalLiabilitiesAndEquity)).toBe(true);
-    });
-  }
+// =========================================================================
+// Per-book balance integrity at every month-end
+// =========================================================================
+
+for (const [label, scope] of [
+  ["US_GAAP", GAAP] as const,
+  ["US_TAX", TAX] as const,
+  ["IFRS", IFRS] as const,
+]) {
+  describe(`Northwind / ${label}: TB + BS balance at every month-end`, () => {
+    for (const date of MONTH_ENDS) {
+      it(`balances on ${date.toISOString().slice(0, 10)}`, async () => {
+        const [tb, bs] = await Promise.all([
+          getTrialBalance(prisma, scope, date),
+          getBalanceSheet(prisma, scope, date),
+        ]);
+        expect(tb.totalDebit.equals(tb.totalCredit)).toBe(true);
+        expect(bs.balances).toBe(true);
+        expect(bs.totalAssets.equals(bs.totalLiabilitiesAndEquity)).toBe(true);
+      });
+    }
+  });
+}
+
+// =========================================================================
+// Sub-ledger reconciliation invariants
+// =========================================================================
+
+describe("Northwind: sub-ledger reconciliation", () => {
+  it("AR open-item sum equals AR control account balance (US_GAAP, 6/30)", async () => {
+    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP");
+    const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-06-30"));
+    const arRow = bs.assets.find((a) => a.code === "1200");
+    expect(arRow).toBeDefined();
+    expect(openBal.equals(arRow!.amount)).toBe(true);
+  });
+
+  it("AP open-item sum equals AP control account balance (US_GAAP, 6/30)", async () => {
+    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP");
+    const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-06-30"));
+    const apRow = bs.liabilities.find((l) => l.code === "2000");
+    // Smith & Co bill paid in May, so AP control should be zero, open balance zero.
+    expect(openBal.toNumber()).toBe(0);
+    if (apRow) expect(apRow.amount.equals(openBal)).toBe(true);
+  });
+
+  it("Fixed asset NBV diverges across books per useful-life difference", async () => {
+    const gaap = await netBookValue(prisma, ENTITY, "US_GAAP");
+    const tax = await netBookValue(prisma, ENTITY, "US_TAX");
+    const ifrs = await netBookValue(prisma, ENTITY, "IFRS");
+    // GAAP/IFRS: 36-mo SL → 6 months × $666.67 ≈ $4,000.02 depreciated → NBV ≈ $19,999.98
+    // TAX: 60-mo SL → 6 months × $400 = $2,400 depreciated → NBV = $21,600
+    expect(gaap.nbv.toDecimalPlaces(2).toString()).toBe(ifrs.nbv.toDecimalPlaces(2).toString());
+    expect(tax.nbv.minus(gaap.nbv).toDecimalPlaces(0).toString()).toBe("1600");
+  });
 });
 
-describe("Northwind Cloud: trial balance balances at every month-end (US_GAAP)", () => {
-  for (const date of MONTH_ENDS) {
-    it(`debits === credits on ${date.toISOString().slice(0, 10)}`, async () => {
-      const tb = await getTrialBalance(prisma, SCOPE, date);
-      expect(tb.totalDebit.equals(tb.totalCredit)).toBe(true);
-    });
-  }
-});
+// =========================================================================
+// Multi-book divergence — the headline of v0.3
+// =========================================================================
 
-describe("Northwind Cloud: financial shape sanity checks", () => {
-  it("has positive total revenue YTD", async () => {
-    const pnl = await getIncomeStatement(
+describe("Northwind: multi-book divergence shows in P&L", () => {
+  it("US_TAX recognizes Globex revenue immediately (cash basis); US_GAAP defers", async () => {
+    // GAAP P&L Jan-Jun: Globex contributes 4 months × $5k = $20k revenue.
+    // TAX P&L Jan-Jun: Globex contributes the full $60k (cash received Mar 1).
+    const gaapPnl = await getIncomeStatement(
       prisma,
-      SCOPE,
+      GAAP,
       new Date("2026-01-01"),
       new Date("2026-06-30")
     );
-    expect(pnl.totalRevenue.toNumber()).toBeGreaterThan(0);
-  });
-
-  it("has positive total expenses YTD", async () => {
-    const pnl = await getIncomeStatement(
+    const taxPnl = await getIncomeStatement(
       prisma,
-      SCOPE,
+      TAX,
       new Date("2026-01-01"),
       new Date("2026-06-30")
     );
-    expect(pnl.totalExpenses.toNumber()).toBeGreaterThan(0);
+
+    // GAAP total revenue = Acme 6×$5k + Globex recognized $20k = $50k
+    // TAX  total revenue = Acme 6×$5k + Globex cash $60k = $90k
+    expect(gaapPnl.totalRevenue.toDecimalPlaces(2).toString()).toBe("50000.00");
+    expect(taxPnl.totalRevenue.toDecimalPlaces(2).toString()).toBe("90000.00");
   });
 
-  it("has a deferred revenue balance reflecting Globex prepayment", async () => {
-    // Globex prepaid $60k in March; by end of June, 4 months have been released ($20k),
-    // leaving $40k in deferred revenue.
-    const bs = await getBalanceSheet(prisma, SCOPE, new Date("2026-06-30"));
+  it("US_GAAP depreciation expense (3-yr life) exceeds US_TAX (5-yr life)", async () => {
+    const gaapPnl = await getIncomeStatement(
+      prisma,
+      GAAP,
+      new Date("2026-01-01"),
+      new Date("2026-06-30")
+    );
+    const taxPnl = await getIncomeStatement(
+      prisma,
+      TAX,
+      new Date("2026-01-01"),
+      new Date("2026-06-30")
+    );
+    const gaapDep = gaapPnl.expenses.find((e) => e.code === "8000");
+    const taxDep = taxPnl.expenses.find((e) => e.code === "8000");
+    expect(gaapDep).toBeDefined();
+    expect(taxDep).toBeDefined();
+    expect(gaapDep!.amount.minus(taxDep!.amount).toDecimalPlaces(0).toString()).toBe("1600");
+  });
+});
+
+// =========================================================================
+// Book-tax-difference report — the v0.3 demo
+// =========================================================================
+
+describe("Northwind: book-tax-difference report (GAAP vs TAX, Jan-Jun 2026)", () => {
+  it("shows tax net income materially higher than book due to Globex + depreciation", async () => {
+    const btd = await getBookTaxDifference(prisma, {
+      entityCode: ENTITY,
+      fromBookCode: "US_GAAP",
+      toBookCode: "US_TAX",
+      periodStart: new Date("2026-01-01"),
+      periodEnd: new Date("2026-06-30"),
+    });
+
+    // Revenue delta: book $50k - tax $90k = -$40k (book lower).
+    // Depreciation expense delta: book $4,000 - tax $2,400 ≈ +$1,600 (book higher expense → book lower income).
+    // Net income delta: bookNetIncome - taxNetIncome ≈ -$41,600.
+    const delta = btd.bookNetIncome.minus(btd.taxNetIncome).toNumber();
+    expect(delta).toBeCloseTo(-41_600, 0);
+
+    // The depreciation expense row should appear with classification TEMPORARY.
+    const depRow = btd.pnlRows.find((r) => r.accountCode === "8000");
+    expect(depRow).toBeDefined();
+    expect(depRow!.classification).toBe("TEMPORARY");
+
+    // Deferred revenue (account 2200) should appear on the BS side as a temporary diff.
+    const defRevRow = btd.balanceSheetRows.find((r) => r.accountCode === "2200");
+    expect(defRevRow).toBeDefined();
+    expect(defRevRow!.classification).toBe("TEMPORARY");
+  });
+});
+
+// =========================================================================
+// Legacy financial-shape assertions
+// =========================================================================
+
+describe("Northwind: financial shape sanity (US_GAAP)", () => {
+  it("has a deferred revenue balance of exactly $40k (Globex, 8 months remaining)", async () => {
+    const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-06-30"));
     const defRev = bs.liabilities.find((l) => l.code === "2200");
     expect(defRev).toBeDefined();
     expect(defRev!.amount.toNumber()).toBe(40_000);
   });
 
-  it("has AR > 0 (uncollected invoices)", async () => {
-    const bs = await getBalanceSheet(prisma, SCOPE, new Date("2026-06-30"));
+  it("has AR of exactly $15k at 6/30 (3 Acme invoices unpaid)", async () => {
+    const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-06-30"));
     const ar = bs.assets.find((a) => a.code === "1200");
     expect(ar).toBeDefined();
-    expect(ar!.amount.toNumber()).toBeGreaterThan(0);
+    expect(ar!.amount.toNumber()).toBe(15_000);
   });
 
-  it("US_TAX book is empty (multi-book seam exists; postings to follow in next batch)", async () => {
-    const tb = await getTrialBalance(
-      prisma,
-      { entityCode: "NORTHWIND", bookCode: "US_TAX" },
-      new Date("2026-06-30")
-    );
-    expect(tb.totalDebit.toNumber()).toBe(0);
-    expect(tb.totalCredit.toNumber()).toBe(0);
+  it("AP is zero at 6/30 (Smith & Co paid in May)", async () => {
+    const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-06-30"));
+    const ap = bs.liabilities.find((l) => l.code === "2000");
+    if (ap) expect(ap.amount.toNumber()).toBe(0);
   });
 });

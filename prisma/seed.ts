@@ -1,30 +1,71 @@
 // Seed data: Northwind Cloud, a fictional SaaS company.
 //
-// 6 months of activity (Jan–Jun 2026): incorporation, hiring, customer sales,
-// expense accruals, monthly depreciation. Every transaction balances.
-//
-// In this v1 seed, postings go to the US_GAAP book only. The schema seeds
-// three books (US_GAAP, US_TAX, IFRS) so the structure is exercised, but
-// divergent multi-book postings (and the book-tax difference report) arrive
-// in the next batch alongside the sub-ledger work.
+// 6 months of activity (Jan–Jun 2026) — Pattern 2 multi-book ledger.
+// Every transaction posts in full to US_GAAP, US_TAX, and IFRS unless the
+// books treat the event differently (Globex prepay: ACCRUAL deferred for
+// GAAP/IFRS, CASH-basis immediate revenue for TAX). Depreciation diverges
+// per book (36-month SL for GAAP/IFRS, 60-month SL for TAX), producing
+// the book-tax difference the v0.3 report can surface.
 //
 // Run with: pnpm db:seed
 
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { CHART_OF_ACCOUNTS } from "../src/lib/db/chart-of-accounts";
+import { openArItem, applyArPayment } from "../src/lib/accounting/sub-ledgers/ar";
+import { openApItem, applyApPayment } from "../src/lib/accounting/sub-ledgers/ap";
+import {
+  createFixedAsset,
+  runDepreciation,
+} from "../src/lib/accounting/sub-ledgers/fixed-assets";
+import {
+  createRevenueContract,
+  runStraightLineRecognition,
+} from "../src/lib/accounting/sub-ledgers/revenue-contracts";
+import { createLease, runLeaseStraightLineExpense } from "../src/lib/accounting/sub-ledgers/leases";
 
 const prisma = new PrismaClient();
 
 const ENTITY_CODE = "NORTHWIND";
 const FISCAL_CALENDAR_CODE = "STANDARD_2026";
+const PARALLEL_BOOKS = ["US_GAAP", "US_TAX", "IFRS"] as const;
 
-// ---- Master data seeding (currencies, entity, books, calendar, periods) ----
+// Books that recognize revenue / capitalize leases on accrual basis.
+const ACCRUAL_BOOKS = ["US_GAAP", "IFRS"] as const;
+
+// ---- Helpers ------------------------------------------------------------
+
+type EntryShape = Omit<Parameters<typeof postJournalEntry>[1], "entityCode" | "bookCode">;
+
+async function postToBooks(
+  books: readonly string[],
+  base: EntryShape
+): Promise<{ bookCode: string; id: string; entryNumber: string }[]> {
+  const results: { bookCode: string; id: string; entryNumber: string }[] = [];
+  for (const bookCode of books) {
+    // Object.assign avoids TS's "specified more than once" check that fires
+    // when an Omit'd spread can't statically prove a key was removed.
+    const input = Object.assign({}, base, { entityCode: ENTITY_CODE, bookCode });
+    const r = await postJournalEntry(prisma, input);
+    results.push({ bookCode, id: r.id, entryNumber: r.entryNumber });
+  }
+  return results;
+}
+
+const MONTH_ENDS = [
+  { date: "2026-01-31", label: "Jan" },
+  { date: "2026-02-28", label: "Feb" },
+  { date: "2026-03-31", label: "Mar" },
+  { date: "2026-04-30", label: "Apr" },
+  { date: "2026-05-31", label: "May" },
+  { date: "2026-06-30", label: "Jun" },
+];
+
+// ---- Master data seeding -----------------------------------------------
 
 async function seedMasterData() {
   console.log("Seeding master data (Layer 2)...");
 
-  // Currencies — minimum viable set. USD is the entity's functional.
   await prisma.currency.upsert({
     where: { code: "USD" },
     create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
@@ -36,7 +77,6 @@ async function seedMasterData() {
     update: {},
   });
 
-  // Legal entity.
   const entity = await prisma.legalEntity.upsert({
     where: { code: ENTITY_CODE },
     create: {
@@ -47,9 +87,6 @@ async function seedMasterData() {
     update: {},
   });
 
-  // Books. Three peer books per the locked multi-book decision — all
-  // reporting in USD for this US-only entity. IFRS book exists for the
-  // future ECB-reporting subsidiary scenario.
   for (const b of [
     { code: "US_GAAP", name: "US GAAP", basis: "US_GAAP" as const },
     { code: "US_TAX", name: "US Federal Tax", basis: "US_TAX" as const },
@@ -67,7 +104,6 @@ async function seedMasterData() {
     });
   }
 
-  // Fiscal calendar with 12 monthly periods for 2026.
   const calendar = await prisma.fiscalCalendar.upsert({
     where: { entityId_code: { entityId: entity.id, code: FISCAL_CALENDAR_CODE } },
     create: {
@@ -79,7 +115,6 @@ async function seedMasterData() {
     update: {},
   });
 
-  const monthEnd = (y: number, m: number) => new Date(Date.UTC(y, m, 0));
   for (let m = 1; m <= 12; m++) {
     const code = `2026-${String(m).padStart(2, "0")}`;
     await prisma.period.upsert({
@@ -89,7 +124,7 @@ async function seedMasterData() {
         code,
         ordinal: m,
         startsOn: new Date(Date.UTC(2026, m - 1, 1)),
-        endsOn: monthEnd(2026, m),
+        endsOn: new Date(Date.UTC(2026, m, 0)),
       },
       update: {},
     });
@@ -99,8 +134,7 @@ async function seedMasterData() {
 }
 
 async function seedAccounts() {
-  console.log("Seeding chart of accounts (Layer 1)...");
-  // entityId = null → shared chart across entities.
+  console.log("Seeding chart of accounts (shared chart, entityId=null)...");
   for (const acct of CHART_OF_ACCOUNTS) {
     await prisma.account.upsert({
       where: { entityId_code: { entityId: null as any, code: acct.code } as any },
@@ -120,14 +154,166 @@ async function seedAccounts() {
   console.log(`  ✓ ${CHART_OF_ACCOUNTS.length} accounts loaded`);
 }
 
-async function seedEntries() {
-  console.log("Seeding journal entries for Northwind Cloud (US_GAAP)...");
+async function seedParties() {
+  console.log("Seeding parties (customers, vendors, lessor)...");
+  const entity = await prisma.legalEntity.findUniqueOrThrow({
+    where: { code: ENTITY_CODE },
+    select: { id: true },
+  });
 
-  // ---- January 2026: Incorporation & initial setup ----
+  for (const p of [
+    { code: "ACME", displayName: "Acme Corp", role: "CUSTOMER" as const },
+    { code: "GLOBEX", displayName: "Globex Corporation", role: "CUSTOMER" as const },
+    { code: "SMITH_CO", displayName: "Smith & Co Legal", role: "VENDOR" as const },
+    { code: "HUDSON_YARDS", displayName: "50 Hudson Yards LLC", role: "VENDOR" as const },
+  ]) {
+    const party = await prisma.party.upsert({
+      where: { entityId_code: { entityId: entity.id, code: p.code } },
+      create: {
+        entityId: entity.id,
+        code: p.code,
+        displayName: p.displayName,
+      },
+      update: {},
+    });
+    await prisma.partyRole.upsert({
+      where: { partyId_role: { partyId: party.id, role: p.role } },
+      create: { partyId: party.id, role: p.role },
+      update: {},
+    });
+  }
+  console.log("  ✓ 4 parties seeded");
+}
 
-  await postJournalEntry(prisma, {
+// ---- Sub-ledger setup --------------------------------------------------
+
+async function setupFixedAssets() {
+  console.log("Creating fixed asset (laptops) with divergent book attributes...");
+  // $24k of laptops, January 5 2026.
+  // GAAP / IFRS: 36-month straight line, $24k / 36 = $666.67/mo
+  // US Tax: 60-month straight line, $24k / 60 = $400/mo
+  // → 6-month YTD: GAAP/IFRS $4,000.02, TAX $2,400. Δ = $1,600.02 temporary.
+  await createFixedAsset(prisma, {
     entityCode: ENTITY_CODE,
-    bookCode: "US_GAAP",
+    code: "LAPTOPS-2026-001",
+    description: "8 MacBooks (engineering team) @ $3,000",
+    category: "COMPUTER_EQUIPMENT",
+    acquisitionDate: new Date("2026-01-05"),
+    acquisitionCost: 24_000,
+    acquisitionCurrencyCode: "USD",
+    assetAccountCode: "1500",
+    books: [
+      {
+        bookCode: "US_GAAP",
+        usefulLifeMonths: 36,
+        method: "STRAIGHT_LINE",
+        inServiceDate: new Date("2026-01-05"),
+        depreciationExpenseAccountCode: "8000",
+        accumDepreciationAccountCode: "1510",
+      },
+      {
+        bookCode: "IFRS",
+        usefulLifeMonths: 36,
+        method: "STRAIGHT_LINE",
+        inServiceDate: new Date("2026-01-05"),
+        depreciationExpenseAccountCode: "8000",
+        accumDepreciationAccountCode: "1510",
+      },
+      {
+        bookCode: "US_TAX",
+        usefulLifeMonths: 60,
+        method: "STRAIGHT_LINE",
+        inServiceDate: new Date("2026-01-05"),
+        depreciationExpenseAccountCode: "8000",
+        accumDepreciationAccountCode: "1510",
+      },
+    ],
+  });
+  console.log("  ✓ fixed asset record created (3 book-attributes rows)");
+}
+
+async function setupRevenueContract() {
+  console.log("Creating Globex revenue contract (ASC 606 / CASH-basis tax)...");
+  // Globex prepays $60k for 12 months of service starting 2026-03-01.
+  // ACCRUAL books (US_GAAP, IFRS): recognize $5k/mo over the 12-month service period.
+  // CASH-basis book (US_TAX): recognize the full $60k when cash is received (March).
+  // → After 6/30/2026: Accrual revenue YTD = $20k (Mar/Apr/May/Jun). Tax = $60k.
+  //   Deferred revenue: Accrual $40k. Tax $0.
+  await createRevenueContract(prisma, {
+    entityCode: ENTITY_CODE,
+    code: "GLOBEX-2026-A1",
+    description: "Globex annual subscription",
+    customerPartyCode: "GLOBEX",
+    contractStartDate: new Date("2026-03-01"),
+    contractEndDate: new Date("2027-02-28"),
+    totalContractValue: 60_000,
+    currencyCode: "USD",
+    performanceObligations: [
+      {
+        sequenceNo: 1,
+        description: "SaaS subscription access",
+        ssp: 60_000,
+        recognitionPattern: "OVER_TIME_STRAIGHT",
+        startDate: new Date("2026-03-01"),
+        endDate: new Date("2027-02-28"),
+        revenueAccountCode: "4000",
+        deferredAccountCode: "2200",
+      },
+    ],
+    books: [
+      { bookCode: "US_GAAP", recognitionBasis: "ACCRUAL" },
+      { bookCode: "IFRS", recognitionBasis: "ACCRUAL" },
+      { bookCode: "US_TAX", recognitionBasis: "CASH" },
+    ],
+  });
+  console.log("  ✓ revenue contract + performance obligation created");
+}
+
+async function setupLease() {
+  console.log("Creating NYC office lease (illustrative — straight-line all books)...");
+  // 24-month lease, $5k/mo, starting 2026-03-01.
+  // GAAP/IFRS classification = OPERATING, TAX = TAX_CASH_BASIS. Both books
+  // expense $5k/mo straight-line in v0.3; the ASC 842 ROU asset + lease
+  // liability mechanics arrive in v0.4 (or in the consumer repo).
+  await createLease(prisma, {
+    entityCode: ENTITY_CODE,
+    code: "NYC-2026",
+    description: "NYC office, 50 Hudson Yards",
+    lessorPartyCode: "HUDSON_YARDS",
+    leaseStartDate: new Date("2026-03-01"),
+    leaseEndDate: new Date("2028-02-29"),
+    paymentFrequency: "MONTHLY",
+    paymentAmount: 5_000,
+    currencyCode: "USD",
+    books: [
+      {
+        bookCode: "US_GAAP",
+        classification: "OPERATING",
+        discountRate: 0.06,
+        expenseAccountCode: "7300",
+      },
+      {
+        bookCode: "IFRS",
+        classification: "OPERATING",
+        discountRate: 0.06,
+        expenseAccountCode: "7300",
+      },
+      {
+        bookCode: "US_TAX",
+        classification: "TAX_CASH_BASIS",
+        expenseAccountCode: "7300",
+      },
+    ],
+  });
+  console.log("  ✓ lease record created (3 book-attributes rows)");
+}
+
+// ---- Journal entries (Pattern 2 parallel posting) ----------------------
+
+async function seedFoundingEntries() {
+  console.log("Posting founding entries (parallel to 3 books)...");
+
+  await postToBooks(PARALLEL_BOOKS, {
     documentDate: new Date("2026-01-02"),
     memo: "Initial capitalization — founders contribute $500k seed",
     source: "SEED",
@@ -138,21 +324,21 @@ async function seedEntries() {
     ],
   });
 
-  await postJournalEntry(prisma, {
-    entityCode: ENTITY_CODE,
-    bookCode: "US_GAAP",
+  // Laptop acquisition — same in all books (cost basis is uniform; the
+  // book divergence is in depreciation, not acquisition).
+  await postToBooks(PARALLEL_BOOKS, {
     documentDate: new Date("2026-01-05"),
     memo: "Purchase laptops for engineering team",
     source: "SEED",
+    sourceRecordType: "AssetAcquisition",
+    sourceRecordId: "LAPTOPS-2026-001",
     lines: [
       { accountCode: "1500", debit: 24_000, description: "8 MacBooks @ $3,000" },
       { accountCode: "1000", credit: 24_000 },
     ],
   });
 
-  await postJournalEntry(prisma, {
-    entityCode: ENTITY_CODE,
-    bookCode: "US_GAAP",
+  await postToBooks(PARALLEL_BOOKS, {
     documentDate: new Date("2026-01-15"),
     memo: "Annual prepayment for office G&A insurance",
     source: "SEED",
@@ -161,23 +347,15 @@ async function seedEntries() {
       { accountCode: "1000", credit: 12_000 },
     ],
   });
+}
 
-  // ---- Recurring monthly patterns: payroll, SaaS tools, revenue, depreciation ----
+async function seedRecurringMonthlyEntries() {
+  console.log("Posting recurring monthly entries (payroll, SaaS, marketing, hosting, prepaid amortization)...");
 
-  const months = [
-    { date: "2026-01-31", label: "Jan" },
-    { date: "2026-02-28", label: "Feb" },
-    { date: "2026-03-31", label: "Mar" },
-    { date: "2026-04-30", label: "Apr" },
-    { date: "2026-05-31", label: "May" },
-    { date: "2026-06-30", label: "Jun" },
-  ];
-
-  for (const m of months) {
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
+  for (const m of MONTH_ENDS) {
+    const docDate = new Date(m.date);
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
       memo: `${m.label} payroll`,
       source: "SEED",
       lines: [
@@ -188,10 +366,8 @@ async function seedEntries() {
       ],
     });
 
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
       memo: `${m.label} SaaS subscriptions`,
       source: "SEED",
       lines: [
@@ -200,10 +376,8 @@ async function seedEntries() {
       ],
     });
 
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
       memo: `${m.label} marketing spend`,
       source: "SEED",
       lines: [
@@ -212,10 +386,8 @@ async function seedEntries() {
       ],
     });
 
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
       memo: `${m.label} AWS hosting`,
       source: "SEED",
       lines: [
@@ -224,10 +396,8 @@ async function seedEntries() {
       ],
     });
 
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
       memo: `${m.label} prepaid insurance amortization`,
       source: "SEED",
       lines: [
@@ -235,113 +405,254 @@ async function seedEntries() {
         { accountCode: "1400", credit: 1_000 },
       ],
     });
-
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
-      memo: `${m.label} depreciation expense`,
-      source: "SEED",
-      lines: [
-        { accountCode: "8000", debit: 667 },
-        { accountCode: "1510", credit: 667, description: "Accumulated depreciation" },
-      ],
-    });
   }
+}
 
-  // ---- Sample customer revenue cycle: invoice → collect ----
+async function seedAcmeArCycle() {
+  console.log("Posting Acme invoices + payments + opening/applying AR items per book...");
 
-  for (const m of months) {
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
+  // Monthly Acme invoice ($5k each) → opens AR open item per book.
+  const acmeInvoices: Record<string, { entryId: string; openItemIds: Record<string, string> }> = {};
+  for (const m of MONTH_ENDS) {
+    const docDate = new Date(m.date);
+    const refNum = `INV-ACME-${m.label.toUpperCase()}`;
+    const dueDate = new Date(docDate);
+    dueDate.setUTCDate(dueDate.getUTCDate() + 30);
+
+    const results = await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
       memo: `${m.label} invoice — Acme Corp`,
       source: "SEED",
+      sourceRecordType: "Invoice",
+      sourceRecordId: refNum,
       lines: [
-        { accountCode: "1200", debit: 5_000, description: "Acme Corp AR" },
+        { accountCode: "1200", debit: 5_000, partyCode: "ACME", description: "Acme Corp AR" },
         { accountCode: "4000", credit: 5_000, description: "Acme subscription revenue" },
       ],
     });
+
+    acmeInvoices[m.label] = { entryId: "", openItemIds: {} };
+    for (const r of results) {
+      const item = await openArItem(prisma, {
+        entityCode: ENTITY_CODE,
+        bookCode: r.bookCode,
+        partyCode: "ACME",
+        openedByEntryId: r.id,
+        referenceNumber: refNum,
+        openedDate: docDate,
+        dueDate,
+        amount: 5_000,
+        currencyCode: "USD",
+        controlAccountCode: "1200",
+        sourceSystem: undefined,
+        sourceRecordType: "Invoice",
+        sourceRecordId: refNum,
+      });
+      acmeInvoices[m.label].openItemIds[r.bookCode] = item.id;
+    }
   }
 
-  for (const [collectDate, memo] of [
-    ["2026-02-15", "Acme Corp pays January invoice"],
-    ["2026-03-15", "Acme Corp pays February invoice"],
-    ["2026-04-15", "Acme Corp pays March invoice"],
+  // Collections: Acme pays Jan invoice on Feb 15, Feb on Mar 15, Mar on Apr 15.
+  for (const [collectDateStr, invoiceMonth, memo] of [
+    ["2026-02-15", "Jan", "Acme Corp pays January invoice"],
+    ["2026-03-15", "Feb", "Acme Corp pays February invoice"],
+    ["2026-04-15", "Mar", "Acme Corp pays March invoice"],
   ] as const) {
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(collectDate),
+    const collectDate = new Date(collectDateStr);
+    const paymentResults = await postToBooks(PARALLEL_BOOKS, {
+      documentDate: collectDate,
       memo,
       source: "SEED",
+      sourceRecordType: "Payment",
+      sourceRecordId: `PMT-ACME-${invoiceMonth}`,
       lines: [
         { accountCode: "1000", debit: 5_000 },
-        { accountCode: "1200", credit: 5_000 },
+        { accountCode: "1200", credit: 5_000, partyCode: "ACME" },
       ],
     });
+    for (const r of paymentResults) {
+      const itemId = acmeInvoices[invoiceMonth].openItemIds[r.bookCode];
+      await applyArPayment(prisma, {
+        openItemId: itemId,
+        appliedByEntryId: r.id,
+        appliedAmount: 5_000,
+        appliedDate: collectDate,
+      });
+    }
   }
+}
 
-  await postJournalEntry(prisma, {
-    entityCode: ENTITY_CODE,
-    bookCode: "US_GAAP",
-    documentDate: new Date("2026-03-01"),
-    memo: "Globex prepays annual contract — $60k",
-    source: "SEED",
-    lines: [
-      { accountCode: "1000", debit: 60_000 },
-      { accountCode: "2200", credit: 60_000, description: "Deferred — Globex" },
-    ],
-  });
+async function seedSmithCoApCycle() {
+  console.log("Posting Smith & Co bill + payment + opening/applying AP items per book...");
 
-  for (const m of months.slice(2)) {
-    await postJournalEntry(prisma, {
-      entityCode: ENTITY_CODE,
-      bookCode: "US_GAAP",
-      documentDate: new Date(m.date),
-      memo: `${m.label} Globex revenue recognition`,
-      source: "SEED",
-      lines: [
-        { accountCode: "2200", debit: 5_000 },
-        { accountCode: "4000", credit: 5_000 },
-      ],
-    });
-  }
-
-  await postJournalEntry(prisma, {
-    entityCode: ENTITY_CODE,
-    bookCode: "US_GAAP",
+  // Bill: 2026-04-10, $8,500
+  const billResults = await postToBooks(PARALLEL_BOOKS, {
     documentDate: new Date("2026-04-10"),
     memo: "Professional fees — legal review, billed",
     source: "SEED",
+    sourceRecordType: "Bill",
+    sourceRecordId: "BILL-SMITH-001",
     lines: [
       { accountCode: "7200", debit: 8_500 },
-      { accountCode: "2000", credit: 8_500, description: "Vendor: Smith & Co" },
+      {
+        accountCode: "2000",
+        credit: 8_500,
+        partyCode: "SMITH_CO",
+        description: "Vendor: Smith & Co",
+      },
     ],
   });
+  const dueDate = new Date("2026-05-10");
+  const apItemIdsByBook: Record<string, string> = {};
+  for (const r of billResults) {
+    const item = await openApItem(prisma, {
+      entityCode: ENTITY_CODE,
+      bookCode: r.bookCode,
+      partyCode: "SMITH_CO",
+      openedByEntryId: r.id,
+      referenceNumber: "BILL-SMITH-001",
+      openedDate: new Date("2026-04-10"),
+      dueDate,
+      amount: 8_500,
+      currencyCode: "USD",
+      controlAccountCode: "2000",
+      sourceRecordType: "Bill",
+      sourceRecordId: "BILL-SMITH-001",
+    });
+    apItemIdsByBook[r.bookCode] = item.id;
+  }
 
-  await postJournalEntry(prisma, {
-    entityCode: ENTITY_CODE,
-    bookCode: "US_GAAP",
+  // Payment: 2026-05-10
+  const payResults = await postToBooks(PARALLEL_BOOKS, {
     documentDate: new Date("2026-05-10"),
     memo: "Smith & Co — pay legal invoice",
     source: "SEED",
+    sourceRecordType: "VendorPayment",
+    sourceRecordId: "VPMT-SMITH-001",
     lines: [
-      { accountCode: "2000", debit: 8_500 },
+      { accountCode: "2000", debit: 8_500, partyCode: "SMITH_CO" },
       { accountCode: "1000", credit: 8_500 },
     ],
   });
-
-  console.log("  ✓ seed entries posted");
+  for (const r of payResults) {
+    await applyApPayment(prisma, {
+      openItemId: apItemIdsByBook[r.bookCode],
+      appliedByEntryId: r.id,
+      appliedAmount: 8_500,
+      appliedDate: new Date("2026-05-10"),
+    });
+  }
 }
+
+async function seedGlobexPrepayAndRecognition() {
+  console.log("Posting Globex prepayment with book-divergent treatment...");
+
+  // Cash receipt — accrual books defer, cash-basis book recognizes immediately.
+  // We post to ACCRUAL books with Dr Cash, Cr Deferred Revenue. To CASH book
+  // we post Dr Cash, Cr Revenue directly. Pattern 2 — divergent line treatment
+  // per book.
+  for (const bookCode of ["US_GAAP", "IFRS"]) {
+    await postJournalEntry(prisma, {
+      entityCode: ENTITY_CODE,
+      bookCode,
+      documentDate: new Date("2026-03-01"),
+      memo: "Globex prepays annual contract — $60k (deferred)",
+      source: "SEED",
+      sourceRecordType: "Payment",
+      sourceRecordId: "PMT-GLOBEX-PREPAY",
+      lines: [
+        { accountCode: "1000", debit: 60_000 },
+        {
+          accountCode: "2200",
+          credit: 60_000,
+          partyCode: "GLOBEX",
+          description: "Deferred revenue — Globex contract",
+        },
+      ],
+    });
+  }
+  await postJournalEntry(prisma, {
+    entityCode: ENTITY_CODE,
+    bookCode: "US_TAX",
+    documentDate: new Date("2026-03-01"),
+    memo: "Globex prepays annual contract — $60k (cash-basis recognition)",
+    source: "SEED",
+    sourceRecordType: "Payment",
+    sourceRecordId: "PMT-GLOBEX-PREPAY",
+    lines: [
+      { accountCode: "1000", debit: 60_000 },
+      {
+        accountCode: "4000",
+        credit: 60_000,
+        partyCode: "GLOBEX",
+        description: "Globex subscription revenue (cash basis)",
+      },
+    ],
+  });
+}
+
+// ---- Period-end runners (depreciation, recognition, lease) -------------
+
+async function runMonthEndRunners() {
+  console.log("Running depreciation + revenue recognition + lease amortization at each month-end...");
+  for (const m of MONTH_ENDS) {
+    const throughDate = new Date(m.date);
+    for (const bookCode of PARALLEL_BOOKS) {
+      // Depreciation diverges per book (3 different useful lives).
+      await runDepreciation(prisma, {
+        entityCode: ENTITY_CODE,
+        bookCode,
+        throughDate,
+        source: "SEED",
+      });
+      // Revenue recognition runs ONLY for accrual books; cash-basis book
+      // recognized the $60k Globex prepay all at once on 2026-03-01.
+      if ((ACCRUAL_BOOKS as readonly string[]).includes(bookCode)) {
+        await runStraightLineRecognition(prisma, {
+          entityCode: ENTITY_CODE,
+          bookCode,
+          throughDate,
+          source: "SEED",
+        });
+      }
+      // Lease amortization — all books book straight-line expense in v0.3.
+      await runLeaseStraightLineExpense(prisma, {
+        entityCode: ENTITY_CODE,
+        bookCode,
+        throughDate,
+        source: "SEED",
+        cashAccountCode: "1000",
+      });
+    }
+  }
+}
+
+// ---- Main --------------------------------------------------------------
 
 async function main() {
   await seedMasterData();
   await seedAccounts();
-  await seedEntries();
-  const count = await prisma.journalEntry.count();
-  console.log(`\nDone. ${count} journal entries in the ledger.\n`);
+  await seedParties();
+  await setupFixedAssets();
+  await setupRevenueContract();
+  await setupLease();
+  await seedFoundingEntries();
+  await seedRecurringMonthlyEntries();
+  await seedAcmeArCycle();
+  await seedSmithCoApCycle();
+  await seedGlobexPrepayAndRecognition();
+  await runMonthEndRunners();
+
+  const entryCount = await prisma.journalEntry.count();
+  const arOpen = await prisma.arOpenItem.count({ where: { status: { in: ["OPEN", "PARTIAL"] } } });
+  const apOpen = await prisma.apOpenItem.count({ where: { status: { in: ["OPEN", "PARTIAL"] } } });
+  const assetCount = await prisma.fixedAsset.count();
+  console.log(
+    `\nDone.\n` +
+      `  ${entryCount} journal entries (across 3 books)\n` +
+      `  ${arOpen} open AR items, ${apOpen} open AP items\n` +
+      `  ${assetCount} fixed asset(s)\n`
+  );
 }
 
 main()
