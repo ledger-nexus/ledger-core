@@ -1,0 +1,664 @@
+// Northwind Cloud seed — exported as a module so both the CLI seed script
+// (prisma/seed.ts) and the demo-reset API endpoint can share the same code
+// path. Each helper takes the PrismaClient as a parameter; the orchestrator
+// is `seedNorthwind(prisma)`.
+//
+// The reset helper (`resetNorthwindData`) deletes only the NORTHWIND-scoped
+// transactional + sub-ledger data, leaving currencies, books, and master
+// reference data intact. Re-seeding is then idempotent on the master rows
+// (upserts) and fresh for the transactional rows.
+
+import { PrismaClient } from "@prisma/client";
+import { postJournalEntry } from "../accounting/post-journal";
+import { CHART_OF_ACCOUNTS } from "../db/chart-of-accounts";
+import { openArItem, applyArPayment } from "../accounting/sub-ledgers/ar";
+import { openApItem, applyApPayment } from "../accounting/sub-ledgers/ap";
+import {
+  createFixedAsset,
+  runDepreciation,
+} from "../accounting/sub-ledgers/fixed-assets";
+import {
+  createRevenueContract,
+  runStraightLineRecognition,
+} from "../accounting/sub-ledgers/revenue-contracts";
+import { createLease, runLeaseAccounting } from "../accounting/sub-ledgers/leases";
+
+export const ENTITY_CODE = "NORTHWIND";
+const FISCAL_CALENDAR_CODE = "STANDARD_2026";
+const PARALLEL_BOOKS = ["US_GAAP", "US_TAX", "IFRS"] as const;
+const ACCRUAL_BOOKS = ["US_GAAP", "IFRS"] as const;
+
+const MONTH_ENDS = [
+  { date: "2026-01-31", label: "Jan" },
+  { date: "2026-02-28", label: "Feb" },
+  { date: "2026-03-31", label: "Mar" },
+  { date: "2026-04-30", label: "Apr" },
+  { date: "2026-05-31", label: "May" },
+  { date: "2026-06-30", label: "Jun" },
+];
+
+type EntryShape = Omit<Parameters<typeof postJournalEntry>[1], "entityCode" | "bookCode">;
+
+function postToBooksFactory(prisma: PrismaClient) {
+  return async function postToBooks(
+    books: readonly string[],
+    base: EntryShape
+  ): Promise<{ bookCode: string; id: string; entryNumber: string }[]> {
+    const results: { bookCode: string; id: string; entryNumber: string }[] = [];
+    for (const bookCode of books) {
+      const input = Object.assign({}, base, { entityCode: ENTITY_CODE, bookCode });
+      const r = await postJournalEntry(prisma, input);
+      results.push({ bookCode, id: r.id, entryNumber: r.entryNumber });
+    }
+    return results;
+  };
+}
+
+// ---- Master data ----------------------------------------------------
+
+async function seedMasterData(prisma: PrismaClient) {
+  await prisma.currency.upsert({
+    where: { code: "USD" },
+    create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
+    update: {},
+  });
+  await prisma.currency.upsert({
+    where: { code: "EUR" },
+    create: { code: "EUR", name: "Euro", decimals: 2, symbol: "€" },
+    update: {},
+  });
+
+  const entity = await prisma.legalEntity.upsert({
+    where: { code: ENTITY_CODE },
+    create: {
+      code: ENTITY_CODE,
+      name: "Northwind Cloud, Inc.",
+      functionalCurrencyId: "USD",
+    },
+    update: {},
+  });
+
+  for (const b of [
+    { code: "US_GAAP", name: "US GAAP", basis: "US_GAAP" as const },
+    { code: "US_TAX", name: "US Federal Tax", basis: "US_TAX" as const },
+    { code: "IFRS", name: "IFRS", basis: "IFRS" as const },
+  ]) {
+    await prisma.book.upsert({
+      where: { code: b.code },
+      create: {
+        code: b.code,
+        name: b.name,
+        basis: b.basis,
+        reportingCurrencyId: "USD",
+      },
+      update: {},
+    });
+  }
+
+  const calendar = await prisma.fiscalCalendar.upsert({
+    where: { entityId_code: { entityId: entity.id, code: FISCAL_CALENDAR_CODE } },
+    create: {
+      entityId: entity.id,
+      code: FISCAL_CALENDAR_CODE,
+      name: "Standard 2026 Calendar",
+      periodFrequency: "MONTHLY",
+    },
+    update: {},
+  });
+
+  for (let m = 1; m <= 12; m++) {
+    const code = `2026-${String(m).padStart(2, "0")}`;
+    await prisma.period.upsert({
+      where: { calendarId_code: { calendarId: calendar.id, code } },
+      create: {
+        calendarId: calendar.id,
+        code,
+        ordinal: m,
+        startsOn: new Date(Date.UTC(2026, m - 1, 1)),
+        endsOn: new Date(Date.UTC(2026, m, 0)),
+      },
+      update: {},
+    });
+  }
+}
+
+async function seedAccounts(prisma: PrismaClient) {
+  for (const acct of CHART_OF_ACCOUNTS) {
+    await prisma.account.upsert({
+      where: { entityId_code: { entityId: null as any, code: acct.code } as any },
+      create: {
+        code: acct.code,
+        name: acct.name,
+        type: acct.type,
+        normalBalance: acct.normalBalance,
+        isContra: acct.isContra ?? false,
+        isControlAccount: acct.isControlAccount ?? false,
+        isBank: acct.isBank ?? false,
+        subtype: acct.subtype,
+      },
+      update: {},
+    });
+  }
+}
+
+async function seedParties(prisma: PrismaClient) {
+  const entity = await prisma.legalEntity.findUniqueOrThrow({
+    where: { code: ENTITY_CODE },
+    select: { id: true },
+  });
+
+  for (const p of [
+    { code: "ACME", displayName: "Acme Corp", role: "CUSTOMER" as const },
+    { code: "GLOBEX", displayName: "Globex Corporation", role: "CUSTOMER" as const },
+    { code: "SMITH_CO", displayName: "Smith & Co Legal", role: "VENDOR" as const },
+    { code: "HUDSON_YARDS", displayName: "50 Hudson Yards LLC", role: "VENDOR" as const },
+  ]) {
+    const party = await prisma.party.upsert({
+      where: { entityId_code: { entityId: entity.id, code: p.code } },
+      create: { entityId: entity.id, code: p.code, displayName: p.displayName },
+      update: {},
+    });
+    await prisma.partyRole.upsert({
+      where: { partyId_role: { partyId: party.id, role: p.role } },
+      create: { partyId: party.id, role: p.role },
+      update: {},
+    });
+  }
+}
+
+// ---- Sub-ledger setup ----------------------------------------------
+
+async function setupFixedAssets(prisma: PrismaClient) {
+  await createFixedAsset(prisma, {
+    entityCode: ENTITY_CODE,
+    code: "LAPTOPS-2026-001",
+    description: "8 MacBooks (engineering team) @ $3,000",
+    category: "COMPUTER_EQUIPMENT",
+    acquisitionDate: new Date("2026-01-05"),
+    acquisitionCost: 24_000,
+    acquisitionCurrencyCode: "USD",
+    assetAccountCode: "1500",
+    books: [
+      {
+        bookCode: "US_GAAP",
+        usefulLifeMonths: 36,
+        method: "STRAIGHT_LINE",
+        inServiceDate: new Date("2026-01-05"),
+        depreciationExpenseAccountCode: "8000",
+        accumDepreciationAccountCode: "1510",
+      },
+      {
+        bookCode: "IFRS",
+        usefulLifeMonths: 36,
+        method: "STRAIGHT_LINE",
+        inServiceDate: new Date("2026-01-05"),
+        depreciationExpenseAccountCode: "8000",
+        accumDepreciationAccountCode: "1510",
+      },
+      {
+        bookCode: "US_TAX",
+        usefulLifeMonths: 60,
+        method: "STRAIGHT_LINE",
+        inServiceDate: new Date("2026-01-05"),
+        depreciationExpenseAccountCode: "8000",
+        accumDepreciationAccountCode: "1510",
+      },
+    ],
+  });
+}
+
+async function setupRevenueContract(prisma: PrismaClient) {
+  await createRevenueContract(prisma, {
+    entityCode: ENTITY_CODE,
+    code: "GLOBEX-2026-A1",
+    description: "Globex annual subscription",
+    customerPartyCode: "GLOBEX",
+    contractStartDate: new Date("2026-03-01"),
+    contractEndDate: new Date("2027-02-28"),
+    totalContractValue: 60_000,
+    currencyCode: "USD",
+    performanceObligations: [
+      {
+        sequenceNo: 1,
+        description: "SaaS subscription access",
+        ssp: 60_000,
+        recognitionPattern: "OVER_TIME_STRAIGHT",
+        startDate: new Date("2026-03-01"),
+        endDate: new Date("2027-02-28"),
+        revenueAccountCode: "4000",
+        deferredAccountCode: "2200",
+      },
+    ],
+    books: [
+      { bookCode: "US_GAAP", recognitionBasis: "ACCRUAL" },
+      { bookCode: "IFRS", recognitionBasis: "ACCRUAL" },
+      { bookCode: "US_TAX", recognitionBasis: "CASH" },
+    ],
+  });
+}
+
+async function setupLease(prisma: PrismaClient) {
+  await createLease(prisma, {
+    entityCode: ENTITY_CODE,
+    code: "NYC-2026",
+    description: "NYC office, 50 Hudson Yards",
+    lessorPartyCode: "HUDSON_YARDS",
+    leaseStartDate: new Date("2026-03-01"),
+    leaseEndDate: new Date("2028-02-29"),
+    paymentFrequency: "MONTHLY",
+    paymentAmount: 5_000,
+    currencyCode: "USD",
+    books: [
+      {
+        bookCode: "US_GAAP",
+        classification: "OPERATING",
+        discountRate: 0.06,
+        rouAccountCode: "1600",
+        liabilityAccountCode: "2600",
+        expenseAccountCode: "7400",
+      },
+      {
+        bookCode: "IFRS",
+        classification: "OPERATING",
+        discountRate: 0.06,
+        rouAccountCode: "1600",
+        liabilityAccountCode: "2600",
+        expenseAccountCode: "7400",
+      },
+      {
+        bookCode: "US_TAX",
+        classification: "TAX_CASH_BASIS",
+        expenseAccountCode: "7400",
+      },
+    ],
+  });
+}
+
+// ---- Transactions --------------------------------------------------
+
+async function seedFoundingEntries(prisma: PrismaClient) {
+  const postToBooks = postToBooksFactory(prisma);
+
+  await postToBooks(PARALLEL_BOOKS, {
+    documentDate: new Date("2026-01-02"),
+    memo: "Initial capitalization — founders contribute $500k seed",
+    source: "SEED",
+    lines: [
+      { accountCode: "1000", debit: 500_000, description: "Cash received" },
+      { accountCode: "3000", credit: 1_000, description: "Common stock at par" },
+      { accountCode: "3100", credit: 499_000, description: "Paid-in capital" },
+    ],
+  });
+
+  await postToBooks(PARALLEL_BOOKS, {
+    documentDate: new Date("2026-01-05"),
+    memo: "Purchase laptops for engineering team",
+    source: "SEED",
+    sourceRecordType: "AssetAcquisition",
+    sourceRecordId: "LAPTOPS-2026-001",
+    lines: [
+      { accountCode: "1500", debit: 24_000, description: "8 MacBooks @ $3,000" },
+      { accountCode: "1000", credit: 24_000 },
+    ],
+  });
+
+  await postToBooks(PARALLEL_BOOKS, {
+    documentDate: new Date("2026-01-15"),
+    memo: "Annual prepayment for office G&A insurance",
+    source: "SEED",
+    lines: [
+      { accountCode: "1400", debit: 12_000 },
+      { accountCode: "1000", credit: 12_000 },
+    ],
+  });
+}
+
+async function seedRecurringMonthlyEntries(prisma: PrismaClient) {
+  const postToBooks = postToBooksFactory(prisma);
+
+  for (const m of MONTH_ENDS) {
+    const docDate = new Date(m.date);
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
+      memo: `${m.label} payroll`,
+      source: "SEED",
+      lines: [
+        { accountCode: "6000", debit: 80_000, description: "Gross salaries" },
+        { accountCode: "6100", debit: 6_400, description: "Employer payroll taxes" },
+        { accountCode: "6200", debit: 8_000, description: "Health & benefits" },
+        { accountCode: "1010", credit: 94_400, description: "Net cash out" },
+      ],
+    });
+
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
+      memo: `${m.label} SaaS subscriptions`,
+      source: "SEED",
+      lines: [
+        { accountCode: "7000", debit: 4_500 },
+        { accountCode: "1000", credit: 4_500 },
+      ],
+    });
+
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
+      memo: `${m.label} marketing spend`,
+      source: "SEED",
+      lines: [
+        { accountCode: "7100", debit: 7_500 },
+        { accountCode: "1000", credit: 7_500 },
+      ],
+    });
+
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
+      memo: `${m.label} AWS hosting`,
+      source: "SEED",
+      lines: [
+        { accountCode: "5000", debit: 3_200 },
+        { accountCode: "1000", credit: 3_200 },
+      ],
+    });
+
+    await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
+      memo: `${m.label} prepaid insurance amortization`,
+      source: "SEED",
+      lines: [
+        { accountCode: "7300", debit: 1_000 },
+        { accountCode: "1400", credit: 1_000 },
+      ],
+    });
+  }
+}
+
+async function seedAcmeArCycle(prisma: PrismaClient) {
+  const postToBooks = postToBooksFactory(prisma);
+
+  const acmeInvoices: Record<string, { entryId: string; openItemIds: Record<string, string> }> = {};
+  for (const m of MONTH_ENDS) {
+    const docDate = new Date(m.date);
+    const refNum = `INV-ACME-${m.label.toUpperCase()}`;
+    const dueDate = new Date(docDate);
+    dueDate.setUTCDate(dueDate.getUTCDate() + 30);
+
+    const results = await postToBooks(PARALLEL_BOOKS, {
+      documentDate: docDate,
+      memo: `${m.label} invoice — Acme Corp`,
+      source: "SEED",
+      sourceRecordType: "Invoice",
+      sourceRecordId: refNum,
+      lines: [
+        { accountCode: "1200", debit: 5_000, partyCode: "ACME", description: "Acme Corp AR" },
+        { accountCode: "4000", credit: 5_000, description: "Acme subscription revenue" },
+      ],
+    });
+
+    acmeInvoices[m.label] = { entryId: "", openItemIds: {} };
+    for (const r of results) {
+      const item = await openArItem(prisma, {
+        entityCode: ENTITY_CODE,
+        bookCode: r.bookCode,
+        partyCode: "ACME",
+        openedByEntryId: r.id,
+        referenceNumber: refNum,
+        openedDate: docDate,
+        dueDate,
+        amount: 5_000,
+        currencyCode: "USD",
+        controlAccountCode: "1200",
+        sourceSystem: undefined,
+        sourceRecordType: "Invoice",
+        sourceRecordId: refNum,
+      });
+      acmeInvoices[m.label].openItemIds[r.bookCode] = item.id;
+    }
+  }
+
+  for (const [collectDateStr, invoiceMonth, memo] of [
+    ["2026-02-15", "Jan", "Acme Corp pays January invoice"],
+    ["2026-03-15", "Feb", "Acme Corp pays February invoice"],
+    ["2026-04-15", "Mar", "Acme Corp pays March invoice"],
+  ] as const) {
+    const collectDate = new Date(collectDateStr);
+    const paymentResults = await postToBooks(PARALLEL_BOOKS, {
+      documentDate: collectDate,
+      memo,
+      source: "SEED",
+      sourceRecordType: "Payment",
+      sourceRecordId: `PMT-ACME-${invoiceMonth}`,
+      lines: [
+        { accountCode: "1000", debit: 5_000 },
+        { accountCode: "1200", credit: 5_000, partyCode: "ACME" },
+      ],
+    });
+    for (const r of paymentResults) {
+      const itemId = acmeInvoices[invoiceMonth].openItemIds[r.bookCode];
+      await applyArPayment(prisma, {
+        openItemId: itemId,
+        appliedByEntryId: r.id,
+        appliedAmount: 5_000,
+        appliedDate: collectDate,
+      });
+    }
+  }
+}
+
+async function seedSmithCoApCycle(prisma: PrismaClient) {
+  const postToBooks = postToBooksFactory(prisma);
+
+  const billResults = await postToBooks(PARALLEL_BOOKS, {
+    documentDate: new Date("2026-04-10"),
+    memo: "Professional fees — legal review, billed",
+    source: "SEED",
+    sourceRecordType: "Bill",
+    sourceRecordId: "BILL-SMITH-001",
+    lines: [
+      { accountCode: "7200", debit: 8_500 },
+      {
+        accountCode: "2000",
+        credit: 8_500,
+        partyCode: "SMITH_CO",
+        description: "Vendor: Smith & Co",
+      },
+    ],
+  });
+  const dueDate = new Date("2026-05-10");
+  const apItemIdsByBook: Record<string, string> = {};
+  for (const r of billResults) {
+    const item = await openApItem(prisma, {
+      entityCode: ENTITY_CODE,
+      bookCode: r.bookCode,
+      partyCode: "SMITH_CO",
+      openedByEntryId: r.id,
+      referenceNumber: "BILL-SMITH-001",
+      openedDate: new Date("2026-04-10"),
+      dueDate,
+      amount: 8_500,
+      currencyCode: "USD",
+      controlAccountCode: "2000",
+      sourceRecordType: "Bill",
+      sourceRecordId: "BILL-SMITH-001",
+    });
+    apItemIdsByBook[r.bookCode] = item.id;
+  }
+
+  const payResults = await postToBooks(PARALLEL_BOOKS, {
+    documentDate: new Date("2026-05-10"),
+    memo: "Smith & Co — pay legal invoice",
+    source: "SEED",
+    sourceRecordType: "VendorPayment",
+    sourceRecordId: "VPMT-SMITH-001",
+    lines: [
+      { accountCode: "2000", debit: 8_500, partyCode: "SMITH_CO" },
+      { accountCode: "1000", credit: 8_500 },
+    ],
+  });
+  for (const r of payResults) {
+    await applyApPayment(prisma, {
+      openItemId: apItemIdsByBook[r.bookCode],
+      appliedByEntryId: r.id,
+      appliedAmount: 8_500,
+      appliedDate: new Date("2026-05-10"),
+    });
+  }
+}
+
+async function seedGlobexPrepayAndRecognition(prisma: PrismaClient) {
+  for (const bookCode of ["US_GAAP", "IFRS"]) {
+    await postJournalEntry(prisma, {
+      entityCode: ENTITY_CODE,
+      bookCode,
+      documentDate: new Date("2026-03-01"),
+      memo: "Globex prepays annual contract — $60k (deferred)",
+      source: "SEED",
+      sourceRecordType: "Payment",
+      sourceRecordId: "PMT-GLOBEX-PREPAY",
+      lines: [
+        { accountCode: "1000", debit: 60_000 },
+        {
+          accountCode: "2200",
+          credit: 60_000,
+          partyCode: "GLOBEX",
+          description: "Deferred revenue — Globex contract",
+        },
+      ],
+    });
+  }
+  await postJournalEntry(prisma, {
+    entityCode: ENTITY_CODE,
+    bookCode: "US_TAX",
+    documentDate: new Date("2026-03-01"),
+    memo: "Globex prepays annual contract — $60k (cash-basis recognition)",
+    source: "SEED",
+    sourceRecordType: "Payment",
+    sourceRecordId: "PMT-GLOBEX-PREPAY",
+    lines: [
+      { accountCode: "1000", debit: 60_000 },
+      {
+        accountCode: "4000",
+        credit: 60_000,
+        partyCode: "GLOBEX",
+        description: "Globex subscription revenue (cash basis)",
+      },
+    ],
+  });
+}
+
+async function runMonthEndRunners(prisma: PrismaClient) {
+  for (const m of MONTH_ENDS) {
+    const throughDate = new Date(m.date);
+    for (const bookCode of PARALLEL_BOOKS) {
+      await runDepreciation(prisma, {
+        entityCode: ENTITY_CODE,
+        bookCode,
+        throughDate,
+        source: "SEED",
+      });
+      if ((ACCRUAL_BOOKS as readonly string[]).includes(bookCode)) {
+        await runStraightLineRecognition(prisma, {
+          entityCode: ENTITY_CODE,
+          bookCode,
+          throughDate,
+          source: "SEED",
+        });
+      }
+      await runLeaseAccounting(prisma, {
+        entityCode: ENTITY_CODE,
+        bookCode,
+        throughDate,
+        source: "SEED",
+        cashAccountCode: "1000",
+      });
+    }
+  }
+}
+
+// ---- Public entry points -------------------------------------------
+
+export async function seedNorthwind(prisma: PrismaClient): Promise<void> {
+  await seedMasterData(prisma);
+  await seedAccounts(prisma);
+  await seedParties(prisma);
+  await setupFixedAssets(prisma);
+  await setupRevenueContract(prisma);
+  await setupLease(prisma);
+  await seedFoundingEntries(prisma);
+  await seedRecurringMonthlyEntries(prisma);
+  await seedAcmeArCycle(prisma);
+  await seedSmithCoApCycle(prisma);
+  await seedGlobexPrepayAndRecognition(prisma);
+  await runMonthEndRunners(prisma);
+}
+
+// Clears every NORTHWIND-scoped transactional + sub-ledger row, leaving
+// currencies / books / calendar / periods (the master skeleton) in place
+// so `seedNorthwind` can re-run idempotently against them.
+//
+// Deletion order matters because of FK relations. AR/AP applications
+// reference open items reference journal entries; sub-ledger records
+// reference entities; etc.
+export async function resetNorthwindData(prisma: PrismaClient): Promise<void> {
+  const entity = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY_CODE },
+    select: { id: true },
+  });
+  if (!entity) return;
+
+  // AR / AP application audit trails (children of open items).
+  await prisma.arApplication.deleteMany({
+    where: { openItem: { entityId: entity.id } },
+  });
+  await prisma.apApplication.deleteMany({
+    where: { openItem: { entityId: entity.id } },
+  });
+
+  // AR / AP open items themselves.
+  await prisma.arOpenItem.deleteMany({ where: { entityId: entity.id } });
+  await prisma.apOpenItem.deleteMany({ where: { entityId: entity.id } });
+
+  // Journal entries (lines cascade via onDelete: Cascade).
+  await prisma.journalEntry.deleteMany({ where: { entityId: entity.id } });
+
+  // Sub-ledger detail records.
+  await prisma.fixedAssetBookAttributes.deleteMany({
+    where: { asset: { entityId: entity.id } },
+  });
+  await prisma.fixedAsset.deleteMany({ where: { entityId: entity.id } });
+
+  await prisma.leaseBookAttributes.deleteMany({
+    where: { lease: { entityId: entity.id } },
+  });
+  await prisma.lease.deleteMany({ where: { entityId: entity.id } });
+
+  await prisma.revenueContractBookAttributes.deleteMany({
+    where: { contract: { entityId: entity.id } },
+  });
+  await prisma.performanceObligation.deleteMany({
+    where: { contract: { entityId: entity.id } },
+  });
+  await prisma.revenueContract.deleteMany({ where: { entityId: entity.id } });
+
+  // Parties + items scoped to NORTHWIND (imported parties under other
+  // entities like QBO_DEMO are untouched).
+  await prisma.partyRole.deleteMany({
+    where: { party: { entityId: entity.id } },
+  });
+  await prisma.party.deleteMany({ where: { entityId: entity.id } });
+  await prisma.item.deleteMany({ where: { entityId: entity.id } });
+
+  // Period close locks.
+  await prisma.periodClose.deleteMany({ where: { entityId: entity.id } });
+}
+
+export async function resetAndReseedNorthwind(prisma: PrismaClient): Promise<{
+  cleared: boolean;
+  entriesAfter: number;
+}> {
+  await resetNorthwindData(prisma);
+  await seedNorthwind(prisma);
+  const entriesAfter = await prisma.journalEntry.count({
+    where: { entity: { code: ENTITY_CODE } },
+  });
+  return { cleared: true, entriesAfter };
+}
