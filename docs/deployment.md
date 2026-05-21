@@ -77,18 +77,63 @@ Open the Vercel URL. You should see:
 
 ---
 
-## Reseting the live demo
+## Resetting the live demo
 
-If random visitors mess with the data (assuming you ever add a new-entry form):
+Random visitors will post test entries via `/journal-entries/new` and apply payments on `/ar` and `/ap`. To return to a clean Northwind state without touching the deployment:
+
+### Option 1 — POST /api/admin/reset
+
+Live since v0.8. Authenticated by an `ADMIN_TOKEN` env var.
+
+1. **Set the token** in Vercel (Settings → Environment Variables):
+   ```
+   ADMIN_TOKEN=<a long random string you generate locally>
+   ```
+   (e.g. `openssl rand -hex 32`)
+
+2. **Trigger the reset**:
+   ```bash
+   curl -X POST https://your-demo.vercel.app/api/admin/reset \
+        -H "Authorization: Bearer $ADMIN_TOKEN"
+   ```
+
+   Response:
+   ```json
+   { "ok": true, "cleared": true, "entriesAfter": 148, "elapsedMs": 4203 }
+   ```
+
+   The endpoint clears all NORTHWIND-scoped transactional + sub-ledger
+   data and re-runs `seedNorthwind`. QBO/NetSuite-imported entities
+   (other entity codes) are untouched.
+
+   If the token is unset, the endpoint fails closed with a 503 — so
+   you can leave it absent in development and the endpoint stays dormant.
+
+3. **Schedule it** with Vercel Cron (optional). Add to `vercel.json`:
+   ```json
+   {
+     "crons": [
+       {
+         "path": "/api/admin/reset",
+         "schedule": "0 6 * * *"
+       }
+     ]
+   }
+   ```
+   That runs the reset daily at 06:00 UTC. Note: Vercel Cron sends GET
+   by default; you'd need a tiny rewrite wrapper or move the logic into
+   a GET handler with bearer-token check. For the v0.8 demo, manual
+   triggers are sufficient.
+
+### Option 2 — `pnpm db:reset` (local with prod DATABASE_URL)
+
+For a truly clean slate (drops every table, re-runs migrations, re-seeds):
 
 ```bash
-# Locally with the production DATABASE_URL
-pnpm db:reset
+DATABASE_URL=<neon-pooled-url> pnpm db:reset
 ```
 
-`db:reset` drops all data, re-runs migrations, and re-seeds. The reset is destructive — do not point it at a database you care about.
-
-A scheduled reset (e.g. Vercel Cron → `/api/admin/reset` endpoint) is a v0.8 task once the demo has real visitors.
+This is destructive — it also drops QBO/NS-imported entities. Use Option 1 unless you want a from-scratch wipe.
 
 ---
 

@@ -22,7 +22,7 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 
 4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test.
 
-## What's wired now (v0.7)
+## What's wired now (v0.8)
 
 - ✅ Layer 1 — `Account`, `JournalEntry`, `JournalLine` with three currency amounts, lineage columns, multi-book scope, GIN-indexed extensions
 - ✅ Layer 2 — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`, `PartyRole`, `Item`
@@ -43,14 +43,14 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 - ✅ **Allowance method (v0.5)** — `estimateBadDebtAllowance` + `writeOffArItem({ method: "ALLOWANCE" })`.
 - ✅ **NetSuite mapper + dimension engine exercise (v0.6)** — `src/lib/mappers/netsuite/` ships end-to-end NS import (4 dimensions: CLASS/DEPARTMENT/LOCATION + custom segments), per-line dimension assignments deduplicated via stable hash, custom fields in `extensions JSONB`, lineage roundtrip. See `docs/netsuite-mapping.md`.
 - ✅ **Next.js UI (v0.7)** — read-only surface in `src/app/`. Sidebar nav + multi-book switcher (cookie-backed via `setScopeAction` Server Action), dashboard, chart of accounts, journal entries list + detail (with frozen lineage payload), all four reports including BTD. Deployment guide at `docs/deployment.md`.
+- ✅ **Interactive UI + demo reset (v0.8)** — `/journal-entries/new` with live debit/credit balance indicator, `/ar` and `/ap` with inline apply-payment forms, `POST /api/admin/reset` gated by `ADMIN_TOKEN`. Seed extracted to `src/lib/seed/northwind.ts` so the CLI and the reset endpoint share one code path.
 
-## What lands next (v0.8)
+## What lands next (v0.9)
 
-- 🚧 `/journal-entries/new` interactive form with real-time debit/credit balance indicator (the one read-write feature still missing)
-- 🚧 AR/AP application UI
-- 🚧 Demo reset endpoint
-- 🚧 Multi-entity consolidation report
-- 🚧 Cash flow statement
+- 🚧 Cash flow statement (indirect method)
+- 🚧 AR aging report page
+- 🚧 CSV export on every report
+- 🚧 Multi-entity consolidation
 
 ## Stack
 

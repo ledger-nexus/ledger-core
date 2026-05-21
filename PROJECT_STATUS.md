@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-05-21
 
-**Current state:** v0.7 just landed. Next.js App Router UI on top of the substrate — dashboard with multi-book KPIs, chart of accounts, journal entries list + detail with lineage payload, four reports (Trial Balance, Income Statement, Balance Sheet, Book-Tax Difference), and a cookie-backed multi-entity / multi-book switcher in the header. Plus a Vercel + Neon deployment guide so the live demo is one push away.
+**Current state:** v0.8 just landed. The UI is now read-write: interactive multi-line journal entry form with live debit/credit balance indicator, per-row apply-payment forms on the new `/ar` and `/ap` pages, and a token-gated `POST /api/admin/reset` endpoint that clears the Northwind transactional data and re-seeds in one call. The seed is now a callable module (`src/lib/seed/northwind.ts`) shared by the CLI script and the reset endpoint.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -87,15 +87,24 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] `vercel.json` wires `prisma generate` into the build command.
 - [x] Updated `.env.example` for Neon's `sslmode=require` connection string.
 
+### v0.8 — Manual JE form + AR/AP application UI + demo reset
+- [x] Seed refactored into a callable module (`src/lib/seed/northwind.ts`) exporting `seedNorthwind(prisma)`, `resetNorthwindData(prisma)`, and `resetAndReseedNorthwind(prisma)`. `prisma/seed.ts` becomes a thin script wrapper.
+- [x] `/journal-entries/new`: Client Component (`new-entry-form.tsx`) with multi-line table, per-line side selector + account dropdown + party + description + amount, add/remove rows, live Σ Dr / Σ Cr / Δ totals memoized on every keystroke. Submit button disabled when unbalanced, missing accounts, or zero amounts. Backed by `createJournalEntryAction` Server Action which calls `postJournalEntry`, surfaces `UnbalancedEntryError` / `UnknownAccountError` / etc. inline, and redirects to `/journal-entries/[id]` on success.
+- [x] `/ar` and `/ap` pages with per-row inline payment forms. Cash-account select (filtered to `isBank` accounts), amount (defaults to current balance), payment date. `applyArPaymentAction` and `applyApPaymentAction` post the cash JE and call `applyArPayment`/`applyApPayment` atomically.
+- [x] `POST /api/admin/reset` endpoint gated by `ADMIN_TOKEN` env. Calls `resetAndReseedNorthwind(prisma)` and returns timing metrics. Fails closed with 503 if the token isn't set.
+- [x] Sidebar nav extended with "New entry", "Open AR", "Open AP" links.
+- [x] `docs/deployment.md` and `.env.example` updated for `ADMIN_TOKEN` usage + Vercel Cron schedule example.
+
 ---
 
 ## What's next
 
-### v0.8 — Manual journal entry form + demo reset
-- [ ] `/journal-entries/new` form: multi-line entry with live debit/credit balance indicator, posting via Server Action through postJournalEntry
-- [ ] AR/AP open-item application UI (mark an invoice paid by selecting cash + amount)
-- [ ] Scheduled reset endpoint (`POST /api/admin/reset`) so the public demo can return to a clean Northwind state nightly
-- [ ] Loom walkthrough recorded + linked in README
+### v0.9 — UX polish + the cash flow statement
+- [ ] Cash flow statement (indirect method): start from net income, adjust for non-cash items (depreciation, working-capital changes)
+- [ ] Account autocomplete on the new-entry form (the 35+ account dropdown gets long)
+- [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
+- [ ] AR aging report (the function exists in `arAging`; just needs a page)
+- [ ] CSV export on every report
 
 ### v1.0 — Multi-entity consolidation + NetSuite Accounting Books
 - [ ] Multi-entity consolidation report with intercompany eliminations (uses `LegalEntity.parentEntityId` hierarchy)
@@ -133,6 +142,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - **2026-05-21** — UI is read-only in v0.7. The manual journal-entry form needs a real-time debit/credit balance indicator + client-side reactivity, which warrants its own batch with proper interactive testing. Shipping the read-only surface first means the live demo is useful immediately for recruiters who just want to click around.
 - **2026-05-21** — Multi-book / multi-entity switcher uses a single `lc-scope` cookie + a Server Action (`setScopeAction`) + `revalidatePath`. No client state, no URL params for scope — the cookie persists across sessions; URL params are reserved for report-specific filters (date ranges, book pairings on the BTD page).
 - **2026-05-21** — Inlined UI primitives (Card/Table/Button/Badge/Input) instead of running the shadcn CLI. Trade-off: less polish, but the bundle stays tiny, the components are auditable, and there's no interactive setup step blocking `pnpm install`.
+- **2026-05-21** — The new-entry form serializes its dynamic lines array to a single hidden `linesJson` input on every keystroke. Alternative was `name="lines[0][accountCode]"` style FormData, which requires more parsing logic in the Server Action and doesn't survive `FormData.getAll` ordering. JSON serialization is one line in the client, one parse in the action — net simpler.
+- **2026-05-21** — `POST /api/admin/reset` fails closed when `ADMIN_TOKEN` is unset (503, not 401). Reasoning: a 401 implies the endpoint is operational but the token is wrong; 503 communicates "this endpoint is intentionally disabled in this deployment." Helps debug a missing env var faster.
+- **2026-05-21** — Seed extracted to `src/lib/seed/northwind.ts` with `prisma` passed as a parameter. The script wrapper at `prisma/seed.ts` is the same shape as before — just 30 lines instead of 670. The reset endpoint imports the same module so there's exactly one Northwind definition.
 
 ---
 
