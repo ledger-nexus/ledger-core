@@ -581,12 +581,16 @@ export async function seedNorthwind(prisma: PrismaClient): Promise<void> {
   await seedAccounts(prisma);
   await seedParties(prisma);
   await seedTestUsersAndQueues(prisma);
+  // Rules must be seeded BEFORE the AR cycle so they fire on each
+  // ON_INSERT during AR item creation.
+  await seedReassignmentRules(prisma);
   await setupFixedAssets(prisma);
   await setupRevenueContract(prisma);
   await setupLease(prisma);
   await seedFoundingEntries(prisma);
   await seedRecurringMonthlyEntries(prisma);
   await seedAcmeArCycle(prisma);
+  await seedGlobexUnpaidArInvoice(prisma);
   await seedSmithCoApCycle(prisma);
   await seedGlobexPrepayAndRecognition(prisma);
   await runMonthEndRunners(prisma);
@@ -694,6 +698,132 @@ export async function seedTestUsersAndQueues(
       where: { queueId_userId: { queueId: queue.id, userId: user.id } },
       create: { queueId: queue.id, userId: user.id },
       update: {},
+    });
+  }
+}
+
+// Two example reassignment rules for AR open items. Demonstrates the
+// cascade-by-priority semantics:
+//
+//   Priority 100 — large-balance escalation: items where currentBalance
+//     > $10,000 route to AR_SENIOR_COLLECTORS. Senior staff handle the
+//     significant exposures.
+//
+//   Priority 999 — catch-all default: everything else routes to
+//     AR_COLLECTIONS (the standard team queue).
+//
+// First-match-wins: the engine evaluates rules in priority order; a
+// matching rule's target is used and subsequent rules are skipped.
+//
+// To see both rules fire in the demo seed: Acme's monthly $5K invoices
+// land in AR_COLLECTIONS (catch-all only), and Globex's single $25K
+// invoice (seeded below) escalates to AR_SENIOR_COLLECTORS.
+//
+// Idempotent via the unique (ruleId, ruleVersion) constraint.
+export async function seedReassignmentRules(
+  prisma: PrismaClient
+): Promise<void> {
+  const seniorQueue = await prisma.queue.findUniqueOrThrow({
+    where: { code: "AR_SENIOR_COLLECTORS" },
+    select: { id: true },
+  });
+  const collectionsQueue = await prisma.queue.findUniqueOrThrow({
+    where: { code: "AR_COLLECTIONS" },
+    select: { id: true },
+  });
+
+  const specs = [
+    {
+      ruleId: "ar-large-balance-to-senior",
+      ruleVersion: 1,
+      recordType: "ArOpenItem",
+      trigger: "ON_INSERT" as const,
+      priority: 100,
+      ruleType: "DECLARATIVE" as const,
+      criteriaJson: {
+        field: "currentBalance",
+        op: "GT",
+        value: 10000,
+      },
+      targetType: "QUEUE" as const,
+      targetId: seniorQueue.id,
+      isActive: true,
+      authoredBy: "seed",
+    },
+    {
+      ruleId: "ar-default-routing",
+      ruleVersion: 1,
+      recordType: "ArOpenItem",
+      trigger: "ON_INSERT" as const,
+      priority: 999,
+      ruleType: "DECLARATIVE" as const,
+      // Empty AND is the "match everything" idiom — used for catch-all
+      // routing rules.
+      criteriaJson: { op: "AND", clauses: [] },
+      targetType: "QUEUE" as const,
+      targetId: collectionsQueue.id,
+      isActive: true,
+      authoredBy: "seed",
+    },
+  ];
+
+  for (const spec of specs) {
+    await prisma.reassignmentRule.upsert({
+      where: {
+        ruleId_ruleVersion: { ruleId: spec.ruleId, ruleVersion: spec.ruleVersion },
+      },
+      create: spec,
+      update: {
+        priority: spec.priority,
+        criteriaJson: spec.criteriaJson,
+        targetType: spec.targetType,
+        targetId: spec.targetId,
+        isActive: spec.isActive,
+      },
+    });
+  }
+}
+
+// One large-balance AR invoice that demonstrates the priority-100 rule
+// firing. Globex owes $25K from Q2 services; the rule escalates this
+// to AR_SENIOR_COLLECTORS automatically on insert. Acme's $5K items
+// from seedAcmeArCycle stay in AR_COLLECTIONS via the catch-all.
+//
+// Posted as a SEED entry across all parallel books (consistent with
+// the multi-book discipline). Not paid in the seed window; remains
+// OPEN through demo lifecycle.
+async function seedGlobexUnpaidArInvoice(prisma: PrismaClient): Promise<void> {
+  const postToBooks = postToBooksFactory(prisma);
+  const docDate = new Date("2026-06-30");
+  const dueDate = new Date("2026-07-30");
+  const refNum = "INV-GLOBEX-2026-Q2";
+
+  const results = await postToBooks(PARALLEL_BOOKS, {
+    documentDate: docDate,
+    memo: "Q2 services invoice — Globex Corporation",
+    source: "SEED",
+    sourceRecordType: "Invoice",
+    sourceRecordId: refNum,
+    lines: [
+      { accountCode: "1200", debit: 25_000, partyCode: "GLOBEX", description: "Globex Q2 services AR" },
+      { accountCode: "4000", credit: 25_000, description: "Globex Q2 services revenue" },
+    ],
+  });
+
+  for (const r of results) {
+    await openArItem(prisma, {
+      entityCode: ENTITY_CODE,
+      bookCode: r.bookCode,
+      partyCode: "GLOBEX",
+      openedByEntryId: r.id,
+      referenceNumber: refNum,
+      openedDate: docDate,
+      dueDate,
+      amount: 25_000,
+      currencyCode: "USD",
+      controlAccountCode: "1200",
+      sourceRecordType: "Invoice",
+      sourceRecordId: refNum,
     });
   }
 }

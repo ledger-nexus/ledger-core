@@ -242,6 +242,10 @@ Phases completed:
 - ✅ v1.5: AR list UI gains an Owner column + inline reassign control (`ReassignArRow`). Lock indicator (🔒) marks records that have been manually reassigned and are now skipped by rule firings.
 - ✅ v1.5: `postJournalEntry` now accepts + persists `createdBy` (added to `JournalEntryInput`; existing schema column populated). Threaded through from Server Action callers.
 - ✅ v1.5: 15 auth-stub unit tests (HMAC sign/verify, cookie encode/parse, tamper resistance, length checks)
+- ✅ v1.6: Example reassignment rules seeded into Northwind. Two rules demonstrating priority-cascade semantics:
+  - `ar-large-balance-to-senior` (priority 100) — currentBalance > $10K routes to AR_SENIOR_COLLECTORS
+  - `ar-default-routing` (priority 999) — catch-all routes everything else to AR_COLLECTIONS
+  Plus one $25K Globex invoice added to the AR seed so the large-balance rule visibly fires on a real record. Acme's $5K invoices land in AR_COLLECTIONS via the catch-all; Globex's $25K invoice lands in AR_SENIOR_COLLECTORS via the priority-100 rule. Demo viewers see both branches of the cascade on `/ar`.
 
 Next phases (separate commits):
 - Adoption on additional record types (ApOpenItem, FixedAsset, Lease, RevenueContract)
