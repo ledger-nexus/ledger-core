@@ -123,10 +123,16 @@ async function seedMasterData(prisma: PrismaClient) {
 }
 
 async function seedAccounts(prisma: PrismaClient) {
+  // Shared-chart accounts (entityId=null). Prisma 5.22 rejects null in
+  // compound unique-key upsert, so use findFirst + create pattern.
   for (const acct of CHART_OF_ACCOUNTS) {
-    await prisma.account.upsert({
-      where: { entityId_code: { entityId: null as any, code: acct.code } as any },
-      create: {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: acct.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
         code: acct.code,
         name: acct.name,
         type: acct.type,
@@ -136,7 +142,6 @@ async function seedAccounts(prisma: PrismaClient) {
         isBank: acct.isBank ?? false,
         subtype: acct.subtype,
       },
-      update: {},
     });
   }
 }

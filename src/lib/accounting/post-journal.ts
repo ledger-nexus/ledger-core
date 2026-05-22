@@ -23,7 +23,7 @@
 // If you find yourself writing a feature that needs to bypass this function,
 // stop. The feature is wrong.
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import {
   JournalEntryInput,
@@ -36,6 +36,20 @@ import {
   AccountBookScopeError,
 } from "./types";
 import { fireInsertRules, type FireRulesResult } from "../rules/integration";
+
+// Accepts either a full PrismaClient or an active TransactionClient so
+// callers can nest postJournalEntry inside a larger transaction (e.g.
+// the fixed-asset record-depreciation endpoint posts N JEs + advances
+// FixedAssetBookAttributes in one atomic operation). When given a
+// TransactionClient, the internal $transaction wrapper is skipped —
+// the outer transaction provides atomicity.
+export type DbClient = PrismaClient | Prisma.TransactionClient;
+
+function hasTransaction(db: DbClient): db is PrismaClient {
+  // TransactionClient is Omit<PrismaClient, "$transaction" | "$connect" | ...>.
+  // Feature-detecting $transaction is the cheapest runtime discriminator.
+  return typeof (db as PrismaClient).$transaction === "function";
+}
 
 // Configure Decimal.js for accounting:
 //   - 28 digits of precision (way more than we'll ever need)
@@ -51,7 +65,7 @@ function toDecimal(v: Decimal | string | number | undefined): Decimal {
 }
 
 export async function postJournalEntry(
-  prisma: PrismaClient,
+  prisma: DbClient,
   input: JournalEntryInput
 ): Promise<{
   id: string;
@@ -242,7 +256,10 @@ export async function postJournalEntry(
 
   // ---- 7. Atomic write ---------------------------------------------------
 
-  const result = await prisma.$transaction(async (tx) => {
+  // Run the write inline if we're already inside an outer transaction;
+  // otherwise open a fresh one. Either way `tx` below is a transaction
+  // client, so the subsequent code is identical.
+  const runWrite = async (tx: Prisma.TransactionClient) => {
     // entryNumber is sequential per (entity, book). Format: ENTITY-BOOK-NNNNN.
     // count() at portfolio scale is fine; production would use a sequence.
     const existingCount = await tx.journalEntry.count({
@@ -295,14 +312,25 @@ export async function postJournalEntry(
     });
 
     return { id: entry.id, entryNumber: entry.entryNumber, bookCode: book.code };
-  });
+  };
+
+  const result = hasTransaction(prisma)
+    ? await prisma.$transaction(runWrite)
+    : await runWrite(prisma);
 
   // Fire ON_INSERT rules AFTER the transaction commits. The JE write is
   // the substrate guarantee — rule firing is post-hoc routing. A rule
   // failure must NOT roll back the entry. We only invoke when a real
   // user is on the hook (ownerUserId set) — seed/import paths skip.
+  //
+  // When called from inside an outer transaction (DbClient is a
+  // TransactionClient), skip rule firing entirely. Rules must run AFTER
+  // the outer transaction commits; the outer caller is responsible for
+  // invoking fireInsertRules itself when it has a full PrismaClient.
+  // This is also why the system/seed depreciation post (ownerUserId
+  // null) is the typical caller for the tx path — no routing needed.
   let rulesResult: FireRulesResult | undefined;
-  if (input.ownerUserId) {
+  if (input.ownerUserId && hasTransaction(prisma)) {
     try {
       // Load the entry shape rules might match on (memo, source, etc.).
       const fullEntry = await prisma.journalEntry.findUniqueOrThrow({

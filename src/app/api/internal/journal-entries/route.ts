@@ -1,12 +1,28 @@
 // POST /api/internal/journal-entries
 //
-// Internal endpoint for trusted sibling repos (recon, revenue-rec) to
-// post journal entries through the canonical postJournalEntry path.
-// Gated by INTERNAL_API_TOKEN — fails closed if unset.
+// Internal endpoint for trusted sibling repos (recon, revenue-rec,
+// fa-amort, integrations) to post journal entries through the canonical
+// postJournalEntry path. Gated by INTERNAL_API_TOKEN — fails closed if
+// unset.
 //
 // This is the architectural boundary the portfolio narrative depends on:
 // "AI suggests; humans approve; ledger-core posts." Recon's adjustment-JE
 // Server Action POSTs here AFTER a human click — never the model's.
+//
+// IDEMPOTENCY: if the request includes a complete lineage triple
+// (sourceSystem + sourceRecordType + sourceRecordId), the endpoint first
+// looks for an existing entry with that exact triple. If found, returns
+// the existing entry's id/entryNumber WITHOUT inserting again, with
+// `wasDuplicate: true` in the response. This lets fa-amort's
+// per-(asset×book×month) JE posts and integrations' Plaid-transaction
+// JE posts be retried safely after partial failures.
+//
+// Race safety: a Postgres partial unique index on the triple (where all
+// three are not null) is added by `pnpm db:push:portable` — see
+// docs/portable-sql.md. Without that index, a true race between two
+// concurrent posts with the same triple may both succeed; with it, the
+// loser hits a unique violation which the endpoint catches and converts
+// to a duplicate-response.
 //
 // Wire format:
 //   POST /api/internal/journal-entries
@@ -16,7 +32,7 @@
 //         decimals as decimal strings)
 //
 // Success (200):
-//   { ok: true, id, entryNumber, bookCode }
+//   { ok: true, id, entryNumber, bookCode, wasDuplicate?: boolean }
 //
 // Failure (4xx/5xx):
 //   { ok: false, error: { code, message } }
@@ -149,6 +165,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // Idempotency check: full lineage triple → look up existing entry first.
+  const hasFullLineage =
+    !!body.sourceSystem && !!body.sourceRecordType && !!body.sourceRecordId;
+  if (hasFullLineage) {
+    const existing = await findByLineage(
+      body.sourceSystem!,
+      body.sourceRecordType!,
+      body.sourceRecordId!
+    );
+    if (existing) {
+      return NextResponse.json({
+        ok: true,
+        id: existing.id,
+        entryNumber: existing.entryNumber,
+        bookCode: existing.bookCode,
+        wasDuplicate: true,
+      });
+    }
+  }
+
   try {
     const result = await postJournalEntry(prisma, input);
     return NextResponse.json({
@@ -158,6 +194,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       bookCode: result.bookCode,
     });
   } catch (e) {
+    // Race-loss case: another concurrent request inserted the same
+    // (sourceSystem, sourceRecordType, sourceRecordId) triple between
+    // our lookup and our insert. Catch the unique-violation, refetch,
+    // and return as duplicate. Only relevant when the partial unique
+    // index exists; harmless otherwise.
+    if (hasFullLineage && isUniqueViolation(e)) {
+      const existing = await findByLineage(
+        body.sourceSystem!,
+        body.sourceRecordType!,
+        body.sourceRecordId!
+      );
+      if (existing) {
+        return NextResponse.json({
+          ok: true,
+          id: existing.id,
+          entryNumber: existing.entryNumber,
+          bookCode: existing.bookCode,
+          wasDuplicate: true,
+        });
+      }
+    }
     if (e instanceof UnbalancedEntryError) return err("UNBALANCED", e.message, 422);
     if (e instanceof InvalidLineError) return err("INVALID_LINE", e.message, 422);
     if (e instanceof UnknownAccountError) return err("UNKNOWN_ACCOUNT", e.message, 422);
@@ -172,6 +229,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       500
     );
   }
+}
+
+// Look up an existing entry by lineage triple. Returns null if none.
+async function findByLineage(
+  sourceSystem: string,
+  sourceRecordType: string,
+  sourceRecordId: string
+): Promise<{ id: string; entryNumber: string; bookCode: string } | null> {
+  const found = await prisma.journalEntry.findFirst({
+    where: { sourceSystem, sourceRecordType, sourceRecordId },
+    select: { id: true, entryNumber: true, book: { select: { code: true } } },
+  });
+  if (!found) return null;
+  return { id: found.id, entryNumber: found.entryNumber, bookCode: found.book.code };
+}
+
+// Postgres unique-violation detection. Prisma wraps it as P2002; raw
+// pg errors use code "23505". Either path here means we lost a race.
+function isUniqueViolation(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  // @ts-expect-error narrow without importing Prisma error namespace
+  const code = e.code as string | undefined;
+  return code === "P2002" || code === "23505";
 }
 
 export async function GET(): Promise<NextResponse> {
