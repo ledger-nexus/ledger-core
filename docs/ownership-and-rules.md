@@ -228,14 +228,35 @@ Owner does NOT enter into any of those checks. If you don't have GL module acces
 ## Build order summary
 
 Phases completed:
-- ✅ Schema (User, Queue, QueueMember, RecordEvent, ReassignmentRule, owner columns on JournalEntry)
-- ✅ Rules engine: types + evaluator + validator + executor + registry
-- ✅ Reassign service + orphan detection query
-- ✅ Tests (78 unit tests; pure-function, no DB needed)
+- ✅ v1.3: Schema (User, Queue, QueueMember, RecordEvent, ReassignmentRule, owner columns on JournalEntry)
+- ✅ v1.3: Rules engine: types + evaluator + validator + executor + registry
+- ✅ v1.3: Reassign service + orphan detection query
+- ✅ v1.3: 78 pure-function unit tests
+- ✅ v1.4: Integration layer (`src/lib/rules/integration.ts`) — `fireRulesForRecord`, `fireInsertRules`, `fireUpdateRules`, `loadActiveRules`. Bridges the engine to record lifecycle events.
+- ✅ v1.4: ArOpenItem adoption — second model with ownership; `openArItem` now fires `ON_INSERT` rules automatically and surfaces results to its caller
+- ✅ v1.4: 9 additional integration tests covering rule loading, declarative firing, first-match-wins, lock-skip semantics, reassignment failures, and the convenience wrappers
 
 Next phases (separate commits):
-- Adoption on additional record types (add `ownerId`/`ownerType`/audit columns)
-- Server Action wrappers that fire `execute()` on insert/update/transition
+- Adoption on additional record types (ApOpenItem, FixedAsset, Lease, RevenueContract)
+- Server Action wrappers in app routes that thread `actorUserId` from session
 - Admin dashboard + role-change preflight UI
 - Auth integration
 - Mirror to recon + revenue-rec
+- `ON_SCHEDULE` cron scanner
+- Notifications
+
+## How to wire a new record type into the rules engine
+
+Pattern, distilled from the ArOpenItem adoption:
+
+1. **Schema**: add `ownerId`, `ownerType`, `createdBy`, `updatedBy`, `reassignmentLockedAt` to the model. Add `RecordEvent` backref with a `@relation` name like `"<Model>Events"`. Add a corresponding nullable FK column on `RecordEvent`. Add `@@index([ownerId])`.
+
+2. **Reassign service** (`src/lib/ownership/reassign.ts`): add the model to the `ReassignableRecordType` union; add a `reassignXxx()` branch with status-machine check + transaction-scoped update + `RecordEvent` write; extend `clearReassignmentLock` switch.
+
+3. **Orphan detection** (`src/lib/ownership/orphan-detection.ts`): add scan block + extend `previewOrphansForUserChange` to query the new model.
+
+4. **Creation path**: in the sub-ledger / Server Action that creates the record, accept an `actorUserId` parameter, default `ownerId` to the actor (or null for system actors), `createdBy = updatedBy = actor`, then call `fireInsertRules(prisma, "<Model>", id, record, actor)` after the create succeeds.
+
+5. **Update path** (when adding): pass the changed-fields array to `fireUpdateRules`. The rules engine uses it to short-circuit ON_UPDATE rules that don't care about the changed fields — important for performance.
+
+The rules engine itself doesn't need changes when adding a new model. It's recordType-agnostic; the addition is purely at the integration boundary.

@@ -27,7 +27,7 @@
 import { PrismaClient } from "@prisma/client";
 import { type Target } from "../rules/types";
 
-export type ReassignableRecordType = "JournalEntry";
+export type ReassignableRecordType = "JournalEntry" | "ArOpenItem";
 
 export interface ReassignInput {
   recordType: ReassignableRecordType;
@@ -104,6 +104,8 @@ export async function reassignRecord(
   switch (input.recordType) {
     case "JournalEntry":
       return reassignJournalEntry(prisma, input, lock);
+    case "ArOpenItem":
+      return reassignArOpenItem(prisma, input, lock);
   }
 }
 
@@ -171,6 +173,76 @@ async function reassignJournalEntry(
   };
 }
 
+async function reassignArOpenItem(
+  prisma: PrismaClient,
+  input: ReassignInput,
+  lock: boolean
+): Promise<ReassignResult> {
+  const item = await prisma.arOpenItem.findUnique({
+    where: { id: input.recordId },
+    select: {
+      id: true,
+      status: true,
+      ownerId: true,
+      ownerType: true,
+    },
+  });
+  if (!item)
+    throw new ReassignError("RECORD_NOT_FOUND", `ArOpenItem ${input.recordId} not found`);
+
+  // Reassignable only in active states (OPEN, PARTIAL, REOPENED). Once an
+  // item is APPLIED / WRITTEN_OFF / VOID it's terminal and ownership is
+  // frozen — those records belong in the historical view, not anyone's
+  // active queue.
+  if (
+    item.status !== "OPEN" &&
+    item.status !== "PARTIAL" &&
+    item.status !== "REOPENED"
+  ) {
+    throw new ReassignError(
+      "RECORD_NOT_REASSIGNABLE",
+      `ArOpenItem status ${item.status} is terminal; ownership is frozen`
+    );
+  }
+
+  const previousOwner = { ownerId: item.ownerId, ownerType: item.ownerType };
+  const newOwnerType = input.newOwner.type;
+
+  const eventId = await prisma.$transaction(async (tx) => {
+    await tx.arOpenItem.update({
+      where: { id: input.recordId },
+      data: {
+        ownerId: input.newOwner.id,
+        ownerType: newOwnerType,
+        reassignmentLockedAt: lock ? new Date() : null,
+        updatedBy: input.actorUserId,
+      },
+    });
+    const event = await tx.recordEvent.create({
+      data: {
+        recordType: "ArOpenItem",
+        recordId: input.recordId,
+        eventType: "OWNER_CHANGED",
+        previousValue: previousOwner as object,
+        newValue: { ownerId: input.newOwner.id, ownerType: newOwnerType },
+        actorUserId: input.actorUserId === "system" ? null : input.actorUserId,
+        actorReason: input.reason,
+        arOpenItemId: input.recordId,
+      },
+      select: { id: true },
+    });
+    return event.id;
+  });
+
+  return {
+    ok: true,
+    recordId: input.recordId,
+    previousOwner,
+    newOwner: { ownerId: input.newOwner.id, ownerType: newOwnerType },
+    recordEventId: eventId,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Unlock action — explicit clear of reassignmentLockedAt.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -190,6 +262,12 @@ export async function clearReassignmentLock(
           data: { reassignmentLockedAt: null, updatedBy: actorUserId },
         });
         break;
+      case "ArOpenItem":
+        await tx.arOpenItem.update({
+          where: { id: recordId },
+          data: { reassignmentLockedAt: null, updatedBy: actorUserId },
+        });
+        break;
     }
     await tx.recordEvent.create({
       data: {
@@ -199,6 +277,7 @@ export async function clearReassignmentLock(
         actorUserId: actorUserId === "system" ? null : actorUserId,
         actorReason: reason,
         journalEntryId: recordType === "JournalEntry" ? recordId : null,
+        arOpenItemId: recordType === "ArOpenItem" ? recordId : null,
       },
     });
   });

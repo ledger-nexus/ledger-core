@@ -703,6 +703,15 @@ model ArOpenItem {
 
   applications ArApplication[]
 
+  // Ownership + audit. Same semantics as JournalEntry — see
+  // docs/ownership-and-rules.md. ownerId is workflow-routing (which
+  // collector is responsible), NOT access control.
+  ownerId       String?   @db.Uuid
+  ownerType     OwnerType @default(USER)
+  createdBy     String?
+  updatedBy     String?
+  reassignmentLockedAt DateTime?
+
   sourceSystem     String?
   sourceRecordType String?
   sourceRecordId   String?
@@ -713,6 +722,10 @@ model ArOpenItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Backref to RecordEvent audit log.
+  recordEvents RecordEvent[] @relation("ArOpenItemEvents")
+
+  @@index([ownerId])
   @@index([entityId, bookId, partyId, status])
   @@index([entityId, bookId, status, dueDate])
   @@map("ar_open_item")
@@ -1139,9 +1152,14 @@ model RecordEvent {
   // "manual:<freeform>". For lifecycle: "lifecycle:<event>".
   actorReason String
 
-  // Specific backref for JournalEntry; add more as ownership adoption grows.
+  // Specific backrefs per ownership-bearing model; add as adoption grows.
+  // Multiple FK columns rather than polymorphic — one is set per row based
+  // on recordType, the others are null. Indexed by (recordType, recordId)
+  // for queries that don't care about which model.
   journalEntryId String?       @db.Uuid
   journalEntry   JournalEntry? @relation("JournalEntryEvents", fields: [journalEntryId], references: [id])
+  arOpenItemId   String?       @db.Uuid
+  arOpenItem     ArOpenItem?   @relation("ArOpenItemEvents", fields: [arOpenItemId], references: [id])
 
   occurredAt DateTime @default(now())
 

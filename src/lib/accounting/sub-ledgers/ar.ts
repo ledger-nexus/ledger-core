@@ -12,6 +12,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../post-journal";
+import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 
 function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
   if (v === undefined || v === null) return new Decimal(0);
@@ -30,16 +31,33 @@ export interface OpenArItemInput {
   amount: Decimal | string | number;
   currencyCode: string;
   controlAccountCode: string; // typically "1200"
+  /**
+   * Acting user. Threaded through into createdBy + the default ownerId.
+   * Use "system" for engine-generated AR items (e.g. ERP-import paths
+   * that don't have a human actor). When auth lands, the Server Action
+   * layer pulls this from the session.
+   */
+  actorUserId?: string;
   sourceSystem?: string;
   sourceRecordType?: string;
   sourceRecordId?: string;
   sourcePayload?: unknown;
 }
 
+export interface OpenArItemResult {
+  id: string;
+  /**
+   * Result of the ON_INSERT rules fire. The AR item exists regardless of
+   * whether rules fired or reassigned — rule failures are non-fatal and
+   * surface here for the caller to log + handle.
+   */
+  rulesResult?: FireRulesResult;
+}
+
 export async function openArItem(
   prisma: PrismaClient,
   input: OpenArItemInput
-): Promise<{ id: string }> {
+): Promise<OpenArItemResult> {
   const [entity, book, party] = await Promise.all([
     prisma.legalEntity.findUniqueOrThrow({
       where: { code: input.entityCode },
@@ -59,6 +77,13 @@ export async function openArItem(
   ]);
 
   const amount = toDecimal(input.amount).toFixed(4);
+  const actor = input.actorUserId ?? "system";
+  // Default owner = creating actor (when they're a real user). When the
+  // actor is "system" (e.g. ERP-import paths with no human actor), leave
+  // ownerId null — the ON_INSERT rules engine fires below and may assign
+  // it to a queue. If no rule matches, the item lands in the dashboard's
+  // unassigned-queue view.
+  const isHumanActor = actor !== "system" && isUuid(actor);
 
   const item = await prisma.arOpenItem.create({
     data: {
@@ -74,14 +99,48 @@ export async function openArItem(
       currencyId: input.currencyCode,
       controlAccountCode: input.controlAccountCode,
       status: "OPEN",
+      ownerId: isHumanActor ? actor : null,
+      ownerType: "USER",
+      createdBy: actor,
+      updatedBy: actor,
       sourceSystem: input.sourceSystem,
       sourceRecordType: input.sourceRecordType,
       sourceRecordId: input.sourceRecordId,
       sourcePayload: (input.sourcePayload as any) ?? undefined,
     },
-    select: { id: true },
+    select: {
+      id: true,
+      status: true,
+      originalAmount: true,
+      currentBalance: true,
+      dueDate: true,
+      openedDate: true,
+      controlAccountCode: true,
+      entityId: true,
+      bookId: true,
+      partyId: true,
+      party: { select: { code: true, displayName: true } },
+    },
   });
-  return item;
+
+  // Fire ON_INSERT rules. The rules engine sees the just-created record
+  // (including joined party data) and may reassign to a queue based on
+  // criteria like "small-balance items → SELF_SERVICE_QUEUE" or
+  // "new-customer items → ONBOARDING_QUEUE". Rules see what the human
+  // would see — same DB filter (no privilege escalation through rules).
+  const rulesResult = await fireInsertRules(
+    prisma,
+    "ArOpenItem",
+    item.id,
+    item as unknown as Record<string, unknown>,
+    actor
+  );
+
+  return { id: item.id, rulesResult };
+}
+
+function isUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
 export interface ApplyArPaymentInput {
