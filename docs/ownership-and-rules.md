@@ -247,12 +247,14 @@ Phases completed:
   - `ar-default-routing` (priority 999) — catch-all routes everything else to AR_COLLECTIONS
   Plus one $25K Globex invoice added to the AR seed so the large-balance rule visibly fires on a real record. Acme's $5K invoices land in AR_COLLECTIONS via the catch-all; Globex's $25K invoice lands in AR_SENIOR_COLLECTORS via the priority-100 rule. Demo viewers see both branches of the cascade on `/ar`.
 - ✅ v1.7: **Admin orphan dashboard** at `/admin/orphans`. Surfaces records whose owner is no longer valid (deactivated users, deleted/inactive queues, null `ownerId`). Headline metrics by cause + type; per-row inline reassign to any active user or queue; age-coded display (>30 days red, >14 amber). Permission-gated by `requireAdmin` (email allowlist stub on `controller@northwind.test`). Generic `adminReassignAction` Server Action handles both `JournalEntry` and `ArOpenItem`. Sidebar gets an Admin section that only renders for admin users.
+- ✅ v1.8: **Admin user-lifecycle page** at `/admin/users` — the prevention-side counterpart to `/admin/orphans`. Lists every user with active/deactivated status + owned-record counts. Per-user deactivate flow includes an inline preflight panel: pick a queue or user to bulk-reassign records to BEFORE flipping `isActive`, or skip and create orphans intentionally for the dashboard to triage. `deactivateUserAction` / `reactivateUserAction` Server Actions gated by `requireAdmin`. Self-deactivation blocked. This is the in-miniature version of the broader role-change preflight UX from this doc — same shape will scale when role/permission removal needs it.
 
 Next phases (separate commits):
 - Adoption on additional record types (ApOpenItem, FixedAsset, Lease, RevenueContract)
 - Wire ON_INSERT rules into `postJournalEntry` (currently only ArOpenItem fires rules on create; JE creation should too)
-- Role-change preflight UI (the orphan dashboard's prevention-side counterpart)
+- Full role-change preflight (current `deactivateUserAction` handles user deactivation specifically; the broader case is "role/permission removal" which needs the roles+permissions catalog to land first)
 - Real auth integration (replace the stub) + real role/permission catalog (replace the email allowlist)
+- Queue management UI (currently no way to delete/deactivate queues without SQL)
 - Mirror to recon + revenue-rec
 - `ON_SCHEDULE` cron scanner — orphan detection materialized into a daily-scanned table
 - Notifications
