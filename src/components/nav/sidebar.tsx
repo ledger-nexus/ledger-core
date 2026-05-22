@@ -27,6 +27,13 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
     ],
   },
   {
+    label: "Close",
+    items: [
+      { href: "/periods", label: "Periods", hint: "open / closed" },
+      { href: "/reports/month-end", label: "Month-end review", hint: "TB + IS + BS" },
+    ],
+  },
+  {
     label: "Reports",
     items: [
       { href: "/reports/trial-balance", label: "Trial balance" },
