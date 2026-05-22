@@ -440,9 +440,26 @@ model JournalEntry {
   arApplications    ArApplication[] @relation("ArAppliedBy")
   apApplications    ApApplication[] @relation("ApAppliedBy")
 
+  // Ownership + audit. ownerId is the default-responsible-party; defaults to
+  // createdBy at insert and only changes via explicit reassignment (manual or
+  // rule-fired). In ERP modules, ownerId is informational/workflow — module
+  // permissions handle access control, NOT this field. See
+  // docs/ownership-and-rules.md for the full semantic.
+  ownerId       String?   @db.Uuid
+  ownerType     OwnerType @default(USER)
+  updatedBy     String?
+  updatedAt     DateTime  @default(now()) @updatedAt
+  // When set, the reassignment-rules engine SKIPS this record. Cleared
+  // explicitly by an admin or by a state transition; never auto-cleared.
+  reassignmentLockedAt DateTime?
+
   createdAt DateTime @default(now())
   createdBy String?
 
+  // Backref to ownership events.
+  recordEvents RecordEvent[] @relation("JournalEntryEvents")
+
+  @@index([ownerId])
   @@index([entityId, bookId, documentDate])
   @@index([entityId, bookId, periodId])
   @@index([sourceSystem, sourceRecordType, sourceRecordId])
@@ -1029,6 +1046,175 @@ model RevenueContractBookAttributes {
 enum RecognitionBasis {
   ACCRUAL
   CASH
+}
+
+// =========================================================================
+// Ownership, queues, audit log, and reassignment rules engine
+// =========================================================================
+//
+// Universal ownership: every transactional record gets ownerId (User OR Queue,
+// discriminated by ownerType), defaults to createdBy at insert, mutable only
+// via explicit reassignment. Audit columns (createdBy, updatedBy, updatedAt)
+// are separate and immutable-or-write-only. See docs/ownership-and-rules.md.
+//
+// Sharing semantics in ERP modules: ownerId is for workflow routing and "my
+// queue" views, NOT for access control. Module/operation permissions and
+// entity/book scope handle sharing. Future CRM modules MAY use ownership as
+// a sharing primitive following Salesforce conventions — that's a per-module
+// choice and must be documented when those modules land.
+
+enum OwnerType {
+  USER
+  QUEUE
+}
+
+// ownerId is polymorphic (User OR Queue, discriminated by ownerType), so
+// JournalEntry doesn't have a real FK relation to User — only ownerType=USER
+// rows point at User.id. The application enforces the polymorphic invariant.
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String    @unique
+  displayName  String
+  isActive     Boolean   @default(true)
+  deactivatedAt DateTime?
+
+  queueMemberships QueueMember[]
+  recordEvents     RecordEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("app_user")
+}
+
+model Queue {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String   @unique // e.g. "AR_COLLECTIONS", "GL_UNASSIGNED"
+  name        String
+  description String?
+  // When isUnassignedFallback is true, this queue is the module's dead-letter
+  // queue — rules fall back to it when their primary target can't resolve.
+  // Exactly one queue per module should carry this flag.
+  isUnassignedFallback Boolean @default(false)
+  isActive    Boolean  @default(true)
+  deletedAt   DateTime?
+
+  members QueueMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("queue")
+}
+
+model QueueMember {
+  queueId String @db.Uuid
+  queue   Queue  @relation(fields: [queueId], references: [id])
+  userId  String @db.Uuid
+  user    User   @relation(fields: [userId], references: [id])
+
+  joinedAt DateTime @default(now())
+
+  @@id([queueId, userId])
+  @@map("queue_member")
+}
+
+// Universal audit log for ownership changes + state-machine transitions.
+// One row per event; append-only; never edited or deleted.
+//
+// recordType is a stable string matching the Prisma model name
+// ("JournalEntry", "ArOpenItem", etc.). recordId is the target record's UUID.
+// previousValue + newValue are flexible JSON to handle different event shapes
+// (owner change carries ownerId; state change carries status; etc.).
+model RecordEvent {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recordType  String          // e.g. "JournalEntry"
+  recordId    String          @db.Uuid
+  eventType   RecordEventType
+  previousValue Json?
+  newValue      Json?
+  actorUserId String?         @db.Uuid
+  actor       User?           @relation(fields: [actorUserId], references: [id])
+  // For rule-fired events: "rule:<ruleId>:v<version>". For manual:
+  // "manual:<freeform>". For lifecycle: "lifecycle:<event>".
+  actorReason String
+
+  // Specific backref for JournalEntry; add more as ownership adoption grows.
+  journalEntryId String?       @db.Uuid
+  journalEntry   JournalEntry? @relation("JournalEntryEvents", fields: [journalEntryId], references: [id])
+
+  occurredAt DateTime @default(now())
+
+  @@index([recordType, recordId, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@map("record_event")
+}
+
+enum RecordEventType {
+  CREATED
+  OWNER_CHANGED
+  STATE_CHANGED
+  REASSIGNMENT_LOCKED
+  REASSIGNMENT_UNLOCKED
+  ABANDONED
+}
+
+// Reassignment rules. Versioned + audited, same discipline as PostingRule.
+// criteriaJson holds the DSL tree (see src/lib/rules/types.ts for the shape).
+// First-match-wins by priority (lower = earlier). Validated at write time
+// via src/lib/rules/validator.ts.
+model ReassignmentRule {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleId      String            // human-readable, stable across versions
+  ruleVersion Int               @default(1)
+  recordType  String            // "JournalEntry", "ArOpenItem", etc.
+  trigger     ReassignmentTrigger
+  // For ON_UPDATE: which fields changing should re-evaluate this rule.
+  // Empty array = evaluate on any field change (use sparingly).
+  triggerFields String[]        @default([])
+  // For ON_STATE_TRANSITION: which (from, to) state pair.
+  triggerStateFrom String?
+  triggerStateTo   String?
+  // For ON_USER_LIFECYCLE: which event triggers ("USER_DEACTIVATED", "ROLE_REMOVED").
+  triggerLifecycleEvent String?
+  // For ON_SCHEDULE: cron expression (UTC).
+  triggerSchedule String?
+  priority    Int               // lower fires earlier; ties = validation error
+  // For declarative rules.
+  criteriaJson Json?
+  // For code rules. References a function name registered in
+  // src/lib/rules/registry.ts. NOT user-editable — code review required.
+  ruleType    ReassignmentRuleType @default(DECLARATIVE)
+  codeImplementation String?
+  // Target: USER, QUEUE, or DERIVED (code-rule decides at evaluation time).
+  targetType     OwnerType?
+  targetId       String?       @db.Uuid
+  // Notification preferences (optional).
+  notifyOwner    Boolean       @default(false)
+  notifyTarget   Boolean       @default(true)
+  notifyTemplateId String?
+
+  isActive     Boolean   @default(true)
+  authoredBy   String?
+  authoredAt   DateTime  @default(now())
+  supersededAt DateTime?
+
+  @@unique([ruleId, ruleVersion])
+  @@index([recordType, isActive, priority])
+  @@map("reassignment_rule")
+}
+
+enum ReassignmentRuleType {
+  DECLARATIVE
+  CODE
+}
+
+enum ReassignmentTrigger {
+  ON_INSERT
+  ON_UPDATE
+  ON_STATE_TRANSITION
+  ON_SCHEDULE
+  ON_USER_LIFECYCLE
 }
 
 // =========================================================================
