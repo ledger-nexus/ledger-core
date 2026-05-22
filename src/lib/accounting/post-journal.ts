@@ -35,6 +35,7 @@ import {
   PeriodClosedError,
   AccountBookScopeError,
 } from "./types";
+import { fireInsertRules, type FireRulesResult } from "../rules/integration";
 
 // Configure Decimal.js for accounting:
 //   - 28 digits of precision (way more than we'll ever need)
@@ -52,7 +53,15 @@ function toDecimal(v: Decimal | string | number | undefined): Decimal {
 export async function postJournalEntry(
   prisma: PrismaClient,
   input: JournalEntryInput
-): Promise<{ id: string; entryNumber: string; bookCode: string }> {
+): Promise<{
+  id: string;
+  entryNumber: string;
+  bookCode: string;
+  // Populated only when input.ownerUserId was set AND ON_INSERT rules
+  // fired against the new entry. Undefined for seed / system / import
+  // paths that leave ownerUserId null.
+  rulesResult?: FireRulesResult;
+}> {
   if (input.lines.length < 2) {
     throw new InvalidLineError(
       `Journal entry must have at least 2 lines (got ${input.lines.length})`
@@ -233,7 +242,7 @@ export async function postJournalEntry(
 
   // ---- 7. Atomic write ---------------------------------------------------
 
-  return await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // entryNumber is sequential per (entity, book). Format: ENTITY-BOOK-NNNNN.
     // count() at portfolio scale is fine; production would use a sequence.
     const existingCount = await tx.journalEntry.count({
@@ -256,6 +265,9 @@ export async function postJournalEntry(
         status: "POSTED",
         createdBy: input.createdBy,
         updatedBy: input.createdBy,
+        ownerId: input.ownerUserId,
+        // ownerType defaults to USER per the schema; explicit for clarity.
+        ownerType: "USER",
         sourceSystem: input.sourceSystem,
         sourceRecordType: input.sourceRecordType,
         sourceRecordId: input.sourceRecordId,
@@ -284,4 +296,61 @@ export async function postJournalEntry(
 
     return { id: entry.id, entryNumber: entry.entryNumber, bookCode: book.code };
   });
+
+  // Fire ON_INSERT rules AFTER the transaction commits. The JE write is
+  // the substrate guarantee — rule firing is post-hoc routing. A rule
+  // failure must NOT roll back the entry. We only invoke when a real
+  // user is on the hook (ownerUserId set) — seed/import paths skip.
+  let rulesResult: FireRulesResult | undefined;
+  if (input.ownerUserId) {
+    try {
+      // Load the entry shape rules might match on (memo, source, etc.).
+      const fullEntry = await prisma.journalEntry.findUniqueOrThrow({
+        where: { id: result.id },
+        select: {
+          id: true,
+          entryNumber: true,
+          memo: true,
+          source: true,
+          status: true,
+          documentDate: true,
+          postingDate: true,
+          currencyId: true,
+          ownerId: true,
+          ownerType: true,
+          reassignmentLockedAt: true,
+          createdBy: true,
+          entity: { select: { code: true } },
+          book: { select: { code: true } },
+        },
+      });
+      // Total debits — derived from the lines we just wrote. Used by
+      // rules that route large-amount entries to controller approval.
+      const totalDebits = normalizedLines
+        .reduce((acc, l) => acc.plus(l.debit), new Decimal(0))
+        .toFixed(2);
+      const recordForRules = {
+        ...fullEntry,
+        totalDebits,
+        bookCode: fullEntry.book.code,
+        entityCode: fullEntry.entity.code,
+      };
+      rulesResult = await fireInsertRules(
+        prisma,
+        "JournalEntry",
+        result.id,
+        recordForRules as unknown as Record<string, unknown>,
+        input.ownerUserId
+      );
+    } catch (e) {
+      // Non-fatal: log and continue. The JE exists; rule failure is a
+      // routing issue, not a substrate write issue.
+      console.error(
+        `JE ${result.entryNumber} posted but ON_INSERT rules failed:`,
+        e
+      );
+    }
+  }
+
+  return { ...result, rulesResult };
 }

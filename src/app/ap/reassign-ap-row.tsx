@@ -1,15 +1,10 @@
 "use client";
 
-// Per-row reassign control on the admin orphan dashboard. Generic over
-// recordType (JournalEntry | ArOpenItem) — both use the same Server
-// Action (adminReassignAction).
-//
-// UI: the row's owner cell stays compact by default; clicking "reassign"
-// expands an inline dropdown of all available users + queues. Selecting
-// one fires the action and collapses on success.
+// AP version of ReassignArRow. Same shape, different Server Action.
 
 import { useState, useTransition } from "react";
-import { adminReassignAction } from "@/app/actions/admin-reassign";
+import { Badge } from "@/components/ui/badge";
+import { reassignApItemAction } from "@/app/actions/reassign-ap-item";
 
 export interface UserOption {
   id: string;
@@ -17,17 +12,27 @@ export interface UserOption {
 }
 export interface QueueOption {
   id: string;
+  code: string;
   name: string;
 }
 
 interface Props {
-  recordType: "JournalEntry" | "ArOpenItem" | "ApOpenItem";
-  recordId: string;
+  openItemId: string;
+  ownerLabel: string | null;
+  ownerType: "USER" | "QUEUE" | null;
+  lockedAt: Date | null;
   users: UserOption[];
   queues: QueueOption[];
 }
 
-export function OrphanReassignRow({ recordType, recordId, users, queues }: Props) {
+export function ReassignApRow({
+  openItemId,
+  ownerLabel,
+  ownerType,
+  lockedAt,
+  users,
+  queues,
+}: Props) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,12 +44,10 @@ export function OrphanReassignRow({ recordType, recordId, users, queues }: Props
     if (type !== "USER" && type !== "QUEUE") return;
     setError(null);
     startTransition(async () => {
-      const result = await adminReassignAction({
-        recordType,
-        recordId,
+      const result = await reassignApItemAction({
+        openItemId,
         newOwnerType: type,
         newOwnerId: id,
-        reason: "admin:orphan repair",
       });
       if (!result.ok) {
         setError(result.message ?? "Reassign failed");
@@ -55,7 +58,24 @@ export function OrphanReassignRow({ recordType, recordId, users, queues }: Props
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1 text-xs">
+      <div className="flex items-center gap-1.5">
+        {ownerLabel ? (
+          <>
+            <Badge tone={ownerType === "QUEUE" ? "info" : "neutral"}>
+              {ownerType === "QUEUE" ? "queue" : "user"}
+            </Badge>
+            <span className="text-ink-700">{ownerLabel}</span>
+          </>
+        ) : (
+          <span className="text-ink-400">unassigned</span>
+        )}
+        {lockedAt ? (
+          <span className="text-[10px] text-amber-700" title="Manual reassignment — rules skip this record">
+            🔒
+          </span>
+        ) : null}
+      </div>
       {open ? (
         <select
           onChange={onPick}
@@ -85,7 +105,7 @@ export function OrphanReassignRow({ recordType, recordId, users, queues }: Props
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="self-start rounded border border-ink-200 px-2 py-0.5 text-[11px] text-ink-700 hover:bg-ink-100"
+          className="self-start text-[10px] text-accent-600 hover:underline"
         >
           reassign
         </button>

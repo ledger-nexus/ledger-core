@@ -52,6 +52,7 @@ export async function applyArPaymentAction(
       sourceRecordType: "Payment",
       sourceRecordId: `MANUAL-PMT-${item.id.slice(0, 8)}`,
       createdBy: currentUser.email,
+      ownerUserId: currentUser.id,
       lines: [
         { accountCode: cashAccountCode, debit: amount, description: "Cash receipt" },
         {

@@ -780,6 +780,14 @@ model ApOpenItem {
 
   applications ApApplication[]
 
+  // Ownership + audit. Same semantics as ArOpenItem / JournalEntry — see
+  // docs/ownership-and-rules.md. AP collector / approval workflow uses this.
+  ownerId       String?   @db.Uuid
+  ownerType     OwnerType @default(USER)
+  createdBy     String?
+  updatedBy     String?
+  reassignmentLockedAt DateTime?
+
   sourceSystem     String?
   sourceRecordType String?
   sourceRecordId   String?
@@ -790,6 +798,10 @@ model ApOpenItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Backref to RecordEvent audit log.
+  recordEvents RecordEvent[] @relation("ApOpenItemEvents")
+
+  @@index([ownerId])
   @@index([entityId, bookId, partyId, status])
   @@index([entityId, bookId, status, dueDate])
   @@map("ap_open_item")
@@ -1160,6 +1172,8 @@ model RecordEvent {
   journalEntry   JournalEntry? @relation("JournalEntryEvents", fields: [journalEntryId], references: [id])
   arOpenItemId   String?       @db.Uuid
   arOpenItem     ArOpenItem?   @relation("ArOpenItemEvents", fields: [arOpenItemId], references: [id])
+  apOpenItemId   String?       @db.Uuid
+  apOpenItem     ApOpenItem?   @relation("ApOpenItemEvents", fields: [apOpenItemId], references: [id])
 
   occurredAt DateTime @default(now())
 

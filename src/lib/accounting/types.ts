@@ -72,11 +72,17 @@ export interface JournalEntryInput {
 
   lines: JournalLineInput[];
 
-  // Acting user. Threaded into JournalEntry.createdBy + the default
-  // ownerId. Use a string identifier (UUID or email — caller's choice).
-  // Native callers leave null for system-generated entries; Server
-  // Actions pass the current user from session.
+  // Acting user — audit string. Threaded into JournalEntry.createdBy.
+  // Free-form (UUID, email, "SEED", "QBO_IMPORT", etc.) used for
+  // human-readable audit display. NOT used to derive ownership.
   createdBy?: string;
+
+  // Explicit owner. When set to a User UUID, the JE's ownerId is
+  // populated and ON_INSERT rules fire after the entry posts. When
+  // null (the default), the JE is left ownerless and ON_INSERT rules
+  // do NOT fire — appropriate for seed paths and system-generated
+  // entries. Server Action callers pass currentUser.id here.
+  ownerUserId?: string;
 
   // Lineage — populated on ERP import. v1 native callers leave null.
   sourceSystem?: string;

@@ -10,11 +10,16 @@
 
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
+import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 
 function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
   if (v === undefined || v === null) return new Decimal(0);
   if (v instanceof Decimal) return v;
   return new Decimal(v);
+}
+
+function isUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
 export interface OpenApItemInput {
@@ -28,16 +33,32 @@ export interface OpenApItemInput {
   amount: Decimal | string | number;
   currencyCode: string;
   controlAccountCode: string; // typically "2000"
+  /**
+   * Acting user. Threaded into createdBy + the default ownerId. "system"
+   * for engine-generated AP items (ERP imports). Real Server Action
+   * callers pass currentUser.id.
+   */
+  actorUserId?: string;
   sourceSystem?: string;
   sourceRecordType?: string;
   sourceRecordId?: string;
   sourcePayload?: unknown;
 }
 
+export interface OpenApItemResult {
+  id: string;
+  /**
+   * Result of the ON_INSERT rules fire. The AP item exists regardless of
+   * whether rules fired or reassigned — rule failures are non-fatal and
+   * surface here for the caller to log + handle.
+   */
+  rulesResult?: FireRulesResult;
+}
+
 export async function openApItem(
   prisma: PrismaClient,
   input: OpenApItemInput
-): Promise<{ id: string }> {
+): Promise<OpenApItemResult> {
   const [entity, book, party] = await Promise.all([
     prisma.legalEntity.findUniqueOrThrow({
       where: { code: input.entityCode },
@@ -57,6 +78,8 @@ export async function openApItem(
   ]);
 
   const amount = toDecimal(input.amount).toFixed(4);
+  const actor = input.actorUserId ?? "system";
+  const isHumanActor = actor !== "system" && isUuid(actor);
 
   const item = await prisma.apOpenItem.create({
     data: {
@@ -72,14 +95,42 @@ export async function openApItem(
       currencyId: input.currencyCode,
       controlAccountCode: input.controlAccountCode,
       status: "OPEN",
+      ownerId: isHumanActor ? actor : null,
+      ownerType: "USER",
+      createdBy: actor,
+      updatedBy: actor,
       sourceSystem: input.sourceSystem,
       sourceRecordType: input.sourceRecordType,
       sourceRecordId: input.sourceRecordId,
       sourcePayload: (input.sourcePayload as any) ?? undefined,
     },
-    select: { id: true },
+    select: {
+      id: true,
+      status: true,
+      originalAmount: true,
+      currentBalance: true,
+      dueDate: true,
+      openedDate: true,
+      controlAccountCode: true,
+      entityId: true,
+      bookId: true,
+      partyId: true,
+      party: { select: { code: true, displayName: true } },
+    },
   });
-  return item;
+
+  // Fire ON_INSERT rules. Mirror of openArItem — rules see the just-created
+  // record with party data and may route to a queue (e.g., utility-vendor
+  // invoices to a utilities approval queue, large-amount AP to controller).
+  const rulesResult = await fireInsertRules(
+    prisma,
+    "ApOpenItem",
+    item.id,
+    item as unknown as Record<string, unknown>,
+    actor
+  );
+
+  return { id: item.id, rulesResult };
 }
 
 export interface ApplyApPaymentInput {

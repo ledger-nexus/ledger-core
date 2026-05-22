@@ -723,16 +723,25 @@ export async function seedTestUsersAndQueues(
 export async function seedReassignmentRules(
   prisma: PrismaClient
 ): Promise<void> {
-  const seniorQueue = await prisma.queue.findUniqueOrThrow({
+  const arSenior = await prisma.queue.findUniqueOrThrow({
     where: { code: "AR_SENIOR_COLLECTORS" },
     select: { id: true },
   });
-  const collectionsQueue = await prisma.queue.findUniqueOrThrow({
+  const arCollections = await prisma.queue.findUniqueOrThrow({
     where: { code: "AR_COLLECTIONS" },
+    select: { id: true },
+  });
+  const glApproval = await prisma.queue.findUniqueOrThrow({
+    where: { code: "GL_APPROVAL" },
+    select: { id: true },
+  });
+  const glUnassigned = await prisma.queue.findUniqueOrThrow({
+    where: { code: "GL_UNASSIGNED" },
     select: { id: true },
   });
 
   const specs = [
+    // ─── AR rules (from v1.6) ────────────────────────────────────────────
     {
       ruleId: "ar-large-balance-to-senior",
       ruleVersion: 1,
@@ -746,7 +755,7 @@ export async function seedReassignmentRules(
         value: 10000,
       },
       targetType: "QUEUE" as const,
-      targetId: seniorQueue.id,
+      targetId: arSenior.id,
       isActive: true,
       authoredBy: "seed",
     },
@@ -757,11 +766,63 @@ export async function seedReassignmentRules(
       trigger: "ON_INSERT" as const,
       priority: 999,
       ruleType: "DECLARATIVE" as const,
-      // Empty AND is the "match everything" idiom — used for catch-all
-      // routing rules.
       criteriaJson: { op: "AND", clauses: [] },
       targetType: "QUEUE" as const,
-      targetId: collectionsQueue.id,
+      targetId: arCollections.id,
+      isActive: true,
+      authoredBy: "seed",
+    },
+    // ─── JE rules (new in v1.9) ──────────────────────────────────────────
+    // Large-amount JEs route to the controller approval queue. The
+    // "totalDebits" field is computed by postJournalEntry at fire time
+    // (sum of all line debits) — used to gate big entries on review.
+    {
+      ruleId: "je-large-amount-to-controller",
+      ruleVersion: 1,
+      recordType: "JournalEntry",
+      trigger: "ON_INSERT" as const,
+      priority: 100,
+      ruleType: "DECLARATIVE" as const,
+      criteriaJson: {
+        field: "totalDebits",
+        op: "GT",
+        value: 50000,
+      },
+      targetType: "QUEUE" as const,
+      targetId: glApproval.id,
+      isActive: true,
+      authoredBy: "seed",
+    },
+    // Catch-all: any JE that didn't match a higher-priority rule lands
+    // in GL_UNASSIGNED. This means the engine NEVER leaves a JE owner-
+    // less when ownerUserId was set — there's always somewhere for the
+    // entry to land for human review.
+    {
+      ruleId: "je-default-routing",
+      ruleVersion: 1,
+      recordType: "JournalEntry",
+      trigger: "ON_INSERT" as const,
+      priority: 999,
+      ruleType: "DECLARATIVE" as const,
+      criteriaJson: { op: "AND", clauses: [] },
+      targetType: "QUEUE" as const,
+      targetId: glUnassigned.id,
+      isActive: true,
+      authoredBy: "seed",
+    },
+    // ─── AP rules (new in v1.9) ──────────────────────────────────────────
+    // No AP-specific queues exist yet; AP items route to GL_UNASSIGNED as
+    // a starting point. Real firms add an AP_INVOICES + AP_APPROVAL pair.
+    {
+      ruleId: "ap-default-routing",
+      ruleVersion: 1,
+      recordType: "ApOpenItem",
+      trigger: "ON_INSERT" as const,
+      priority: 999,
+      ruleType: "DECLARATIVE" as const,
+      criteriaJson: { op: "AND", clauses: [] },
+      targetType: "QUEUE" as const,
+      targetId: glUnassigned.id,
       isActive: true,
       authoredBy: "seed",
     },
