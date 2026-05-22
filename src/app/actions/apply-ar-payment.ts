@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { applyArPayment } from "@/lib/accounting/sub-ledgers/ar";
+import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
 
 export type ApplyArPaymentState =
   | { ok?: undefined; error?: undefined }
@@ -19,6 +20,7 @@ export async function applyArPaymentAction(
   formData: FormData
 ): Promise<ApplyArPaymentState> {
   try {
+    const currentUser = await requireCurrentUser();
     const openItemId = String(formData.get("openItemId") ?? "");
     const cashAccountCode = String(formData.get("cashAccountCode") ?? "1000");
     const amount = String(formData.get("amount") ?? "0");
@@ -49,6 +51,7 @@ export async function applyArPaymentAction(
       source: "MANUAL",
       sourceRecordType: "Payment",
       sourceRecordId: `MANUAL-PMT-${item.id.slice(0, 8)}`,
+      createdBy: currentUser.email,
       lines: [
         { accountCode: cashAccountCode, debit: amount, description: "Cash receipt" },
         {
@@ -71,6 +74,9 @@ export async function applyArPaymentAction(
     revalidatePath("/", "layout");
     return { ok: true, entryNumber: entry.entryNumber };
   } catch (e) {
+    if (e instanceof NotAuthenticatedError) {
+      return { ok: false, error: e.message };
+    }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Unknown error applying payment",

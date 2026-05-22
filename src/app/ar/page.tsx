@@ -10,10 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { ApplyArPaymentRow } from "./apply-payment-row";
+import { ReassignArRow } from "./reassign-ar-row";
 
 export default async function ArPage() {
   const scope = getScope();
-  const [openItems, total, cashAccounts] = await Promise.all([
+  const [openItems, total, cashAccounts, users, queues] = await Promise.all([
     prisma.arOpenItem.findMany({
       where: {
         entity: { code: scope.entityCode },
@@ -30,6 +31,9 @@ export default async function ArPage() {
         currentBalance: true,
         status: true,
         currencyId: true,
+        ownerId: true,
+        ownerType: true,
+        reassignmentLockedAt: true,
         party: { select: { code: true, displayName: true } },
       },
     }),
@@ -43,7 +47,22 @@ export default async function ArPage() {
       orderBy: { code: "asc" },
       select: { code: true, name: true },
     }),
+    prisma.user.findMany({
+      where: { isActive: true },
+      select: { id: true, displayName: true },
+      orderBy: { displayName: "asc" },
+    }),
+    prisma.queue.findMany({
+      where: { isActive: true, deletedAt: null },
+      select: { id: true, code: true, name: true },
+      orderBy: { code: "asc" },
+    }),
   ]);
+
+  // Resolve owner display labels (user displayName or queue name).
+  const ownerLabels = new Map<string, { label: string; type: "USER" | "QUEUE" }>();
+  for (const u of users) ownerLabels.set(u.id, { label: u.displayName, type: "USER" });
+  for (const q of queues) ownerLabels.set(q.id, { label: q.name, type: "QUEUE" });
 
   return (
     <div className="flex flex-col gap-6">
@@ -79,39 +98,53 @@ export default async function ArPage() {
                   <TH>Status</TH>
                   <TH className="text-right">Original</TH>
                   <TH className="text-right">Balance</TH>
+                  <TH>Owner</TH>
                   <TH>Apply payment</TH>
                 </tr>
               </THead>
               <TBody>
-                {openItems.map((item) => (
-                  <TR key={item.id}>
-                    <TD className="font-mono text-xs text-ink-700">
-                      {item.referenceNumber ?? item.id.slice(0, 8)}
-                    </TD>
-                    <TD>
-                      <div className="text-ink-900">{item.party.displayName}</div>
-                      <div className="text-[11px] text-ink-500">{item.party.code}</div>
-                    </TD>
-                    <TD className="text-ink-500">{formatDate(item.openedDate)}</TD>
-                    <TD className="text-ink-500">{formatDate(item.dueDate)}</TD>
-                    <TD>
-                      <Badge tone={item.status === "PARTIAL" ? "warning" : "info"}>{item.status}</Badge>
-                    </TD>
-                    <TD className="amount-cell text-right text-ink-500">
-                      {formatMoney(item.originalAmount.toString())}
-                    </TD>
-                    <TD className="amount-cell text-right font-semibold text-ink-900">
-                      {formatMoney(item.currentBalance.toString())}
-                    </TD>
-                    <TD>
-                      <ApplyArPaymentRow
-                        openItemId={item.id}
-                        defaultAmount={new Decimal(item.currentBalance.toString()).toFixed(2)}
-                        cashAccounts={cashAccounts}
-                      />
-                    </TD>
-                  </TR>
-                ))}
+                {openItems.map((item) => {
+                  const owner = item.ownerId ? ownerLabels.get(item.ownerId) : null;
+                  return (
+                    <TR key={item.id}>
+                      <TD className="font-mono text-xs text-ink-700">
+                        {item.referenceNumber ?? item.id.slice(0, 8)}
+                      </TD>
+                      <TD>
+                        <div className="text-ink-900">{item.party.displayName}</div>
+                        <div className="text-[11px] text-ink-500">{item.party.code}</div>
+                      </TD>
+                      <TD className="text-ink-500">{formatDate(item.openedDate)}</TD>
+                      <TD className="text-ink-500">{formatDate(item.dueDate)}</TD>
+                      <TD>
+                        <Badge tone={item.status === "PARTIAL" ? "warning" : "info"}>{item.status}</Badge>
+                      </TD>
+                      <TD className="amount-cell text-right text-ink-500">
+                        {formatMoney(item.originalAmount.toString())}
+                      </TD>
+                      <TD className="amount-cell text-right font-semibold text-ink-900">
+                        {formatMoney(item.currentBalance.toString())}
+                      </TD>
+                      <TD>
+                        <ReassignArRow
+                          openItemId={item.id}
+                          ownerLabel={owner?.label ?? null}
+                          ownerType={owner?.type ?? item.ownerType}
+                          lockedAt={item.reassignmentLockedAt}
+                          users={users}
+                          queues={queues}
+                        />
+                      </TD>
+                      <TD>
+                        <ApplyArPaymentRow
+                          openItemId={item.id}
+                          defaultAmount={new Decimal(item.currentBalance.toString()).toFixed(2)}
+                          cashAccounts={cashAccounts}
+                        />
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           )}

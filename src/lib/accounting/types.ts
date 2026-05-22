@@ -72,6 +72,12 @@ export interface JournalEntryInput {
 
   lines: JournalLineInput[];
 
+  // Acting user. Threaded into JournalEntry.createdBy + the default
+  // ownerId. Use a string identifier (UUID or email — caller's choice).
+  // Native callers leave null for system-generated entries; Server
+  // Actions pass the current user from session.
+  createdBy?: string;
+
   // Lineage — populated on ERP import. v1 native callers leave null.
   sourceSystem?: string;
   sourceRecordType?: string;

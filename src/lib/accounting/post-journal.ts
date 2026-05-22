@@ -254,6 +254,8 @@ export async function postJournalEntry(
         fxRate: fxRate.toFixed(10),
         source: input.source ?? "MANUAL",
         status: "POSTED",
+        createdBy: input.createdBy,
+        updatedBy: input.createdBy,
         sourceSystem: input.sourceSystem,
         sourceRecordType: input.sourceRecordType,
         sourceRecordId: input.sourceRecordId,

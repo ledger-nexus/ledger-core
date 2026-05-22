@@ -580,6 +580,7 @@ export async function seedNorthwind(prisma: PrismaClient): Promise<void> {
   await seedMasterData(prisma);
   await seedAccounts(prisma);
   await seedParties(prisma);
+  await seedTestUsersAndQueues(prisma);
   await setupFixedAssets(prisma);
   await setupRevenueContract(prisma);
   await setupLease(prisma);
@@ -589,6 +590,112 @@ export async function seedNorthwind(prisma: PrismaClient): Promise<void> {
   await seedSmithCoApCycle(prisma);
   await seedGlobexPrepayAndRecognition(prisma);
   await runMonthEndRunners(prisma);
+}
+
+// Test users + queues for the v1.5 ownership UI. Idempotent — upserts by
+// email / code. Production replaces this with a real user-provisioning
+// flow (NextAuth JIT, WorkOS SSO, etc.).
+//
+// The four roles here cover the typical small-firm accounting org:
+//   - Controller: full authority, can close periods, approves everything
+//   - GL Accountant: posts JEs, runs reports
+//   - AR Clerk: works open AR items, applies payments, collections
+//   - External Auditor: read-only with time-bounded access (modeled by
+//     a deactivation date set in a future commit when the role-grants
+//     subsystem lands; for now the user just exists)
+//
+// Queues represent functional teams that records can be assigned to. Used
+// by reassignment rules ("escalate to senior collectors" → senior queue).
+export async function seedTestUsersAndQueues(
+  prisma: PrismaClient
+): Promise<void> {
+  // ─── Users ────────────────────────────────────────────────────────────────
+  const userSpecs = [
+    { email: "controller@northwind.test", displayName: "Carla Controller" },
+    { email: "gl@northwind.test", displayName: "Greg GL Accountant" },
+    { email: "ar-clerk@northwind.test", displayName: "Anna AR Clerk" },
+    { email: "auditor@deloitte.test", displayName: "Devon Auditor (Deloitte)" },
+  ];
+  for (const spec of userSpecs) {
+    await prisma.user.upsert({
+      where: { email: spec.email },
+      create: spec,
+      update: { displayName: spec.displayName, isActive: true },
+    });
+  }
+
+  // ─── Queues ───────────────────────────────────────────────────────────────
+  const queueSpecs = [
+    {
+      code: "AR_COLLECTIONS",
+      name: "AR Collections",
+      description: "Standard AR collection queue — 0–60 days overdue",
+      isUnassignedFallback: false,
+    },
+    {
+      code: "AR_SENIOR_COLLECTORS",
+      name: "AR Senior Collectors",
+      description: "Escalation queue — 60+ days overdue, senior staff only",
+      isUnassignedFallback: false,
+    },
+    {
+      code: "AR_UNASSIGNED",
+      name: "AR Unassigned",
+      description: "Fallback queue for orphaned AR items",
+      isUnassignedFallback: true,
+    },
+    {
+      code: "GL_APPROVAL",
+      name: "GL Approval",
+      description: "JEs awaiting controller sign-off",
+      isUnassignedFallback: false,
+    },
+    {
+      code: "GL_UNASSIGNED",
+      name: "GL Unassigned",
+      description: "Fallback queue for orphaned JE records",
+      isUnassignedFallback: true,
+    },
+  ];
+  for (const spec of queueSpecs) {
+    await prisma.queue.upsert({
+      where: { code: spec.code },
+      create: spec,
+      update: {
+        name: spec.name,
+        description: spec.description,
+        isUnassignedFallback: spec.isUnassignedFallback,
+        isActive: true,
+        deletedAt: null,
+      },
+    });
+  }
+
+  // ─── Queue memberships ────────────────────────────────────────────────────
+  // AR Clerk works the standard collections queue.
+  // Controller is in the senior queue (escalations land on their desk).
+  // GL Accountant is NOT in any AR queue.
+  const memberships = [
+    { userEmail: "ar-clerk@northwind.test", queueCode: "AR_COLLECTIONS" },
+    { userEmail: "controller@northwind.test", queueCode: "AR_SENIOR_COLLECTORS" },
+    { userEmail: "controller@northwind.test", queueCode: "GL_APPROVAL" },
+    { userEmail: "gl@northwind.test", queueCode: "GL_APPROVAL" },
+  ];
+  for (const m of memberships) {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { email: m.userEmail },
+      select: { id: true },
+    });
+    const queue = await prisma.queue.findUniqueOrThrow({
+      where: { code: m.queueCode },
+      select: { id: true },
+    });
+    await prisma.queueMember.upsert({
+      where: { queueId_userId: { queueId: queue.id, userId: user.id } },
+      create: { queueId: queue.id, userId: user.id },
+      update: {},
+    });
+  }
 }
 
 // Clears every NORTHWIND-scoped transactional + sub-ledger row, leaving
@@ -649,6 +756,11 @@ export async function resetNorthwindData(prisma: PrismaClient): Promise<void> {
 
   // Period close locks.
   await prisma.periodClose.deleteMany({ where: { entityId: entity.id } });
+
+  // Ownership audit log + reassignment rules. Users + queues survive
+  // resets because they're org-level, not entity-scoped.
+  await prisma.recordEvent.deleteMany({});
+  await prisma.reassignmentRule.deleteMany({});
 }
 
 export async function resetAndReseedNorthwind(prisma: PrismaClient): Promise<{

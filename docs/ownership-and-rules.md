@@ -235,12 +235,19 @@ Phases completed:
 - ✅ v1.4: Integration layer (`src/lib/rules/integration.ts`) — `fireRulesForRecord`, `fireInsertRules`, `fireUpdateRules`, `loadActiveRules`. Bridges the engine to record lifecycle events.
 - ✅ v1.4: ArOpenItem adoption — second model with ownership; `openArItem` now fires `ON_INSERT` rules automatically and surfaces results to its caller
 - ✅ v1.4: 9 additional integration tests covering rule loading, declarative firing, first-match-wins, lock-skip semantics, reassignment failures, and the convenience wrappers
+- ✅ v1.5: Dev-only auth stub (`src/lib/auth/current-user.ts`) — HMAC-signed HTTP-only cookie, `getCurrentUser` / `requireCurrentUser` helpers. Replaceable: when real auth lands, the module body changes but the exports stay the same. **Not production auth** — clearly labeled in the UI as `DEV AUTH STUB`.
+- ✅ v1.5: Test users + queues + memberships seeded by `seedTestUsersAndQueues` in Northwind. Four roles (Controller, GL Accountant, AR Clerk, External Auditor) and five queues (AR_COLLECTIONS, AR_SENIOR_COLLECTORS, AR_UNASSIGNED, GL_APPROVAL, GL_UNASSIGNED).
+- ✅ v1.5: `UserSwitcher` Client Component in the layout header. Switching the cookie via Server Action; record events attribute to the picked user from there on.
+- ✅ v1.5: `applyArPaymentAction` threads identity via `requireCurrentUser` → `postJournalEntry.createdBy`. `reassignArItemAction` added for manual AR reassignment with `RecordEvent` audit + reassignment-lock semantics.
+- ✅ v1.5: AR list UI gains an Owner column + inline reassign control (`ReassignArRow`). Lock indicator (🔒) marks records that have been manually reassigned and are now skipped by rule firings.
+- ✅ v1.5: `postJournalEntry` now accepts + persists `createdBy` (added to `JournalEntryInput`; existing schema column populated). Threaded through from Server Action callers.
+- ✅ v1.5: 15 auth-stub unit tests (HMAC sign/verify, cookie encode/parse, tamper resistance, length checks)
 
 Next phases (separate commits):
 - Adoption on additional record types (ApOpenItem, FixedAsset, Lease, RevenueContract)
-- Server Action wrappers in app routes that thread `actorUserId` from session
+- Wire ON_INSERT rules into `postJournalEntry` (currently only ArOpenItem fires rules on create; JE creation should too)
 - Admin dashboard + role-change preflight UI
-- Auth integration
+- Real auth integration (replace the stub)
 - Mirror to recon + revenue-rec
 - `ON_SCHEDULE` cron scanner
 - Notifications
