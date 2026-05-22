@@ -93,6 +93,10 @@ export async function deactivateUserAction(
             // Lifecycle reassignments do NOT lock — the new owner should
             // still be subject to rule firings (e.g., aging escalation).
             lockFromRules: false,
+            // Suppress per-record notifications during bulk deactivation —
+            // a Carla-deactivates-Anna flow that moves 50 records would
+            // otherwise flood the new owner's inbox.
+            silent: true,
           });
           reassignedCount += 1;
         } catch (e) {

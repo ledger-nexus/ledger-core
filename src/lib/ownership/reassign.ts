@@ -26,6 +26,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { type Target } from "../rules/types";
+import { notify, type NotificationCategory } from "../notifications";
 
 export type ReassignableRecordType = "JournalEntry" | "ArOpenItem" | "ApOpenItem";
 
@@ -43,6 +44,12 @@ export interface ReassignInput {
    * reassignments should pass false.
    */
   lockFromRules?: boolean;
+  /**
+   * When true, skip emitting a Notification for this reassignment.
+   * Used for bulk operations (user deactivation reassignments) where
+   * flooding the new owner's inbox would be hostile. Default false.
+   */
+  silent?: boolean;
 }
 
 export interface ReassignResult {
@@ -101,13 +108,98 @@ export async function reassignRecord(
 
   // 2. Dispatch on recordType. Each branch fetches, validates reassignable
   // state, updates the record, and writes the RecordEvent in a transaction.
+  let result: ReassignResult;
   switch (input.recordType) {
     case "JournalEntry":
-      return reassignJournalEntry(prisma, input, lock);
+      result = await reassignJournalEntry(prisma, input, lock);
+      break;
     case "ArOpenItem":
-      return reassignArOpenItem(prisma, input, lock);
+      result = await reassignArOpenItem(prisma, input, lock);
+      break;
     case "ApOpenItem":
-      return reassignApOpenItem(prisma, input, lock);
+      result = await reassignApOpenItem(prisma, input, lock);
+      break;
+  }
+
+  // Emit a Notification to the new owner (unless silent OR the new owner
+  // IS the actor — notify-self filtering is also done inside notify()).
+  // Failures are non-fatal: the reassignment succeeded; only the bell
+  // doesn't ring. Log and continue.
+  if (!input.silent) {
+    try {
+      await emitReassignmentNotification(prisma, input);
+    } catch (e) {
+      console.warn(
+        `Reassignment of ${input.recordType} ${input.recordId.slice(0, 8)} succeeded but notification emit failed:`,
+        e
+      );
+    }
+  }
+
+  return result;
+}
+
+async function emitReassignmentNotification(
+  prisma: PrismaClient,
+  input: ReassignInput
+): Promise<void> {
+  const recordRef = recordLabelFor(input.recordType, input.recordId);
+  const link = recordLinkFor(input.recordType, input.recordId);
+  const category: NotificationCategory = "REASSIGNMENT";
+
+  // Reason format from earlier conventions:
+  //   "manual:<freeform>"
+  //   "rule:<rule-id>:v<version>"
+  //   "lifecycle:user-deactivation by Carla Controller"
+  //   "admin:orphan repair by Carla Controller"
+  const isRuleFired = input.reason.startsWith("rule:");
+  const sourceRuleId = isRuleFired
+    ? input.reason.split(":")[1] // "rule:<id>:v<ver>" → "<id>"
+    : undefined;
+
+  const title = isRuleFired
+    ? `${recordRef} routed to your queue`
+    : `${recordRef} assigned to you`;
+
+  const body = isRuleFired
+    ? `Reassignment rule ${sourceRuleId} fired on insert`
+    : input.reason.length > 80
+      ? `${input.reason.slice(0, 80)}…`
+      : input.reason;
+
+  await notify(prisma, {
+    recipient: { type: input.newOwner.type, id: input.newOwner.id },
+    category,
+    title,
+    body,
+    link,
+    sourceRuleId,
+    actorUserId: input.actorUserId === "system" ? undefined : input.actorUserId,
+    recordType: input.recordType,
+    recordId: input.recordId,
+  });
+}
+
+function recordLabelFor(recordType: ReassignableRecordType, id: string): string {
+  // Short, human-readable. The bell dropdown shows this verbatim.
+  switch (recordType) {
+    case "JournalEntry":
+      return `JE ${id.slice(0, 8)}`;
+    case "ArOpenItem":
+      return `AR item ${id.slice(0, 8)}`;
+    case "ApOpenItem":
+      return `AP item ${id.slice(0, 8)}`;
+  }
+}
+
+function recordLinkFor(recordType: ReassignableRecordType, id: string): string {
+  switch (recordType) {
+    case "JournalEntry":
+      return `/journal-entries/${id}`;
+    case "ArOpenItem":
+      return `/ar`;
+    case "ApOpenItem":
+      return `/ap`;
   }
 }
 

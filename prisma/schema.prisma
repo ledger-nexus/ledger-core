@@ -1103,8 +1103,10 @@ model User {
   isActive     Boolean   @default(true)
   deactivatedAt DateTime?
 
-  queueMemberships QueueMember[]
-  recordEvents     RecordEvent[]
+  queueMemberships      QueueMember[]
+  recordEvents          RecordEvent[]
+  notifications         Notification[] @relation("NotificationRecipient")
+  notificationsActed    Notification[] @relation("NotificationActor")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1247,6 +1249,58 @@ enum ReassignmentTrigger {
   ON_STATE_TRANSITION
   ON_SCHEDULE
   ON_USER_LIFECYCLE
+}
+
+// User-facing notifications. Emitted by the rules engine + reassignment
+// service to surface "something happened" — e.g., "A new $25K AR item
+// was assigned to your queue."
+//
+// Recipient is always a USER (not a queue). When a record is assigned
+// to a queue, the notification emitter fans out one row per queue
+// member. This is intentionally simple — production systems would add
+// per-user preferences (mute, batch, route to email/Slack) but this is
+// the substrate those layer on.
+//
+// link is a relative URL the bell dropdown opens (e.g., "/ar" or
+// "/journal-entries/abc"). recordType + recordId let the bell group
+// multiple notifications for the same target.
+model Notification {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recipientUserId String   @db.Uuid
+  recipient       User     @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  category    NotificationCategory
+  title       String
+  body        String?
+  link        String?
+
+  // Audit: who/what triggered this notification.
+  // sourceRuleId references a ReassignmentRule.ruleId (string, since
+  // rules are versioned and we want to track which rule version fired).
+  // actorUserId is the User who took the action (manual reassignment)
+  // or null for engine-fired notifications.
+  sourceRuleId String?
+  actorUserId  String?  @db.Uuid
+  actor        User?    @relation("NotificationActor", fields: [actorUserId], references: [id])
+
+  // Target record. Lets the bell group repeated notifications about
+  // the same record and link to its detail page.
+  recordType  String?
+  recordId    String?  @db.Uuid
+
+  seenAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([recipientUserId, seenAt, createdAt])
+  @@index([recipientUserId, createdAt])
+  @@map("notification")
+}
+
+enum NotificationCategory {
+  REASSIGNMENT          // record's owner changed (manual or rule-fired)
+  APPROVAL_NEEDED       // record is in your queue awaiting action
+  ORPHAN_DETECTED       // a record you previously owned is now an orphan
+  SYSTEM                // catch-all for engine-level events
 }
 
 // =========================================================================

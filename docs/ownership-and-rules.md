@@ -252,6 +252,7 @@ Phases completed:
   - **ApOpenItem ownership adoption** — mirror of v1.4's AR adoption. Schema columns + RecordEvent backref + reassign-service branch + orphan-detection extension + `openApItem` fires ON_INSERT rules. New `reassignApItemAction` Server Action + `ReassignApRow` Client Component + Owner column on `/ap`.
   - **JournalEntry rule firing** — `postJournalEntry` now accepts an explicit `ownerUserId` input (separate from `createdBy`, which stays audit-shaped). When set, ON_INSERT rules fire AFTER the transaction commits (deliberately outside the substrate write so rule failures can't roll back the entry). Rules see a synthetic record with `totalDebits` derived from the lines so amount-based criteria work. Seed paths (no `ownerUserId`) leave JEs ownerless and skip rule firing — appropriate for system-generated entries.
   - **Three new seeded rules**: `je-large-amount-to-controller` (priority 100, `totalDebits > 50000` → GL_APPROVAL), `je-default-routing` (priority 999, catch-all → GL_UNASSIGNED), `ap-default-routing` (priority 999, catch-all → GL_UNASSIGNED). `applyArPaymentAction` updated to pass `ownerUserId` so payment JEs hit the engine — small payments land in GL_UNASSIGNED, large ones auto-route to GL_APPROVAL.
+- ✅ v1.10: **Notifications** — visible feedback loop for ownership changes. New `Notification` table; `notify()` helper in `src/lib/notifications/` fans out per-row notifications for USER recipients and one-per-member for QUEUE recipients (self-notification suppressed — the actor doesn't get notified about their own action). `reassignRecord` emits a `REASSIGNMENT` notification on every assignment (rule-fired OR manual); `silent: true` escape hatch suppresses emission for bulk operations like user-deactivation reassignments where a flood would be hostile. Bell icon in the header (only when a user is logged in) shows unread count + dropdown with recent unread + recently-read. Clicking a notification marks it seen + navigates. "Mark all read" wipes the queue. `markNotificationsReadAction` is anti-spoofing — only the recipient can mark their own. Categories: REASSIGNMENT, APPROVAL_NEEDED, ORPHAN_DETECTED, SYSTEM. Per-user channel preferences (mute, email, Slack) and a `/notifications` history page deferred — in-app bell only for v1.10.
 
 Next phases (separate commits):
 - Adoption on remaining record types (FixedAsset, Lease, RevenueContract)
@@ -260,7 +261,7 @@ Next phases (separate commits):
 - Queue management UI (currently no way to delete/deactivate queues without SQL)
 - Mirror to recon + revenue-rec
 - `ON_SCHEDULE` cron scanner — orphan detection materialized into a daily-scanned table
-- Notifications
+- Notification polish: `/notifications` history page, user preferences (mute, batch, frequency), channel routing (email, Slack), real-time push via WebSocket / SSE
 
 ## How to wire a new record type into the rules engine
 

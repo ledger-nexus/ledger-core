@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { Sidebar } from "@/components/nav/sidebar";
 import { BookSwitcher } from "@/components/nav/book-switcher";
 import { UserSwitcher } from "@/components/nav/user-switcher";
+import { NotificationBell } from "@/components/nav/notification-bell";
 import { getScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getRecentNotifications } from "@/lib/notifications";
 import { prisma } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import "./globals.css";
@@ -23,6 +25,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       orderBy: { displayName: "asc" },
     }),
   ]);
+  // Notifications are user-scoped — empty when there's no logged-in user.
+  const notifications = currentUser
+    ? await getRecentNotifications(prisma, currentUser.id)
+    : { unread: [], recentRead: [], unreadCount: 0 };
   return (
     <html lang="en">
       <body>
@@ -41,7 +47,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   Scope: every report on this page is computed for the (entity, book) above.
                 </p>
               </div>
-              <div className="flex gap-3">
+              <div className="flex items-start gap-3">
+                {currentUser && (
+                  <NotificationBell
+                    unread={notifications.unread}
+                    recentRead={notifications.recentRead}
+                    unreadCount={notifications.unreadCount}
+                  />
+                )}
                 <div className="w-56">
                   <Card className="shadow-none">
                     <CardContent className="px-3 py-2">
