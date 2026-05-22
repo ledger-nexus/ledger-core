@@ -42,7 +42,21 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
   },
 ];
 
-export function Sidebar({ currentPath }: { currentPath?: string }) {
+const ADMIN_SECTION = {
+  label: "Admin",
+  items: [
+    { href: "/admin/orphans", label: "Orphan records", hint: "ownership" },
+  ],
+} as const;
+
+export function Sidebar({
+  currentPath,
+  isAdmin = false,
+}: {
+  currentPath?: string;
+  isAdmin?: boolean;
+}) {
+  const visibleSections = isAdmin ? [...sections, ADMIN_SECTION] : sections;
   return (
     <nav className="flex h-full flex-col gap-6 p-5">
       <div>
@@ -54,7 +68,7 @@ export function Sidebar({ currentPath }: { currentPath?: string }) {
         </Link>
       </div>
       <div className="flex flex-col gap-5">
-        {sections.map((section) => (
+        {visibleSections.map((section) => (
           <div key={section.label}>
             <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-400">
               {section.label}

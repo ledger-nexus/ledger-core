@@ -8,7 +8,7 @@
 // component should be able to construct a valid cookie value.
 
 import { describe, it, expect } from "vitest";
-import { _internal } from "../src/lib/auth/current-user";
+import { _internal, isAdmin } from "../src/lib/auth/current-user";
 
 const VALID_UUID = "abcdef01-2345-6789-abcd-ef0123456789";
 const OTHER_UUID = "11111111-2222-3333-4444-555555555555";
@@ -88,5 +88,41 @@ describe("auth stub: encode + parseCookie", () => {
 
   it("parseCookie returns null when the userId half is empty", () => {
     expect(_internal.parseCookie(`.${_internal.sign(VALID_UUID)}`)).toBeNull();
+  });
+});
+
+describe("isAdmin predicate", () => {
+  it("returns false for null", () => {
+    expect(isAdmin(null)).toBe(false);
+  });
+
+  it("returns true for a user on the allowlist", () => {
+    expect(
+      isAdmin({
+        id: VALID_UUID,
+        email: "controller@northwind.test",
+        displayName: "Carla",
+      })
+    ).toBe(true);
+  });
+
+  it("returns false for a user NOT on the allowlist", () => {
+    expect(
+      isAdmin({
+        id: VALID_UUID,
+        email: "ar-clerk@northwind.test",
+        displayName: "Anna",
+      })
+    ).toBe(false);
+  });
+
+  it("is case-sensitive (defensive)", () => {
+    expect(
+      isAdmin({
+        id: VALID_UUID,
+        email: "Controller@Northwind.Test",
+        displayName: "Carla",
+      })
+    ).toBe(false);
   });
 });

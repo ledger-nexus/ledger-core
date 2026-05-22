@@ -246,14 +246,15 @@ Phases completed:
   - `ar-large-balance-to-senior` (priority 100) — currentBalance > $10K routes to AR_SENIOR_COLLECTORS
   - `ar-default-routing` (priority 999) — catch-all routes everything else to AR_COLLECTIONS
   Plus one $25K Globex invoice added to the AR seed so the large-balance rule visibly fires on a real record. Acme's $5K invoices land in AR_COLLECTIONS via the catch-all; Globex's $25K invoice lands in AR_SENIOR_COLLECTORS via the priority-100 rule. Demo viewers see both branches of the cascade on `/ar`.
+- ✅ v1.7: **Admin orphan dashboard** at `/admin/orphans`. Surfaces records whose owner is no longer valid (deactivated users, deleted/inactive queues, null `ownerId`). Headline metrics by cause + type; per-row inline reassign to any active user or queue; age-coded display (>30 days red, >14 amber). Permission-gated by `requireAdmin` (email allowlist stub on `controller@northwind.test`). Generic `adminReassignAction` Server Action handles both `JournalEntry` and `ArOpenItem`. Sidebar gets an Admin section that only renders for admin users.
 
 Next phases (separate commits):
 - Adoption on additional record types (ApOpenItem, FixedAsset, Lease, RevenueContract)
 - Wire ON_INSERT rules into `postJournalEntry` (currently only ArOpenItem fires rules on create; JE creation should too)
-- Admin dashboard + role-change preflight UI
-- Real auth integration (replace the stub)
+- Role-change preflight UI (the orphan dashboard's prevention-side counterpart)
+- Real auth integration (replace the stub) + real role/permission catalog (replace the email allowlist)
 - Mirror to recon + revenue-rec
-- `ON_SCHEDULE` cron scanner
+- `ON_SCHEDULE` cron scanner — orphan detection materialized into a daily-scanned table
 - Notifications
 
 ## How to wire a new record type into the rules engine

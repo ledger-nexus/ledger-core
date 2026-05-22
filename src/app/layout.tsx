@@ -3,7 +3,7 @@ import { Sidebar } from "@/components/nav/sidebar";
 import { BookSwitcher } from "@/components/nav/book-switcher";
 import { UserSwitcher } from "@/components/nav/user-switcher";
 import { getScope } from "@/lib/scope";
-import { getCurrentUser } from "@/lib/auth/current-user";
+import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { prisma } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import "./globals.css";
@@ -28,7 +28,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <div className="grid min-h-screen grid-cols-[260px_1fr] bg-ink-50">
           <aside className="border-r border-ink-200 bg-white">
-            <Sidebar />
+            <Sidebar isAdmin={isAdmin(currentUser)} />
           </aside>
           <main className="flex flex-col">
             <header className="flex items-center justify-between border-b border-ink-200 bg-white px-8 py-3">
