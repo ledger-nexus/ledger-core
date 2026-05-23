@@ -210,7 +210,7 @@ export async function getBalanceSheet(
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
   const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
 
-  const accounts = await prisma.account.findMany({
+  const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
       type: { in: ["ASSET", "LIABILITY", "EQUITY"] },
@@ -227,6 +227,23 @@ export async function getBalanceSheet(
     orderBy: { code: "asc" },
   });
 
+  // Dedup: when both a shared (entityId=null) and an entity-specific
+  // account exist at the same code, prefer the entity-specific one.
+  // This mirrors postJournalEntry's resolution: an entity-specific
+  // override means "use this for this entity," not "render both rows."
+  // Without dedup, the BS would show two lines per code and
+  // .find(c => c.code === X) becomes ambiguous.
+  const byCode = new Map<string, (typeof rawAccounts)[number]>();
+  for (const a of rawAccounts) {
+    const existing = byCode.get(a.code);
+    if (!existing || (a.entityId !== null && existing.entityId === null)) {
+      byCode.set(a.code, a);
+    }
+  }
+  const accounts = Array.from(byCode.values()).sort((a, b) =>
+    a.code.localeCompare(b.code)
+  );
+
   const assets: BalanceSheet["assets"] = [];
   const liabilities: BalanceSheet["liabilities"] = [];
   const equity: BalanceSheet["equity"] = [];
@@ -242,8 +259,22 @@ export async function getBalanceSheet(
       credit = credit.plus(new Decimal(line.credit.toString()));
     }
 
-    const sign = signFor(acct.type as AccountType, acct.isContra);
-    const amount = sign === 1 ? debit.minus(credit) : credit.minus(debit);
+    // Use the SECTION'S natural sign, not the account's effective sign.
+    // For the Assets section, every line is on the DEBIT side, so the
+    // amount = debit - credit. A contra-asset (Accumulated Depreciation,
+    // Allowance for Doubtful Accounts) is credit-normal — its amount
+    // here is therefore NEGATIVE, which correctly DEDUCTS from totalAssets
+    // when summed. Same logic for Liabilities + Equity on the credit side
+    // (contra-liabilities and treasury stock show as negative deductions).
+    //
+    // The earlier implementation used signFor(type, isContra) which gave
+    // the contra account's effective normal side — that produced a
+    // positive amount that got ADDED to its section, double-counting
+    // the deduction and breaking the A = L + E identity by 2× the
+    // contra balance.
+    const sectionSign: 1 | -1 = acct.type === "ASSET" ? 1 : -1;
+    const amount =
+      sectionSign === 1 ? debit.minus(credit) : credit.minus(debit);
 
     if (acct.type === "ASSET") {
       assets.push({ code: acct.code, name: acct.name, amount });
