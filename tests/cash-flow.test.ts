@@ -72,10 +72,16 @@ async function seedMasterData() {
       update: {},
     });
   }
+  // Prisma 5.22 rejects null in compound unique-key upsert. Use
+  // findFirst + create to upsert shared-chart accounts (entityId=null).
   for (const a of CHART_OF_ACCOUNTS) {
-    await prisma.account.upsert({
-      where: { entityId_code: { entityId: null as any, code: a.code } as any },
-      create: {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: a.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
         code: a.code,
         name: a.name,
         type: a.type,
@@ -85,7 +91,6 @@ async function seedMasterData() {
         isBank: a.isBank ?? false,
         subtype: a.subtype,
       },
-      update: {},
     });
   }
 }

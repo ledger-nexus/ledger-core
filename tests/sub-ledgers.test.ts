@@ -90,10 +90,16 @@ async function seedMasterData() {
       update: {},
     });
   }
+  // Prisma 5.22 rejects null in compound unique-key upsert. Use
+  // findFirst + create to upsert shared-chart accounts (entityId=null).
   for (const a of CHART_OF_ACCOUNTS) {
-    await prisma.account.upsert({
-      where: { entityId_code: { entityId: null as any, code: a.code } as any },
-      create: {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: a.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
         code: a.code,
         name: a.name,
         type: a.type,
@@ -103,7 +109,6 @@ async function seedMasterData() {
         isBank: a.isBank ?? false,
         subtype: a.subtype,
       },
-      update: {},
     });
   }
   // Parties used by sub-ledger lifecycle tests.
@@ -467,9 +472,9 @@ describe("Fixed assets: divergent depreciation across books", () => {
     const gaapNbv = await netBookValue(prisma, ENTITY, "US_GAAP");
     const taxNbv = await netBookValue(prisma, ENTITY, "US_TAX");
 
-    expect(gaapNbv.nbv.toDecimalPlaces(2).toString()).toBe("20000.00");
-    expect(taxNbv.nbv.toDecimalPlaces(2).toString()).toBe("21600.00");
-    expect(taxNbv.nbv.minus(gaapNbv.nbv).toDecimalPlaces(2).toString()).toBe("1600.00");
+    expect(gaapNbv.nbv.toFixed(2)).toBe("20000.00");
+    expect(taxNbv.nbv.toFixed(2)).toBe("21600.00");
+    expect(taxNbv.nbv.minus(gaapNbv.nbv).toFixed(2)).toBe("1600.00");
   });
 
   it("running depreciation twice through the same date is idempotent", async () => {
@@ -611,9 +616,9 @@ describe("Book-tax-difference report", () => {
     // GAAP P&L = -$2,000 (expense). TAX P&L = -$1,200 (expense).
     // bookNetIncome = -2000, taxNetIncome = -1200.
     // totalDelta = bookNetIncome - taxNetIncome = -800.
-    expect(btd.bookNetIncome.toDecimalPlaces(2).toString()).toBe("-2000.00");
-    expect(btd.taxNetIncome.toDecimalPlaces(2).toString()).toBe("-1200.00");
-    expect(btd.totalDelta.toDecimalPlaces(2).toString()).toBe("-800.00");
+    expect(btd.bookNetIncome.toFixed(2)).toBe("-2000.00");
+    expect(btd.taxNetIncome.toFixed(2)).toBe("-1200.00");
+    expect(btd.totalDelta.toFixed(2)).toBe("-800.00");
 
     // The depreciation expense row should be present and classified TEMPORARY.
     const depRow = btd.pnlRows.find((r) => r.accountCode === "8000");

@@ -34,8 +34,30 @@ const ENTITY_CODE = "TEST_CO";
 const SCOPE = { entityCode: ENTITY_CODE, bookCode: "US_GAAP" };
 
 async function clearLedger() {
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+  // Scope to TEST_CO only — never wipe Northwind / other seeded entities.
+  // Order matters: sub-ledger rows that FK back to JEs (AR/AP open items
+  // via openedByEntryId, applications via appliedByEntryId, AR/AP
+  // applications, period closes, journal lines) must be deleted before
+  // their parent JEs. Same discipline as the consolidation test's
+  // clearAll().
+  const testEntity = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY_CODE },
+    select: { id: true },
+  });
+  if (!testEntity) return;
+  const entityId = testEntity.id;
+  await prisma.arApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.apApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.arOpenItem.deleteMany({ where: { entityId } });
+  await prisma.apOpenItem.deleteMany({ where: { entityId } });
+  await prisma.journalLine.deleteMany({
+    where: { entry: { entityId } },
+  });
+  await prisma.journalEntry.deleteMany({ where: { entityId } });
 }
 
 async function seedMasterData() {
@@ -91,10 +113,16 @@ async function seedMasterData() {
 }
 
 async function seedAccountsOnly() {
+  // Prisma 5.22 rejects null in compound unique-key upsert. Use
+  // findFirst + create to upsert shared-chart accounts (entityId=null).
   for (const a of CHART_OF_ACCOUNTS) {
-    await prisma.account.upsert({
-      where: { entityId_code: { entityId: null as any, code: a.code } as any },
-      create: {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: a.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
         code: a.code,
         name: a.name,
         type: a.type,
@@ -104,7 +132,6 @@ async function seedAccountsOnly() {
         isBank: a.isBank ?? false,
         subtype: a.subtype,
       },
-      update: {},
     });
   }
 }
@@ -304,8 +331,15 @@ describe("invariant: posting is atomic", () => {
         ],
       });
     } catch {}
-    const entryCount = await prisma.journalEntry.count();
-    const lineCount = await prisma.journalLine.count();
+    // Scope to TEST_CO — other entities (Northwind seed, other suites)
+    // legitimately have entries; we only care about whether THIS failed
+    // post wrote anything for TEST_CO.
+    const entryCount = await prisma.journalEntry.count({
+      where: { entity: { code: ENTITY_CODE } },
+    });
+    const lineCount = await prisma.journalLine.count({
+      where: { entry: { entity: { code: ENTITY_CODE } } },
+    });
     expect(entryCount).toBe(0);
     expect(lineCount).toBe(0);
   });
@@ -322,8 +356,16 @@ describe("invariant: posting is atomic", () => {
         ],
       });
     } catch {}
-    expect(await prisma.journalEntry.count()).toBe(0);
-    expect(await prisma.journalLine.count()).toBe(0);
+    expect(
+      await prisma.journalEntry.count({
+        where: { entity: { code: ENTITY_CODE } },
+      })
+    ).toBe(0);
+    expect(
+      await prisma.journalLine.count({
+        where: { entry: { entity: { code: ENTITY_CODE } } },
+      })
+    ).toBe(0);
   });
 });
 

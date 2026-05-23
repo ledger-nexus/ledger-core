@@ -37,20 +37,45 @@ const GAAP = { entityCode: ENTITY, bookCode: "US_GAAP" };
 const TAX = { entityCode: ENTITY, bookCode: "US_TAX" };
 
 async function clearAll() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.fixedAssetBookAttributes.deleteMany();
-  await prisma.fixedAsset.deleteMany();
-  await prisma.leaseBookAttributes.deleteMany();
-  await prisma.lease.deleteMany();
-  await prisma.revenueContractBookAttributes.deleteMany();
-  await prisma.performanceObligation.deleteMany();
-  await prisma.revenueContract.deleteMany();
-  await prisma.postingRule.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+  // Scope to V04_TEST only — preserves seed data + other tests' state.
+  const testEntity = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY },
+    select: { id: true },
+  });
+  if (!testEntity) return;
+  const entityId = testEntity.id;
+  await prisma.arApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.apApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.arOpenItem.deleteMany({ where: { entityId } });
+  await prisma.apOpenItem.deleteMany({ where: { entityId } });
+  await prisma.fixedAssetBookAttributes.deleteMany({
+    where: { asset: { entityId } },
+  });
+  await prisma.fixedAsset.deleteMany({ where: { entityId } });
+  await prisma.leaseBookAttributes.deleteMany({
+    where: { lease: { entityId } },
+  });
+  await prisma.lease.deleteMany({ where: { entityId } });
+  await prisma.revenueContractBookAttributes.deleteMany({
+    where: { contract: { entityId } },
+  });
+  await prisma.performanceObligation.deleteMany({
+    where: { contract: { entityId } },
+  });
+  await prisma.revenueContract.deleteMany({ where: { entityId } });
+  // PostingRule is keyed by (sourceEventType, bookId) — not entity-scoped.
+  // Test fixtures register rules against the shared US_GAAP / US_TAX books,
+  // so we leave them in place; the upsert path in seedMasterData reuses
+  // them. If a test ever needed entity-scoped postings, it'd register
+  // a separate test-only book.
+  await prisma.journalLine.deleteMany({
+    where: { entry: { entityId } },
+  });
+  await prisma.journalEntry.deleteMany({ where: { entityId } });
 }
 
 async function seedMasterData() {
@@ -101,10 +126,16 @@ async function seedMasterData() {
       update: {},
     });
   }
+  // Prisma 5.22 rejects null in compound unique-key upsert. Use
+  // findFirst + create to upsert shared-chart accounts (entityId=null).
   for (const a of CHART_OF_ACCOUNTS) {
-    await prisma.account.upsert({
-      where: { entityId_code: { entityId: null as any, code: a.code } as any },
-      create: {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: a.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
         code: a.code,
         name: a.name,
         type: a.type,
@@ -114,7 +145,6 @@ async function seedMasterData() {
         isBank: a.isBank ?? false,
         subtype: a.subtype,
       },
-      update: {},
     });
   }
   for (const p of [
@@ -193,8 +223,8 @@ describe("fixed asset disposal", () => {
       source: "SEED",
     });
     expect(results).toHaveLength(1);
-    expect(results[0].nbvAtDisposal.toDecimalPlaces(2).toString()).toBe("6000.00");
-    expect(results[0].gainLoss.toDecimalPlaces(2).toString()).toBe("0.00");
+    expect(results[0].nbvAtDisposal.toFixed(2)).toBe("6000.00");
+    expect(results[0].gainLoss.toFixed(2)).toBe("0.00");
 
     const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-07-01"));
     // Equipment 1500 should be zero (asset removed). Accum dep 1510 should be zero.
@@ -265,8 +295,8 @@ describe("fixed asset disposal", () => {
     });
     const gaap = results.find((r) => r.bookCode === "US_GAAP")!;
     const tax = results.find((r) => r.bookCode === "US_TAX")!;
-    expect(gaap.gainLoss.toDecimalPlaces(2).toString()).toBe("1000.00");
-    expect(tax.gainLoss.toDecimalPlaces(2).toString()).toBe("-3800.00");
+    expect(gaap.gainLoss.toFixed(2)).toBe("1000.00");
+    expect(tax.gainLoss.toFixed(2)).toBe("-3800.00");
   });
 
   it("disposing an already-DISPOSED asset throws", async () => {

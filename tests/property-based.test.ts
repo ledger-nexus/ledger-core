@@ -30,12 +30,25 @@ const SCOPE = { entityCode: ENTITY, bookCode: "US_GAAP" };
 const ACCOUNTS = ["1000", "1010", "1200", "2000", "2100", "3000", "3100"] as const;
 
 async function clearLedger() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+  // Scope to the property-test entity only — never wipe seed data.
+  const testEntity = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY },
+    select: { id: true },
+  });
+  if (!testEntity) return;
+  const entityId = testEntity.id;
+  await prisma.arApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.apApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.arOpenItem.deleteMany({ where: { entityId } });
+  await prisma.apOpenItem.deleteMany({ where: { entityId } });
+  await prisma.journalLine.deleteMany({
+    where: { entry: { entityId } },
+  });
+  await prisma.journalEntry.deleteMany({ where: { entityId } });
 }
 
 async function seedMasterData() {
@@ -84,10 +97,16 @@ async function seedMasterData() {
       update: {},
     });
   }
+  // Prisma 5.22 rejects null in compound unique-key upsert. Use
+  // findFirst + create to upsert shared-chart accounts (entityId=null).
   for (const a of CHART_OF_ACCOUNTS) {
-    await prisma.account.upsert({
-      where: { entityId_code: { entityId: null as any, code: a.code } as any },
-      create: {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: a.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
         code: a.code,
         name: a.name,
         type: a.type,
@@ -97,7 +116,6 @@ async function seedMasterData() {
         isBank: a.isBank ?? false,
         subtype: a.subtype,
       },
-      update: {},
     });
   }
   await prisma.party.upsert({
@@ -168,7 +186,11 @@ const balancedMultiLineEntryArb = fc
         amount: (c / 100).toFixed(2),
       })),
       creditLines: adjustedCredits.map((c, i) => ({
-        accountCode: ACCOUNTS[(i + ACCOUNTS.length / 2) % ACCOUNTS.length],
+        // ACCOUNTS.length is 7 (odd), so a half-length offset would be 3.5 —
+        // which produces undefined array indices. Floor it to keep the
+        // generator deterministic and the indices integral.
+        accountCode:
+          ACCOUNTS[(i + Math.floor(ACCOUNTS.length / 2)) % ACCOUNTS.length],
         amount: (c / 100).toFixed(2),
       })),
     };

@@ -19,11 +19,34 @@ const SUB_B = "CONS_TEST_SUB_B";
 const BOOK = "US_GAAP";
 
 async function clearAll() {
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
-  await prisma.legalEntity.deleteMany({
+  // Scope to the test entities — don't wipe Northwind etc.
+  const testEntities = await prisma.legalEntity.findMany({
     where: { code: { in: [PARENT, SUB_A, SUB_B] } },
+    select: { id: true },
   });
+  const entityIds = testEntities.map((e) => e.id);
+  if (entityIds.length === 0) return;
+
+  // Order matters — FKs have no cascade on these relations. Delete
+  // dependents first, parent last. The schema doesn't enable
+  // ON DELETE CASCADE on fiscal_calendar.entityId (intentional —
+  // a calendar's data outliving its entity row would be a bug), so
+  // we must explicitly drop calendars + periods + closes here.
+  const calendars = await prisma.fiscalCalendar.findMany({
+    where: { entityId: { in: entityIds } },
+    select: { id: true },
+  });
+  const calendarIds = calendars.map((c) => c.id);
+  if (calendarIds.length > 0) {
+    await prisma.periodClose.deleteMany({ where: { entityId: { in: entityIds } } });
+    await prisma.period.deleteMany({ where: { calendarId: { in: calendarIds } } });
+    await prisma.fiscalCalendar.deleteMany({ where: { id: { in: calendarIds } } });
+  }
+  await prisma.journalLine.deleteMany({
+    where: { entry: { entityId: { in: entityIds } } },
+  });
+  await prisma.journalEntry.deleteMany({ where: { entityId: { in: entityIds } } });
+  await prisma.legalEntity.deleteMany({ where: { id: { in: entityIds } } });
 }
 
 async function seedHierarchy() {
@@ -37,10 +60,16 @@ async function seedHierarchy() {
     create: { code: BOOK, name: "US GAAP", basis: "US_GAAP", reportingCurrencyId: "USD" },
     update: {},
   });
+  // Prisma 5.22 rejects null in compound unique-key upsert. Use
+  // findFirst + create to upsert shared-chart accounts (entityId=null).
   for (const a of CHART_OF_ACCOUNTS) {
-    await prisma.account.upsert({
-      where: { entityId_code: { entityId: null as any, code: a.code } as any },
-      create: {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: a.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
         code: a.code,
         name: a.name,
         type: a.type,
@@ -50,7 +79,6 @@ async function seedHierarchy() {
         isBank: a.isBank ?? false,
         subtype: a.subtype,
       },
-      update: {},
     });
   }
   const parent = await prisma.legalEntity.create({
