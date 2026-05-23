@@ -175,28 +175,46 @@ export default async function MonthEndPage({
           </span>
         </CardHeader>
         <CardContent>
-          <form className="flex items-end gap-3" method="get">
-            <label className="flex flex-col gap-1 text-xs text-ink-500">
-              Period
-              <select
-                name="period"
-                defaultValue={selectedPeriod.code}
-                className="rounded border border-ink-200 px-2 py-1 text-sm font-mono"
+          <div className="flex items-end justify-between gap-3 flex-wrap">
+            <form className="flex items-end gap-3" method="get">
+              <label className="flex flex-col gap-1 text-xs text-ink-500">
+                Period
+                <select
+                  name="period"
+                  defaultValue={selectedPeriod.code}
+                  className="rounded border border-ink-200 px-2 py-1 text-sm font-mono"
+                >
+                  {allPeriods.map((p) => (
+                    <option key={p.id} value={p.code}>
+                      {p.code} ({formatDate(p.startsOn)} → {formatDate(p.endsOn)})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="submit"
+                className="rounded bg-ink-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-ink-800"
               >
-                {allPeriods.map((p) => (
-                  <option key={p.id} value={p.code}>
-                    {p.code} ({formatDate(p.startsOn)} → {formatDate(p.endsOn)})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="submit"
-              className="rounded bg-ink-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-ink-800"
-            >
-              Switch period
-            </button>
-          </form>
+                Switch period
+              </button>
+            </form>
+            <div className="flex items-end gap-2 text-xs">
+              <a
+                href={`/api/reports/month-end/csv?period=${selectedPeriod.code}`}
+                className="rounded border border-ink-200 px-3 py-1.5 font-medium text-ink-700 hover:bg-ink-50"
+                download
+              >
+                Download CSV
+              </a>
+              <a
+                href={`/api/reports/month-end/pdf?period=${selectedPeriod.code}`}
+                className="rounded bg-ink-900 px-3 py-1.5 font-medium text-white hover:bg-ink-800"
+                download
+              >
+                Download PDF
+              </a>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
