@@ -25,11 +25,20 @@ const TAX = { entityCode: ENTITY, bookCode: "US_TAX" };
 const IFRS = { entityCode: ENTITY, bookCode: "IFRS" };
 
 beforeAll(async () => {
-  const count = await prisma.journalEntry.count();
-  if (count === 0) {
-    throw new Error(
-      "No entries in ledger. Run `pnpm db:seed` before running seeded-company tests."
-    );
+  // Self-heal: if Northwind has been wiped by another test's cleanup
+  // (or by a fresh db:push), re-seed it before running these assertions.
+  // The seed is now idempotent (clears entity-scoped sub-ledger rows
+  // at the top) so calling it on top of stale data is safe.
+  const northwind = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY },
+    select: { id: true },
+  });
+  const jeCount = northwind
+    ? await prisma.journalEntry.count({ where: { entityId: northwind.id } })
+    : 0;
+  if (jeCount === 0) {
+    const { seedNorthwind } = await import("../src/lib/seed/northwind");
+    await seedNorthwind(prisma);
   }
 });
 
@@ -124,10 +133,12 @@ describe("Northwind: multi-book divergence shows in P&L", () => {
       new Date("2026-06-30")
     );
 
-    // GAAP total revenue = Acme 6×$5k + Globex recognized $20k = $50k
-    // TAX  total revenue = Acme 6×$5k + Globex cash $60k = $90k
-    expect(gaapPnl.totalRevenue.toDecimalPlaces(2).toString()).toBe("50000.00");
-    expect(taxPnl.totalRevenue.toDecimalPlaces(2).toString()).toBe("90000.00");
+    // GAAP total revenue = Acme 6×$5k + Globex SaaS recognized $20k (4
+    // months × $5k straight-line) + Globex Q2 services invoice $25k = $75k
+    // TAX  total revenue = Acme 6×$5k + Globex SaaS cash $60k + Globex Q2
+    //                      services $25k = $115k
+    expect(gaapPnl.totalRevenue.toFixed(2)).toBe("75000.00");
+    expect(taxPnl.totalRevenue.toFixed(2)).toBe("115000.00");
   });
 
   it("US_GAAP depreciation expense (3-yr life) exceeds US_TAX (5-yr life)", async () => {
@@ -195,11 +206,11 @@ describe("Northwind: financial shape sanity (US_GAAP)", () => {
     expect(defRev!.amount.toNumber()).toBe(40_000);
   });
 
-  it("has AR of exactly $15k at 6/30 (3 Acme invoices unpaid)", async () => {
+  it("has AR of exactly $40k at 6/30 (3 unpaid Acme @ $5k + Globex Q2 services $25k)", async () => {
     const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-06-30"));
     const ar = bs.assets.find((a) => a.code === "1200");
     expect(ar).toBeDefined();
-    expect(ar!.amount.toNumber()).toBe(15_000);
+    expect(ar!.amount.toNumber()).toBe(40_000);
   });
 
   it("AP is zero at 6/30 (Smith & Co paid in May)", async () => {

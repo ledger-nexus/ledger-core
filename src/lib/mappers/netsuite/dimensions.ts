@@ -28,6 +28,7 @@ export function dimensionSetHash(
 export interface SetupDimensionInput {
   code: string;                       // "CLASS", "DEPARTMENT", "LOCATION", "REGION"
   name: string;
+  description?: string;               // optional free-form, for roundtrip preservation
   isRequired?: boolean;
   appliesToAccountTypes?: ("ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE")[];
 }
@@ -42,11 +43,13 @@ export async function setupDimension(
     create: {
       code: input.code,
       name: input.name,
+      description: input.description,
       isRequired: input.isRequired ?? false,
       appliesToAccountTypes: applies as unknown as any,
     },
     update: {
       name: input.name,
+      description: input.description,
       isRequired: input.isRequired ?? false,
       appliesToAccountTypes: applies as unknown as any,
     },
@@ -129,22 +132,36 @@ export async function getOrCreateDimensionSet(
     resolved.push({ dimensionId, dimensionValueId: value.id });
   }
 
-  // Create the set + its value bridges atomically. There's a small race
-  // window between the findUnique above and create here; in the rare case
-  // two callers race for the same hash, Prisma's unique constraint on
-  // `hash` will reject the second one. Catching that and re-reading is a
-  // v0.7 task.
-  const created = await prisma.dimensionSet.create({
-    data: {
-      hash,
-      values: {
-        create: resolved.map((r) => ({
-          dimensionId: r.dimensionId,
-          dimensionValueId: r.dimensionValueId,
-        })),
+  // Create the set + its value bridges. There's a small race window
+  // between the findUnique above and create here; if two callers race for
+  // the same hash, the unique constraint will reject the second one. We
+  // catch P2002 and refetch, returning the existing row's id — making
+  // the function safe to call concurrently and across multiple test runs
+  // where the same hash gets seeded repeatedly.
+  try {
+    const created = await prisma.dimensionSet.create({
+      data: {
+        hash,
+        values: {
+          create: resolved.map((r) => ({
+            dimensionId: r.dimensionId,
+            dimensionValueId: r.dimensionValueId,
+          })),
+        },
       },
-    },
-    select: { id: true },
-  });
-  return created.id;
+      select: { id: true },
+    });
+    return created.id;
+  } catch (e) {
+    // Prisma's typed code; tolerate raw pg "23505" too.
+    const code = (e as { code?: string }).code;
+    if (code === "P2002" || code === "23505") {
+      const reread = await prisma.dimensionSet.findUnique({
+        where: { hash },
+        select: { id: true },
+      });
+      if (reread) return reread.id;
+    }
+    throw e;
+  }
 }

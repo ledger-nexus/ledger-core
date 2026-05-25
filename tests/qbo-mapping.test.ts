@@ -31,12 +31,29 @@ function loadFixture(): QboExport {
 }
 
 async function clearAll() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+  // Scope to the QBO test entity — never wipe Northwind / other tests' data.
+  const ent = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY },
+    select: { id: true },
+  });
+  const entityId = ent?.id;
+  if (entityId) {
+    await prisma.arApplication.deleteMany({
+      where: { openItem: { entityId } },
+    });
+    await prisma.apApplication.deleteMany({
+      where: { openItem: { entityId } },
+    });
+    await prisma.arOpenItem.deleteMany({ where: { entityId } });
+    await prisma.apOpenItem.deleteMany({ where: { entityId } });
+    await prisma.journalLine.deleteMany({
+      where: { entry: { entityId } },
+    });
+    await prisma.journalEntry.deleteMany({ where: { entityId } });
+  }
+  // QBO-sourced parties + accounts may be shared (entityId=null), so
+  // scope by sourceSystem rather than entity. These belong to the QBO
+  // mapper's own data; deleting them across runs is correct.
   await prisma.partyRole.deleteMany({
     where: { party: { sourceSystem: "QBO" } },
   });

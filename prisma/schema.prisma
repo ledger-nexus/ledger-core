@@ -545,6 +545,10 @@ model Dimension {
   id                    String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   code                  String  @unique // "DEPARTMENT", "CLASS", "LOCATION", "PROJECT"
   name                  String
+  // Optional free-form descriptive blurb. Preserved across mapper
+  // roundtrips so NS custom-segment definitions survive export/import.
+  // Not consumed by the GL engine.
+  description           String?
   isRequired            Boolean @default(false)
   // JSON array of AccountType strings this dimension applies to.
   // e.g. ["REVENUE", "EXPENSE"] for P&L-only dimensions.

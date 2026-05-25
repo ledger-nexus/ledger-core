@@ -155,6 +155,7 @@ export async function importFromNs(
   const dimensionSetups: Array<{
     code: string;
     name: string;
+    description?: string;
     values: { code: string; name: string }[];
   }> = [];
 
@@ -183,6 +184,7 @@ export async function importFromNs(
     dimensionSetups.push({
       code: seg.internalid.toUpperCase(),
       name: seg.name,
+      description: seg.description,
       values: seg.values.map((v) => ({ code: v.internalid, name: v.name })),
     });
   }
@@ -192,7 +194,11 @@ export async function importFromNs(
       where: { code: dimSetup.code },
       select: { id: true },
     });
-    await setupDimension(prisma, { code: dimSetup.code, name: dimSetup.name });
+    await setupDimension(prisma, {
+      code: dimSetup.code,
+      name: dimSetup.name,
+      description: dimSetup.description,
+    });
     if (!dimensionExisted) result.dimensionsCreated += 1;
     for (const v of dimSetup.values) {
       const valueExisted = await prisma.dimensionValue.findFirst({

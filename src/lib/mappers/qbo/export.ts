@@ -139,9 +139,32 @@ export async function exportToQbo(
 
 // Compare two QBO exports for equivalence. Order-insensitive on arrays.
 // Returns null if equivalent, or a description of the first difference.
+//
+// canonical() recursively sorts object keys before serializing so that
+// the same record with keys in a different declaration order compares
+// equal — the roundtrip preserves SEMANTICS, not lexical key order.
 export function diffQboExports(a: QboExport, b: QboExport): string | null {
   function sortById<T extends { Id: string }>(arr: T[] | undefined): T[] {
     return [...(arr ?? [])].sort((x, y) => x.Id.localeCompare(y.Id));
+  }
+
+  function canonical(value: unknown): string {
+    if (value === undefined) return "undefined";
+    if (value === null || typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return "[" + value.map(canonical).join(",") + "]";
+    }
+    const obj = value as Record<string, unknown>;
+    // Drop undefined-valued keys so "absent" and "explicitly undefined"
+    // canonicalize the same way (mirrors JSON.stringify's semantics).
+    const keys = Object.keys(obj)
+      .filter((k) => obj[k] !== undefined)
+      .sort();
+    return (
+      "{" +
+      keys.map((k) => JSON.stringify(k) + ":" + canonical(obj[k])).join(",") +
+      "}"
+    );
   }
 
   for (const key of ["Account", "Customer", "Vendor", "Invoice", "Bill", "Payment", "BillPayment", "JournalEntry"] as const) {
@@ -151,8 +174,8 @@ export function diffQboExports(a: QboExport, b: QboExport): string | null {
       return `${key}: count differs (a=${aArr.length}, b=${bArr.length})`;
     }
     for (let i = 0; i < aArr.length; i++) {
-      const aStr = JSON.stringify(aArr[i]);
-      const bStr = JSON.stringify(bArr[i]);
+      const aStr = canonical(aArr[i]);
+      const bStr = canonical(bArr[i]);
       if (aStr !== bStr) {
         return `${key}[${aArr[i].Id}]: payload differs\n  a=${aStr}\n  b=${bStr}`;
       }

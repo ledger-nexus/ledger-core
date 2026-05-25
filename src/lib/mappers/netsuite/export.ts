@@ -143,11 +143,18 @@ export async function exportToNs(
     where: { code: { notIn: ["CLASS", "DEPARTMENT", "LOCATION"] } },
     include: { values: { orderBy: { code: "asc" } } },
   });
-  const customSegments: NsCustomSegment[] = customDimensions.map((d) => ({
-    internalid: d.code.toLowerCase(),
-    name: d.name,
-    values: d.values.map((v) => ({ internalid: v.code, name: v.name })),
-  }));
+  const customSegments: NsCustomSegment[] = customDimensions.map((d) => {
+    const seg: NsCustomSegment = {
+      internalid: d.code.toLowerCase(),
+      name: d.name,
+      values: d.values.map((v) => ({ internalid: v.code, name: v.name })),
+    };
+    // Preserve roundtrip-relevant metadata when present. Skipping
+    // undefined keeps the canonical-compare from emitting noise on
+    // input fixtures that don't carry a description.
+    if (d.description) seg.description = d.description;
+    return seg;
+  });
 
   const customFieldDefs = await prisma.customFieldDefinition.findMany({
     where: { sourceErpField: { startsWith: "cust" } },
@@ -200,6 +207,32 @@ export function diffNsExports(a: NsExport, b: NsExport): string | null {
     return [...(arr ?? [])].sort((x, y) => x.internalid.localeCompare(y.internalid));
   }
 
+  // Key-order-agnostic stringifier. Two records with identical key/value
+  // pairs but different declaration order should compare equal — the
+  // roundtrip preserves SEMANTICS, not lexical key order. Recursively
+  // sorts object keys before serializing.
+  //
+  // Skips keys whose value is `undefined` so that `{a, b}` and
+  // `{a, b, c: undefined}` canonicalize to the same string — this mirrors
+  // JSON.stringify's behavior (which already drops undefined values) and
+  // keeps "key absent" semantically equal to "key explicitly undefined."
+  function canonical(value: unknown): string {
+    if (value === undefined) return "undefined";
+    if (value === null || typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return "[" + value.map(canonical).join(",") + "]";
+    }
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj)
+      .filter((k) => obj[k] !== undefined)
+      .sort();
+    return (
+      "{" +
+      keys.map((k) => JSON.stringify(k) + ":" + canonical(obj[k])).join(",") +
+      "}"
+    );
+  }
+
   const keys = [
     "Subsidiary",
     "Account",
@@ -225,8 +258,8 @@ export function diffNsExports(a: NsExport, b: NsExport): string | null {
       return `${key}: count differs (a=${aArr.length}, b=${bArr.length})`;
     }
     for (let i = 0; i < aArr.length; i++) {
-      const aStr = JSON.stringify(aArr[i]);
-      const bStr = JSON.stringify(bArr[i]);
+      const aStr = canonical(aArr[i]);
+      const bStr = canonical(bArr[i]);
       if (aStr !== bStr) {
         return `${key}[${aArr[i].internalid}]: payload differs\n  a=${aStr}\n  b=${bStr}`;
       }

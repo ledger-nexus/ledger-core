@@ -582,6 +582,45 @@ async function runMonthEndRunners(prisma: PrismaClient) {
 // ---- Public entry points -------------------------------------------
 
 export async function seedNorthwind(prisma: PrismaClient): Promise<void> {
+  // Make the seed re-runnable: wipe Northwind's per-entity rows that
+  // would collide with idempotent creates. Tests in v1.x sometimes
+  // partial-wipe Northwind (delete JEs but leave fixed_asset /
+  // revenue_contract / lease) — re-seeding then trips P2002 on the
+  // (entityId, code) unique constraint. Clearing the same set here
+  // makes db:seed a true reset for NORTHWIND.
+  const existing = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY_CODE },
+    select: { id: true },
+  });
+  if (existing) {
+    const eid = existing.id;
+    // Order: dependents before parents (no cascade in the schema).
+    await prisma.arApplication.deleteMany({ where: { openItem: { entityId: eid } } });
+    await prisma.apApplication.deleteMany({ where: { openItem: { entityId: eid } } });
+    await prisma.arOpenItem.deleteMany({ where: { entityId: eid } });
+    await prisma.apOpenItem.deleteMany({ where: { entityId: eid } });
+    await prisma.fixedAssetBookAttributes.deleteMany({
+      where: { asset: { entityId: eid } },
+    });
+    await prisma.fixedAsset.deleteMany({ where: { entityId: eid } });
+    await prisma.leaseBookAttributes.deleteMany({
+      where: { lease: { entityId: eid } },
+    });
+    await prisma.lease.deleteMany({ where: { entityId: eid } });
+    await prisma.revenueContractBookAttributes.deleteMany({
+      where: { contract: { entityId: eid } },
+    });
+    await prisma.performanceObligation.deleteMany({
+      where: { contract: { entityId: eid } },
+    });
+    await prisma.revenueContract.deleteMany({ where: { entityId: eid } });
+    await prisma.journalLine.deleteMany({
+      where: { entry: { entityId: eid } },
+    });
+    await prisma.journalEntry.deleteMany({ where: { entityId: eid } });
+    await prisma.periodClose.deleteMany({ where: { entityId: eid } });
+  }
+
   await seedMasterData(prisma);
   await seedAccounts(prisma);
   await seedParties(prisma);

@@ -128,6 +128,7 @@ export default async function PeriodsPage() {
                   <TH>Status</TH>
                   <TH>Closed by</TH>
                   <TH>Closed at</TH>
+                  <TH>Packet</TH>
                   {admin ? <TH>Action</TH> : null}
                 </tr>
               </THead>
@@ -169,6 +170,33 @@ export default async function PeriodsPage() {
                       </TD>
                       <TD className="text-xs text-ink-500">
                         {close ? formatDate(close.closedAt) : "—"}
+                      </TD>
+                      <TD className="text-xs">
+                        {jeCount > 0 ? (
+                          <span className="flex items-center gap-2">
+                            <Link
+                              href={`/api/reports/month-end/csv?period=${p.code}`}
+                              className="text-accent-600 hover:underline"
+                            >
+                              CSV
+                            </Link>
+                            <Link
+                              href={`/api/reports/month-end/pdf?period=${p.code}`}
+                              className="text-accent-600 hover:underline"
+                            >
+                              PDF
+                            </Link>
+                            <Link
+                              href={`/reports/month-end?period=${p.code}`}
+                              className="text-ink-400 hover:text-accent-600"
+                              title="Open month-end review"
+                            >
+                              ↗
+                            </Link>
+                          </span>
+                        ) : (
+                          <span className="text-ink-400">—</span>
+                        )}
                       </TD>
                       {admin ? (
                         <TD>

@@ -32,13 +32,29 @@ function loadFixture(): NsExport {
 }
 
 async function clearAll() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
-  // Dimension data
+  // Scope JE/sub-ledger cleanup to the NS test entity — never wipe
+  // Northwind / other tests' data.
+  const ent = await prisma.legalEntity.findUnique({
+    where: { code: ENTITY },
+    select: { id: true },
+  });
+  const entityId = ent?.id;
+  if (entityId) {
+    await prisma.arApplication.deleteMany({
+      where: { openItem: { entityId } },
+    });
+    await prisma.apApplication.deleteMany({
+      where: { openItem: { entityId } },
+    });
+    await prisma.arOpenItem.deleteMany({ where: { entityId } });
+    await prisma.apOpenItem.deleteMany({ where: { entityId } });
+    await prisma.journalLine.deleteMany({
+      where: { entry: { entityId } },
+    });
+    await prisma.journalEntry.deleteMany({ where: { entityId } });
+  }
+  // Dimension data — fully owned by the NS mapper (it's the only
+  // mapper that uses dimensions in v1.x). Wholesale clear is fine.
   await prisma.dimensionSetValue.deleteMany();
   await prisma.dimensionSet.deleteMany();
   await prisma.dimensionValue.deleteMany();
@@ -46,6 +62,7 @@ async function clearAll() {
   await prisma.customFieldDefinition.deleteMany({
     where: { sourceErpField: { startsWith: "cust" } },
   });
+  // NETSUITE-sourced items / parties / accounts — scope by sourceSystem.
   await prisma.item.deleteMany({ where: { sourceSystem: "NETSUITE" } });
   await prisma.partyRole.deleteMany({
     where: { party: { sourceSystem: "NETSUITE" } },
