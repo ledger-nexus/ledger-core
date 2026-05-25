@@ -21,6 +21,7 @@
     "test:property": "vitest run tests/property-based.test.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "^6.39.4",
     "@prisma/client": "^5.22.0",
     "@react-pdf/renderer": "^4.5.1",
     "clsx": "^2.1.1",

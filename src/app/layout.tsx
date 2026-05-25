@@ -5,6 +5,7 @@ import { UserSwitcher } from "@/components/nav/user-switcher";
 import { NotificationBell } from "@/components/nav/notification-bell";
 import { getScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { isClerkEnabled } from "@/lib/auth/clerk";
 import { getRecentNotifications } from "@/lib/notifications";
 import { prisma } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,7 +30,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const notifications = currentUser
     ? await getRecentNotifications(prisma, currentUser.id)
     : { unread: [], recentRead: [], unreadCount: 0 };
-  return (
+  // Conditionally wrap the app in ClerkProvider. We can't statically
+  // import ClerkProvider at module scope because Clerk would try to
+  // evaluate publishable key from env at build time even when unused.
+  // The lazy import below is rendered once per request — Next.js
+  // dedupes at the React level.
+  const tree = (
     <html lang="en">
       <body>
         <div className="grid min-h-screen grid-cols-[260px_1fr] bg-ink-50">
@@ -77,4 +83,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </body>
     </html>
   );
+
+  if (isClerkEnabled()) {
+    // Dynamic import so the Clerk package is only loaded when configured.
+    const { ClerkProvider } = await import("@clerk/nextjs");
+    return <ClerkProvider>{tree}</ClerkProvider>;
+  }
+  return tree;
 }

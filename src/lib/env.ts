@@ -62,6 +62,27 @@ const ENV_SPECS: EnvSpec[] = [
     description:
       "Gates POST /api/admin/reset. If unset, the reset endpoint returns 503.",
   },
+  // Clerk auth — when both keys are present, the Clerk path activates
+  // (see src/lib/auth/clerk.ts isClerkEnabled). When either is missing,
+  // we fall back to the dev cookie stub. Marked REQUIRED_FOR_FEATURE
+  // (not REQUIRED_IN_PRODUCTION) until SOC2_ROADMAP Phase 1 lands —
+  // at that point this becomes a production-required pair.
+  {
+    name: "CLERK_SECRET_KEY",
+    requiredInProduction: false,
+    minLength: 32,
+    description:
+      "Clerk server-side secret key (sk_test_... or sk_live_...). Enables " +
+      "real auth when set. Pair with NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.",
+  },
+  {
+    name: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Clerk client-side publishable key (pk_test_... or pk_live_...). " +
+      "Required whenever CLERK_SECRET_KEY is set.",
+  },
 ];
 
 export interface EnvValidationResult {
@@ -103,6 +124,23 @@ export function validateEnv(): EnvValidationResult {
         warnings.push(msg);
       }
     }
+  }
+
+  // Paired-presence check: Clerk requires BOTH keys to function. If only
+  // one is set, the runtime will silently fail (currentUser() returns
+  // null even after sign-in). Catch the half-configured state.
+  const secret = process.env.CLERK_SECRET_KEY;
+  const pub = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const secretSet = secret != null && secret.length > 0;
+  const pubSet = pub != null && pub.length > 0;
+  if (secretSet !== pubSet) {
+    const msg =
+      "Clerk is half-configured: " +
+      `CLERK_SECRET_KEY=${secretSet ? "set" : "unset"}, ` +
+      `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${pubSet ? "set" : "unset"}. ` +
+      "Both must be set together; otherwise unset both to use the dev stub.";
+    if (isProd) errors.push(msg);
+    else warnings.push(msg);
   }
 
   return { ok: errors.length === 0, errors, warnings };

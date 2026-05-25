@@ -77,12 +77,28 @@ function parseCookie(raw: string | undefined): string | null {
 }
 
 /**
- * Read the current-user cookie + verify the HMAC + look the user up.
- * Returns null if no cookie, cookie tampered, or user not found/inactive.
+ * Read the current user. Two implementations, selected at runtime:
  *
- * Cached per-request via Next's `cookies()` — same render reads at most once.
+ *   - When CLERK_SECRET_KEY is set: delegate to the Clerk-backed
+ *     implementation in ./clerk.ts. Identity comes from Clerk; the
+ *     User row is upserted by email on first contact.
+ *
+ *   - Otherwise: the HMAC-signed dev cookie path below. Used in tests,
+ *     local dev without Clerk credentials, and during the migration
+ *     window before Clerk is provisioned for a given environment.
+ *
+ * The interface (CurrentUser shape, null-when-signed-out contract) is
+ * identical across both paths. Callers shouldn't care which is active.
  */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
+  // Lazy-evaluate the env check on every call (not module-load) so a
+  // test that swaps the env mid-suite picks up the new path.
+  const { isClerkEnabled, getCurrentUserFromClerk } = await import("./clerk");
+  if (isClerkEnabled()) {
+    return getCurrentUserFromClerk();
+  }
+
+  // Dev-cookie stub path.
   const raw = cookies().get(COOKIE_NAME)?.value;
   const userId = parseCookie(raw);
   if (!userId) return null;

@@ -2,13 +2,29 @@
 
 The HMAC-signed dev cookie in `src/lib/auth/current-user.ts` is sufficient for a demo but should not host real client data. This doc covers the swap to Clerk, NextAuth, or WorkOS — depending on what fits your operating context.
 
+## Status (2026-05-25)
+
+**Clerk integration is wired and env-gated** (Phase 3 of `docs/multi-tenancy.md`). Production turns it on by setting two env vars; dev and tests keep the dev-cookie stub by default. The runtime selector is in `src/lib/auth/clerk.ts` → `isClerkEnabled()`.
+
+What's already in the repo:
+- `src/lib/auth/clerk.ts` — Clerk-backed `getCurrentUserFromClerk()` with JIT user provisioning by email
+- `src/lib/auth/current-user.ts` — dispatches to Clerk when `CLERK_SECRET_KEY` is set, otherwise the HMAC dev cookie
+- `src/middleware.ts` — Clerk middleware behind the same env gate, with `/api/internal/*` + sign-in/sign-up exempted from auth
+- `src/app/sign-in/[[...sign-in]]/page.tsx`, `src/app/sign-up/[[...sign-up]]/page.tsx` — Clerk hosted UI pages
+- `src/app/layout.tsx` — conditionally wraps children in `<ClerkProvider>`
+- `src/lib/env.ts` — paired-presence validation (both keys or neither)
+
+To turn Clerk on in a given environment: set `CLERK_SECRET_KEY` + `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`. That's it — no code change.
+
+## The stable interface
+
 The auth-stub's exported API stays stable across swaps:
 - `getCurrentUser()` returns the current user or null
 - `requireCurrentUser()` throws `NotAuthenticatedError` if no user
 - `isAdmin(user)` returns boolean
 - `requireAdmin()` throws `NotAuthorizedError` if not admin
 
-Every Server Action that uses these exports keeps working as long as the new implementation returns the same `CurrentUser` shape (`{id, email, displayName}`).
+Every Server Action that uses these exports keeps working regardless of which path is active, because both implementations return the same `CurrentUser` shape (`{id, email, displayName}`).
 
 ---
 
