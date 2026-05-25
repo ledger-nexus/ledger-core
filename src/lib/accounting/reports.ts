@@ -65,7 +65,7 @@ export async function getTrialBalance(
   );
 
   // Pull lines for the (entity, book) on/before asOf, grouped by account.
-  const accounts = await prisma.account.findMany({
+  const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
       OR: [{ entityId: null }, { entityId }],
@@ -80,6 +80,19 @@ export async function getTrialBalance(
     },
     orderBy: { code: "asc" },
   });
+
+  // Dedup: entity-specific account overrides shared (entityId=null) at
+  // the same code. See getBalanceSheet for the full rationale.
+  const byCode = new Map<string, (typeof rawAccounts)[number]>();
+  for (const a of rawAccounts) {
+    const existing = byCode.get(a.code);
+    if (!existing || (a.entityId !== null && existing.entityId === null)) {
+      byCode.set(a.code, a);
+    }
+  }
+  const accounts = Array.from(byCode.values()).sort((a, b) =>
+    a.code.localeCompare(b.code)
+  );
 
   let totalDebit = new Decimal(0);
   let totalCredit = new Decimal(0);
@@ -131,7 +144,7 @@ export async function getIncomeStatement(
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
   const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
 
-  const accounts = await prisma.account.findMany({
+  const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
       type: { in: ["REVENUE", "EXPENSE"] },
@@ -151,6 +164,22 @@ export async function getIncomeStatement(
     },
     orderBy: { code: "asc" },
   });
+
+  // Dedup: same pattern as getBalanceSheet — when both shared and
+  // entity-specific accounts exist at the same code, prefer the
+  // entity-specific one. Otherwise the IS would show two rows per
+  // code (one with the entity's activity, one zero from the shared
+  // chart), which is just visual noise.
+  const byCode = new Map<string, (typeof rawAccounts)[number]>();
+  for (const a of rawAccounts) {
+    const existing = byCode.get(a.code);
+    if (!existing || (a.entityId !== null && existing.entityId === null)) {
+      byCode.set(a.code, a);
+    }
+  }
+  const accounts = Array.from(byCode.values()).sort((a, b) =>
+    a.code.localeCompare(b.code)
+  );
 
   const revenue: IncomeStatement["revenue"] = [];
   const expenses: IncomeStatement["expenses"] = [];
