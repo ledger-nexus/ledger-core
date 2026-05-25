@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { resolveScope } from "@/lib/scope";
 import {
   getTrialBalance,
   getIncomeStatement,
@@ -24,7 +24,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
   const periodParam = url.searchParams.get("period");
-  const scope = getScope();
+  // Accept ?entity=&book= overrides for shareable URLs (same pattern
+  // as the CSV route).
+  const scope = resolveScope(url.searchParams);
 
   const entity = await prisma.legalEntity.findUnique({
     where: { code: scope.entityCode },

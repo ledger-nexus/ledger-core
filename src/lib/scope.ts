@@ -32,4 +32,25 @@ export function getScope(): LedgerScope {
   }
 }
 
+/**
+ * Resolve the effective scope from URL overrides, falling back to the
+ * cookie. Lets pages and route handlers accept `?entity=X&book=Y` query
+ * parameters that override the sidebar-switched scope cookie for a
+ * single request. Critical for shareable demo URLs — paste the link,
+ * see the right entity's data, no cookie surgery required.
+ */
+export function resolveScope(
+  searchParams: URLSearchParams | Record<string, string | undefined>
+): LedgerScope {
+  const cookieScope = getScope();
+  const get = (k: string): string | undefined =>
+    searchParams instanceof URLSearchParams
+      ? searchParams.get(k) ?? undefined
+      : searchParams[k];
+  return {
+    entityCode: get("entity") ?? cookieScope.entityCode,
+    bookCode: get("book") ?? cookieScope.bookCode,
+  };
+}
+
 export const SCOPE_COOKIE_NAME = COOKIE_NAME;

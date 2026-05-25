@@ -19,7 +19,7 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { resolveScope } from "@/lib/scope";
 import {
   getTrialBalance,
   getIncomeStatement,
@@ -33,6 +33,24 @@ import { formatMoney, formatDate } from "@/lib/utils/format";
 
 interface SearchParams {
   period?: string;
+  /** Optional override of the cookie scope — makes URLs shareable. */
+  entity?: string;
+  /** Optional override of the cookie scope — makes URLs shareable. */
+  book?: string;
+}
+
+/**
+ * Build a query string for the CSV/PDF download links that preserves
+ * any URL-override scope (?entity=&book=) the page itself was opened
+ * with. Without this, clicking "Download CSV" from a shared demo URL
+ * would silently fall back to the cookie scope, which is usually
+ * Northwind — yielding the wrong packet.
+ */
+function packetQuery(periodCode: string, sp: SearchParams): string {
+  const parts = [`period=${encodeURIComponent(periodCode)}`];
+  if (sp.entity) parts.push(`entity=${encodeURIComponent(sp.entity)}`);
+  if (sp.book) parts.push(`book=${encodeURIComponent(sp.book)}`);
+  return parts.join("&");
 }
 
 export default async function MonthEndPage({
@@ -40,7 +58,10 @@ export default async function MonthEndPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const scope = getScope();
+  const scope = resolveScope({
+    entity: searchParams.entity,
+    book: searchParams.book,
+  });
 
   const entity = await prisma.legalEntity.findUnique({
     where: { code: scope.entityCode },
@@ -177,6 +198,15 @@ export default async function MonthEndPage({
         <CardContent>
           <div className="flex items-end justify-between gap-3 flex-wrap">
             <form className="flex items-end gap-3" method="get">
+              {/* Preserve URL-override scope across form GET so a shareable
+                  ?entity=&book= link doesn't drop the overrides when the
+                  user picks a different period. */}
+              {searchParams.entity ? (
+                <input type="hidden" name="entity" value={searchParams.entity} />
+              ) : null}
+              {searchParams.book ? (
+                <input type="hidden" name="book" value={searchParams.book} />
+              ) : null}
               <label className="flex flex-col gap-1 text-xs text-ink-500">
                 Period
                 <select
@@ -200,14 +230,14 @@ export default async function MonthEndPage({
             </form>
             <div className="flex items-end gap-2 text-xs">
               <a
-                href={`/api/reports/month-end/csv?period=${selectedPeriod.code}`}
+                href={`/api/reports/month-end/csv?${packetQuery(selectedPeriod.code, searchParams)}`}
                 className="rounded border border-ink-200 px-3 py-1.5 font-medium text-ink-700 hover:bg-ink-50"
                 download
               >
                 Download CSV
               </a>
               <a
-                href={`/api/reports/month-end/pdf?period=${selectedPeriod.code}`}
+                href={`/api/reports/month-end/pdf?${packetQuery(selectedPeriod.code, searchParams)}`}
                 className="rounded bg-ink-900 px-3 py-1.5 font-medium text-white hover:bg-ink-800"
                 download
               >

@@ -75,23 +75,21 @@ async function main(): Promise<void> {
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`\nDone in ${elapsed}s.\n`);
 
+  const base = process.env.LEDGER_CORE_URL ?? "http://localhost:3000";
+  const qs = `entity=${DEMO_ENTITY_CODE}&book=US_GAAP&period=${DEMO_PERIOD_CODE}`;
+
   console.log("Next steps:");
-  console.log("  1. Start the dev server:  pnpm dev");
-  console.log("  2. In the sidebar, switch scope to DEMO_CO / US_GAAP");
-  console.log("  3. Open /reports/month-end?period=2026-05");
+  console.log("  1. Start the dev server (if not running):  pnpm dev");
+  console.log("  2. Open this link in your browser:");
   console.log("");
-  console.log("Or fetch the packet directly (once dev server is running):");
+  console.log(`     ${base}/reports/month-end?${qs}`);
+  console.log("");
+  console.log("Or download the packet directly:");
+  console.log(`  curl -O '${base}/api/reports/month-end/csv?${qs}'`);
+  console.log(`  curl -O '${base}/api/reports/month-end/pdf?${qs}'`);
+  console.log("");
   console.log(
-    "  curl -b 'lc-scope={\"entityCode\":\"DEMO_CO\",\"bookCode\":\"US_GAAP\"}' \\"
-  );
-  console.log(
-    "    'http://localhost:3000/api/reports/month-end/csv?period=2026-05' -o demo-packet.csv"
-  );
-  console.log(
-    "  curl -b 'lc-scope={\"entityCode\":\"DEMO_CO\",\"bookCode\":\"US_GAAP\"}' \\"
-  );
-  console.log(
-    "    'http://localhost:3000/api/reports/month-end/pdf?period=2026-05' -o demo-packet.pdf"
+    "The ?entity=&book= URL params override the sidebar scope cookie for the request — no cookie surgery needed."
   );
 }
 
