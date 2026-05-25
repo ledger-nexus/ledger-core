@@ -44,6 +44,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { auditTokenUse } from "@/lib/audit/log";
 import {
   UnbalancedEntryError,
   InvalidLineError,
@@ -110,8 +111,22 @@ function lineFromJson(l: JsonLineInput): JournalLineInput {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // SOC 2 CC6 (logical access controls): every internal-API request
+  // is audit-logged regardless of outcome. The audit row is the
+  // primary control for detecting credential misuse or scanning
+  // attempts on this endpoint.
+  const reqHeaders = {
+    ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    userAgent: req.headers.get("user-agent"),
+  };
   const token = process.env.INTERNAL_API_TOKEN;
   if (!token) {
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/journal-entries",
+      reason: "INTERNAL_API_TOKEN not set — endpoint disabled",
+      requestHeaders: reqHeaders,
+    });
     return err(
       "UNAUTHORIZED",
       "INTERNAL_API_TOKEN env var is not set — endpoint disabled. Set it in the deployment env to enable.",
@@ -120,8 +135,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const authHeader = req.headers.get("authorization") ?? "";
   if (authHeader !== `Bearer ${token}`) {
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/journal-entries",
+      reason: authHeader ? "Invalid bearer token" : "Missing bearer token",
+      requestHeaders: reqHeaders,
+    });
     return err("UNAUTHORIZED", "Invalid or missing bearer token", 401);
   }
+  // Success path — log AFTER we've fully consumed the body + dispatched.
+  // We don't log here to avoid double-logging (one per-request, one
+  // post-create); the actual `postJournalEntry` success branch writes
+  // the row at the bottom of this handler.
 
   let body: JsonEntryInput;
   try {
@@ -187,6 +212,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const result = await postJournalEntry(prisma, input);
+    // SOC 2 CC6: log the successful token use + resulting JE.
+    // sourceSystem identifies which sibling repo posted this.
+    await auditTokenUse({
+      success: true,
+      endpoint: "POST /api/internal/journal-entries",
+      metadata: {
+        sourceSystem: body.sourceSystem,
+        sourceRecordType: body.sourceRecordType,
+        sourceRecordId: body.sourceRecordId,
+        entryNumber: result.entryNumber,
+        entityCode: body.entityCode,
+        bookCode: result.bookCode,
+      },
+      requestHeaders: reqHeaders,
+    });
     return NextResponse.json({
       ok: true,
       id: result.id,

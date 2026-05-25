@@ -1111,6 +1111,7 @@ model User {
   recordEvents          RecordEvent[]
   notifications         Notification[] @relation("NotificationRecipient")
   notificationsActed    Notification[] @relation("NotificationActor")
+  auditEvents           AuditLog[]     @relation("AuditLogActor")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1195,6 +1196,82 @@ enum RecordEventType {
   REASSIGNMENT_LOCKED
   REASSIGNMENT_UNLOCKED
   ABANDONED
+}
+
+// AuditLog — security & access events.
+//
+// Complements RecordEvent (which tracks state changes on tracked records).
+// AuditLog records the events SOC 2 CC6/CC7 auditors expect to see:
+//   - Login + logout + access denials
+//   - Privileged actions (period close, user lifecycle changes, admin reset)
+//   - Internal-API token use (success + rejection)
+//   - Data exports (CSV/PDF downloads)
+//   - Configuration changes
+//   - Anomalies the system itself catches
+//
+// Designed for long retention (12+ months for SOC 2). The actorEmail
+// column duplicates the join target so the log survives a User row
+// deletion — auditors expect immutability of the trail.
+//
+// metadata is intentionally Json — different event types carry different
+// shapes. Conventions documented in src/lib/audit/log.ts.
+model AuditLog {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType   AuditEventType
+  // Who: actor (when known) + denormalized email + network identity
+  actorUserId String?        @db.Uuid
+  actor       User?          @relation("AuditLogActor", fields: [actorUserId], references: [id])
+  // Captured separately so the log survives a User deletion. Required
+  // for actor-identifiable events (LOGIN_*, PRIVILEGED_ACTION, etc.);
+  // null for system events (CONFIG_CHANGE on boot, etc.).
+  actorEmail  String?
+  // From x-forwarded-for (Vercel) or remoteAddress. Best-effort; clients
+  // can spoof. Required reading for unusual-access investigations.
+  ipAddress   String?
+  userAgent   String?
+  // What: resource + action
+  // resource is a stable string ("JournalEntry", "Period", "User",
+  // "FixedAsset", "DepreciationRun", etc.). resourceId is the target
+  // record's code or UUID (whichever's more readable in the log).
+  resource    String?
+  resourceId  String?
+  // action is free-form verbal: "post", "close", "reopen", "deactivate",
+  // "download-csv", "view-report", "issue-token", etc. Match action
+  // names to the Server Action / endpoint that wrote the log entry.
+  action      String
+  outcome     AuditOutcome   @default(SUCCESS)
+  // Context: structured fields the event-type expects. See
+  // src/lib/audit/log.ts for the convention per event type.
+  metadata    Json?
+  occurredAt  DateTime       @default(now())
+
+  // Indexes drive the common audit queries:
+  //   - "What did Carla do this week?" → (actorUserId, occurredAt)
+  //   - "Show me all login failures last 30 days" → (eventType, occurredAt)
+  //   - "Who accessed JE NORTHWIND-US_GAAP-00042?" → (resource, resourceId)
+  @@index([actorUserId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([resource, resourceId, occurredAt])
+  @@map("audit_log")
+}
+
+enum AuditEventType {
+  LOGIN_SUCCESS           // setCurrentUser succeeded
+  LOGIN_FAILURE           // setCurrentUser rejected (unknown user, inactive)
+  LOGOUT                  // clearCurrentUser
+  ACCESS_DENIED           // requireAdmin failed; non-admin tried admin action
+  PRIVILEGED_ACTION       // period close, user lifecycle, admin reset, etc.
+  DATA_EXPORT             // CSV/PDF download, bulk read
+  TOKEN_USED              // /api/internal/* request authenticated via INTERNAL_API_TOKEN
+  TOKEN_REJECTED          // /api/internal/* request failed Bearer-token check
+  CONFIG_CHANGE           // env-var change, schema migration applied
+  SECURITY_EVENT          // anything anomalous: rate-limit hit, repeated failures, etc.
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+  ANOMALOUS
 }
 
 // Reassignment rules. Versioned + audited, same discipline as PostingRule.

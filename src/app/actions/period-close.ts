@@ -43,6 +43,10 @@ import {
   NotAuthenticatedError,
   NotAuthorizedError,
 } from "@/lib/auth/current-user";
+import {
+  auditPrivilegedAction,
+  auditAccessDenied,
+} from "@/lib/audit/log";
 
 export interface ClosePeriodInput {
   entityCode: string;
@@ -135,6 +139,17 @@ export async function closePeriodAction(
       select: { closedAt: true, closedBy: true },
     });
 
+    // SOC 2 CC5/CC6: every period close is a privileged action.
+    // Captured in audit_log so quarterly access reviews can prove the
+    // human-in-the-loop chain (who closed which period when).
+    await auditPrivilegedAction({
+      actor: admin,
+      action: "close-period",
+      resource: "Period",
+      resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      metadata: { journalEntryCount: jeCount },
+    });
+
     revalidatePath("/periods");
     revalidatePath("/reports/month-end");
 
@@ -148,9 +163,21 @@ export async function closePeriodAction(
     };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
+      await auditAccessDenied({
+        attemptedAction: "close-period",
+        reason: "Not authenticated",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
       return { ok: false, message: "You must be signed in." };
     }
     if (e instanceof NotAuthorizedError) {
+      await auditAccessDenied({
+        attemptedAction: "close-period",
+        reason: "Not admin",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
       return { ok: false, message: "Period close requires admin permission." };
     }
     return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
@@ -173,7 +200,7 @@ export async function reopenPeriodAction(
   input: ReopenPeriodInput
 ): Promise<ReopenPeriodState> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
 
     if (!input.entityCode || !input.bookCode || !input.periodCode) {
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
@@ -226,6 +253,16 @@ export async function reopenPeriodAction(
 
     await prisma.periodClose.delete({ where: { id: existing.id } });
 
+    // SOC 2 CC5/CC6: reopen is a SIGNIFICANT privileged action (it
+    // re-opens books that may have been used for stakeholder reporting).
+    // Capture even more aggressively than close.
+    await auditPrivilegedAction({
+      actor: admin,
+      action: "reopen-period",
+      resource: "Period",
+      resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+    });
+
     revalidatePath("/periods");
     revalidatePath("/reports/month-end");
 
@@ -236,9 +273,21 @@ export async function reopenPeriodAction(
     };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
+      await auditAccessDenied({
+        attemptedAction: "reopen-period",
+        reason: "Not authenticated",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
       return { ok: false, message: "You must be signed in." };
     }
     if (e instanceof NotAuthorizedError) {
+      await auditAccessDenied({
+        attemptedAction: "reopen-period",
+        reason: "Not admin",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
       return { ok: false, message: "Period reopen requires admin permission." };
     }
     return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
