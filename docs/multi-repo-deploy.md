@@ -6,6 +6,53 @@ The architecture: five Next.js apps, each its own Vercel project, all connecting
 
 ---
 
+## TL;DR — one-command deploy
+
+If you'd rather not click through Vercel's dashboard five times, the script `bin/deploy.sh` does the whole thing non-interactively. Total runtime: ~10–15 minutes (Vercel builds dominate).
+
+### One-time signup (do this first)
+
+Both services have generous free tiers and don't ask for a credit card.
+
+1. **Vercel** — go to [vercel.com/signup](https://vercel.com/signup), sign in with GitHub. After signup you'll land on a dashboard.
+
+2. **Vercel deploy token** — visit [vercel.com/account/tokens](https://vercel.com/account/tokens). Click **Create Token**. Name it `ledger-nexus-deploy`. Expiration: pick whatever — 1 year is reasonable. Scope: full account (default). Copy the token. **You won't see it again.**
+
+3. **Neon** — go to [neon.tech](https://neon.tech), sign in with GitHub. After signup, click **New Project**. Name it `ledger-nexus`. Region: pick something close to you (default `aws-us-east-2` is fine; for Vercel deploys to `iad1` you'd ideally pick `aws-us-east-1`). Click **Create**.
+
+4. **Neon connection string** — once the project is created, look for the **Connection Details** panel on the dashboard. **You want the POOLED connection string**, not the direct one. It ends in `-pooler` (e.g., `ep-misty-snow-12345-pooler.us-east-2.aws.neon.tech`). The pooled URL is required for Vercel's serverless cold-starts; the direct URL will run you out of Postgres connections under load. Copy it.
+
+### Run the deploy
+
+```bash
+export VERCEL_TOKEN=<token from step 2>
+export DATABASE_URL=<Neon pooled URL from step 4>
+
+cd /path/to/ledger-core
+./bin/deploy.sh
+```
+
+The script auto-discovers all 5 sibling repos (`ledger-core/`, `recon/`, `revenue-rec/`, `integrations/`, `fa-amort/` under one parent directory). It then:
+
+- generates three random internal-auth tokens
+- creates 5 Vercel projects under your account (named `ledger-nexus-*`)
+- wires every Vercel project's env vars (cross-repo URLs propagate automatically)
+- pushes the ledger-core schema to Neon
+- runs the Northwind seed
+- deploys all 5 repos in order
+
+Output: five `https://*.vercel.app` URLs printed at the end. Tokens saved to `/tmp/ledger-nexus-tokens.txt` for redeploys.
+
+### Troubleshooting
+
+- **"Project name already exists"** — Vercel project names are unique per account. If you've deployed before, the script reuses the existing project. If you want a fresh project, delete it from the Vercel dashboard first.
+- **"Schema push failed"** — Neon idle-suspends free-tier compute after 5 minutes. First connection wakes it up; the script retries. If it really fails, run `DATABASE_URL=<url> npx prisma db push` from `ledger-core/` manually.
+- **"Permission denied on /tmp/ledger-nexus-tokens.txt"** — your `/tmp` is locked down. Edit the script's `cat > /tmp/...` line to write elsewhere.
+
+Want to see every step manually? Skip this section and follow Steps 1-8 below.
+
+---
+
 ## The big picture
 
 ```
