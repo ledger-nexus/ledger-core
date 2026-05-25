@@ -23,6 +23,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
+import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 // next/headers' cookies() only works inside a Next.js request scope.
 // Mock it with a simple in-memory store so the auth stub + the Server
 // Action's revalidatePath calls can run in vitest. Must be hoisted
@@ -87,10 +88,11 @@ async function seedMasterData() {
     create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
     update: {},
   });
+  const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
     where: { code: ENTITY_CODE },
-    create: { code: ENTITY_CODE, name: "Close Co.", functionalCurrencyId: "USD" },
-    update: {},
+    create: { tenantId, code: ENTITY_CODE, name: "Close Co.", functionalCurrencyId: "USD" },
+    update: { tenantId },
   });
   for (const b of [
     { code: BOOK_GAAP, name: "US GAAP", basis: "US_GAAP" as const },

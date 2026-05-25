@@ -60,7 +60,7 @@ export async function createFixedAsset(
 ): Promise<{ id: string }> {
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: input.entityCode },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   const vendor = input.vendorPartyCode
     ? await prisma.party.findFirstOrThrow({
@@ -80,6 +80,7 @@ export async function createFixedAsset(
   return await prisma.$transaction(async (tx) => {
     const asset = await tx.fixedAsset.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code: input.code,
         description: input.description,

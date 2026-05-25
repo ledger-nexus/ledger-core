@@ -70,7 +70,7 @@ export async function createLease(
 ): Promise<{ id: string }> {
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: input.entityCode },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   const lessor = input.lessorPartyCode
     ? await prisma.party.findFirstOrThrow({
@@ -95,6 +95,7 @@ export async function createLease(
 
   return await prisma.lease.create({
     data: {
+      tenantId: entity.tenantId,
       entityId: entity.id,
       code: input.code,
       description: input.description,

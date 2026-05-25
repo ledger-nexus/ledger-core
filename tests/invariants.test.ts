@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import {
@@ -67,10 +68,11 @@ async function seedMasterData() {
     update: {},
   });
 
+  const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
     where: { code: ENTITY_CODE },
-    create: { code: ENTITY_CODE, name: "Test Co.", functionalCurrencyId: "USD" },
-    update: {},
+    create: { tenantId, code: ENTITY_CODE, name: "Test Co.", functionalCurrencyId: "USD" },
+    update: { tenantId },
   });
 
   for (const b of [

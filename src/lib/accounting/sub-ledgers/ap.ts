@@ -62,7 +62,7 @@ export async function openApItem(
   const [entity, book, party] = await Promise.all([
     prisma.legalEntity.findUniqueOrThrow({
       where: { code: input.entityCode },
-      select: { id: true },
+      select: { id: true, tenantId: true },
     }),
     prisma.book.findUniqueOrThrow({
       where: { code: input.bookCode },
@@ -83,6 +83,7 @@ export async function openApItem(
 
   const item = await prisma.apOpenItem.create({
     data: {
+      tenantId: entity.tenantId,
       entityId: entity.id,
       bookId: book.id,
       partyId: party.id,

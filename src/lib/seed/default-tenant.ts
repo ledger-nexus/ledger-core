@@ -1,0 +1,32 @@
+// Resolver for "the default tenant" — the single Tenant row created by
+// the Phase 1 multi-tenancy migration (slug = "default"). Used by seeds
+// and test fixtures that need to create LegalEntities, Accounts, etc.,
+// before any real tenant is provisioned.
+//
+// New production data (post-Clerk-sign-up) should NOT use this helper —
+// it should use the requesting user's actual current tenant via
+// `requireCurrentTenant()`. This helper is for the migration window
+// between v1 (single default tenant) and v2 (real multi-tenant).
+//
+// Once Phase 4b applies NOT NULL to tenantId everywhere, this resolver
+// becomes the only sensible default for legacy code paths still being
+// migrated.
+
+import type { PrismaClient } from "@prisma/client";
+
+const DEFAULT_TENANT_SLUG = "default";
+
+export async function getDefaultTenantId(prisma: PrismaClient): Promise<string> {
+  const t = await prisma.tenant.findUnique({
+    where: { slug: DEFAULT_TENANT_SLUG },
+    select: { id: true },
+  });
+  if (!t) {
+    throw new Error(
+      `Default tenant (slug="${DEFAULT_TENANT_SLUG}") not found. ` +
+        "Run prisma migration 0002_multi_tenancy first (creates it + " +
+        "backfills existing rows). See docs/multi-tenancy.md."
+    );
+  }
+  return t.id;
+}

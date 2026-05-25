@@ -81,14 +81,26 @@ async function seedHierarchy() {
       },
     });
   }
+  // Multi-tenancy (Phase 1+): every entity must belong to a tenant.
+  // For tests we use the default tenant created by the Phase 1 migration.
+  const defaultTenant = await prisma.tenant.findUnique({
+    where: { slug: "default" },
+    select: { id: true },
+  });
+  if (!defaultTenant) {
+    throw new Error(
+      "Default tenant not found — run prisma migration 0002_multi_tenancy first"
+    );
+  }
+  const tenantId = defaultTenant.id;
   const parent = await prisma.legalEntity.create({
-    data: { code: PARENT, name: "Parent Co", functionalCurrencyId: "USD" },
+    data: { tenantId, code: PARENT, name: "Parent Co", functionalCurrencyId: "USD" },
   });
   const subA = await prisma.legalEntity.create({
-    data: { code: SUB_A, name: "Sub A", functionalCurrencyId: "USD", parentEntityId: parent.id },
+    data: { tenantId, code: SUB_A, name: "Sub A", functionalCurrencyId: "USD", parentEntityId: parent.id },
   });
   const subB = await prisma.legalEntity.create({
-    data: { code: SUB_B, name: "Sub B", functionalCurrencyId: "USD", parentEntityId: parent.id },
+    data: { tenantId, code: SUB_B, name: "Sub B", functionalCurrencyId: "USD", parentEntityId: parent.id },
   });
 
   // Fiscal calendars (required for postJournalEntry's period lookup).

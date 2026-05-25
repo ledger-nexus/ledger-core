@@ -13,6 +13,7 @@ import { postJournalEntry } from "../accounting/post-journal";
 import { CHART_OF_ACCOUNTS } from "../db/chart-of-accounts";
 import { openArItem, applyArPayment } from "../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../accounting/sub-ledgers/ap";
+import { getDefaultTenantId } from "./default-tenant";
 import {
   createFixedAsset,
   runDepreciation,
@@ -68,14 +69,19 @@ async function seedMasterData(prisma: PrismaClient) {
     update: {},
   });
 
+  // Multi-tenancy: every entity belongs to a Tenant. Seeds belong to
+  // the migration-created "default" tenant (the single-tenant fallback
+  // for non-multi-tenant deployments).
+  const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
     where: { code: ENTITY_CODE },
     create: {
+      tenantId,
       code: ENTITY_CODE,
       name: "Northwind Cloud, Inc.",
       functionalCurrencyId: "USD",
     },
-    update: {},
+    update: { tenantId }, // backfill for any pre-migration row
   });
 
   for (const b of [

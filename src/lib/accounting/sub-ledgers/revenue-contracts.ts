@@ -57,7 +57,7 @@ export async function createRevenueContract(
 ): Promise<{ id: string }> {
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: input.entityCode },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   const customer = await prisma.party.findFirstOrThrow({
     where: {
@@ -74,6 +74,7 @@ export async function createRevenueContract(
 
   return await prisma.revenueContract.create({
     data: {
+      tenantId: entity.tenantId,
       entityId: entity.id,
       code: input.code,
       description: input.description,

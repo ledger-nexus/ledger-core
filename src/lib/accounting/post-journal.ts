@@ -34,6 +34,8 @@ import {
   UnknownBookError,
   PeriodClosedError,
   AccountBookScopeError,
+  TenantScopeMismatchError,
+  EntityMissingTenantError,
 } from "./types";
 import { fireInsertRules, type FireRulesResult } from "../rules/integration";
 
@@ -86,9 +88,42 @@ export async function postJournalEntry(
 
   const entity = await prisma.legalEntity.findUnique({
     where: { code: input.entityCode },
-    select: { id: true, code: true, functionalCurrencyId: true },
+    select: {
+      id: true,
+      code: true,
+      functionalCurrencyId: true,
+      // tenantId is denormalized onto JournalEntry + every JournalLine
+      // so multi-tenant queries can filter without joining LegalEntity.
+      // Required for Phase 4 of docs/multi-tenancy.md.
+      tenantId: true,
+    },
   });
   if (!entity) throw new UnknownEntityError(input.entityCode);
+
+  // ---- 1a. Multi-tenancy scope check --------------------------------------
+  //
+  // Three states are valid:
+  //   - entity.tenantId != null + input.tenantId omitted: trust the entity
+  //     (legacy callers, seeds, default-tenant single-tenant world)
+  //   - entity.tenantId != null + input.tenantId == entity.tenantId: caller
+  //     asserted scope and it matches — preferred for Server Actions
+  //   - entity.tenantId != null + input.tenantId != entity.tenantId: BUG —
+  //     caller's session is for tenant X but trying to post to tenant Y's
+  //     entity. Refuse.
+  //
+  // entity.tenantId == null indicates a row that escaped the Phase 1
+  // backfill (shouldn't be possible in v1+) — refuse for safety.
+  if (entity.tenantId == null) {
+    throw new EntityMissingTenantError(entity.code);
+  }
+  if (input.tenantId != null && input.tenantId !== entity.tenantId) {
+    throw new TenantScopeMismatchError(
+      input.tenantId,
+      entity.tenantId,
+      entity.code
+    );
+  }
+  const tenantId = entity.tenantId;
 
   const bookCode = input.bookCode ?? DEFAULT_BOOK;
   const book = await prisma.book.findUnique({
@@ -270,6 +305,9 @@ export async function postJournalEntry(
     const entry = await tx.journalEntry.create({
       data: {
         entryNumber,
+        // tenantId resolved at top of function; denormalized here for query
+        // speed (every cross-tenant filter hits this column, not a JOIN).
+        tenantId,
         entityId: entity.id,
         bookId: book.id,
         periodId: period?.id,
@@ -293,6 +331,9 @@ export async function postJournalEntry(
         extensions: (input.extensions as any) ?? undefined,
         lines: {
           create: normalizedLines.map((l) => ({
+            // Same tenantId on every line for query speed — JournalLine
+            // queries filter by tenantId without traversing the JE FK.
+            tenantId,
             lineNo: l.lineNo,
             accountId: codeToAccount.get(l.accountCode)!.id,
             partyId: l.partyCode ? partyMap.get(l.partyCode) ?? null : null,

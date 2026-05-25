@@ -61,7 +61,9 @@ export async function openArItem(
   const [entity, book, party] = await Promise.all([
     prisma.legalEntity.findUniqueOrThrow({
       where: { code: input.entityCode },
-      select: { id: true },
+      // tenantId pulled so we can denormalize onto the open-item row
+      // (Phase 4 of docs/multi-tenancy.md).
+      select: { id: true, tenantId: true },
     }),
     prisma.book.findUniqueOrThrow({
       where: { code: input.bookCode },
@@ -87,6 +89,7 @@ export async function openArItem(
 
   const item = await prisma.arOpenItem.create({
     data: {
+      tenantId: entity.tenantId,
       entityId: entity.id,
       bookId: book.id,
       partyId: party.id,

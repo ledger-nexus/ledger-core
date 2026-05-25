@@ -42,6 +42,7 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../accounting/post-journal";
+import { getDefaultTenantId } from "./default-tenant";
 import { openArItem, applyArPayment } from "../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../accounting/sub-ledgers/ap";
 import { createFixedAsset } from "../accounting/sub-ledgers/fixed-assets";
@@ -465,14 +466,16 @@ async function seedMasterData(prisma: PrismaClient): Promise<void> {
     create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
     update: {},
   });
+  const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
     where: { code: ENTITY_CODE },
     create: {
+      tenantId,
       code: ENTITY_CODE,
       name: "Demo Co — month-one SaaS",
       functionalCurrencyId: "USD",
     },
-    update: { name: "Demo Co — month-one SaaS" },
+    update: { name: "Demo Co — month-one SaaS", tenantId },
   });
   for (const b of [
     { code: "US_GAAP", name: "US GAAP", basis: "US_GAAP" as const },

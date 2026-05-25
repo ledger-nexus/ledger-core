@@ -77,7 +77,8 @@ export async function closePeriodAction(
 
     const entity = await prisma.legalEntity.findUnique({
       where: { code: input.entityCode },
-      select: { id: true, code: true },
+      // tenantId pulled so the PeriodClose row is tenant-tagged.
+      select: { id: true, code: true, tenantId: true },
     });
     if (!entity) return { ok: false, message: `Unknown entity: ${input.entityCode}` };
 
@@ -131,6 +132,7 @@ export async function closePeriodAction(
 
     const created = await prisma.periodClose.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         bookId: book.id,
         periodId: period.id,

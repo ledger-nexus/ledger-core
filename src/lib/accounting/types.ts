@@ -61,6 +61,14 @@ export interface JournalLineInput {
 // The schema cannot have a balanced trial balance without knowing which
 // (entity, book) the lines belong to.
 export interface JournalEntryInput {
+  // Multi-tenancy scope assertion. When provided, postJournalEntry rejects
+  // the write if the resolved entity belongs to a different tenant —
+  // catches a Server Action holding tenant A's session that tries to
+  // post to an entity owned by tenant B. When omitted (legacy callers),
+  // the engine resolves tenantId from the entity and tags the JE
+  // automatically. New callers should ALWAYS pass this so cross-tenant
+  // attempts are caught at the write layer.
+  tenantId?: string;
   entityCode: string;
   bookCode?: string;                // default "US_GAAP"
   currencyCode?: string;            // default = entity's functional currency
@@ -142,5 +150,38 @@ export class AccountBookScopeError extends Error {
   constructor(public accountCode: string, public bookCode: string) {
     super(`Account ${accountCode} is not in scope for book ${bookCode}`);
     this.name = "AccountBookScopeError";
+  }
+}
+
+// Raised when input.tenantId is supplied but doesn't match the tenant
+// that owns the resolved LegalEntity. Indicates a cross-tenant attempt —
+// e.g. a Server Action running as tenant A trying to write to an entity
+// owned by tenant B. Caller's session is the source of truth; the
+// engine refuses to silently switch tenants.
+export class TenantScopeMismatchError extends Error {
+  constructor(
+    public claimedTenantId: string,
+    public entityTenantId: string,
+    public entityCode: string
+  ) {
+    super(
+      `Tenant scope mismatch: caller claims tenant ${claimedTenantId} ` +
+        `but entity ${entityCode} belongs to tenant ${entityTenantId}`
+    );
+    this.name = "TenantScopeMismatchError";
+  }
+}
+
+// Raised when the resolved entity has no tenantId. Should not happen in
+// v1+ (the Phase 1 multi-tenancy migration backfilled every row). If it
+// does, it's a data-integrity bug — refusing to silently default to a
+// global namespace.
+export class EntityMissingTenantError extends Error {
+  constructor(public entityCode: string) {
+    super(
+      `Entity ${entityCode} has no tenantId — data integrity error. ` +
+        `Every entity must belong to a tenant (Phase 1 migration).`
+    );
+    this.name = "EntityMissingTenantError";
   }
 }

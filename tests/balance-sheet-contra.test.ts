@@ -33,6 +33,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getBalanceSheet } from "../src/lib/accounting/reports";
@@ -61,10 +62,11 @@ async function seedMasterData() {
     create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
     update: {},
   });
+  const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
     where: { code: ENTITY_CODE },
-    create: { code: ENTITY_CODE, name: "Contra Co.", functionalCurrencyId: "USD" },
-    update: {},
+    create: { tenantId, code: ENTITY_CODE, name: "Contra Co.", functionalCurrencyId: "USD" },
+    update: { tenantId },
   });
   await prisma.book.upsert({
     where: { code: BOOK_CODE },

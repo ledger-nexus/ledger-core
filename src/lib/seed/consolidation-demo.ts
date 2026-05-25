@@ -16,6 +16,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "../accounting/post-journal";
+import { getDefaultTenantId } from "./default-tenant";
 
 const PARENT_CODE = "ACME_GROUP";
 const SUB_US_CODE = "ACME_US";
@@ -37,36 +38,41 @@ export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void>
     update: {},
   });
 
+  const tenantId = await getDefaultTenantId(prisma);
+
   // Create parent entity first so child rows can FK to it.
   const parent = await prisma.legalEntity.upsert({
     where: { code: PARENT_CODE },
     create: {
+      tenantId,
       code: PARENT_CODE,
       name: "Acme Group (consolidation parent)",
       functionalCurrencyId: "USD",
     },
-    update: {},
+    update: { tenantId },
   });
 
   const usSub = await prisma.legalEntity.upsert({
     where: { code: SUB_US_CODE },
     create: {
+      tenantId,
       code: SUB_US_CODE,
       name: "Acme US Subsidiary",
       functionalCurrencyId: "USD",
       parentEntityId: parent.id,
     },
-    update: { parentEntityId: parent.id },
+    update: { tenantId, parentEntityId: parent.id },
   });
   const ukSub = await prisma.legalEntity.upsert({
     where: { code: SUB_UK_CODE },
     create: {
+      tenantId,
       code: SUB_UK_CODE,
       name: "Acme UK Subsidiary",
       functionalCurrencyId: "USD",  // Real-world: GBP; demo uses USD to keep math clean.
       parentEntityId: parent.id,
     },
-    update: { parentEntityId: parent.id },
+    update: { tenantId, parentEntityId: parent.id },
   });
 
   // Fiscal calendar + Q1 period for each sub (needed by postJournalEntry).
