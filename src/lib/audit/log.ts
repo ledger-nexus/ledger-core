@@ -42,6 +42,13 @@ export interface AuditLogInput {
   resource?: string | null;
   resourceId?: string | null;
   metadata?: Record<string, unknown> | null;
+  // Multi-tenancy scope. When the audit row is generated inside a
+  // resolved tenant context (Server Action, internal API after token
+  // resolution), pass the tenantId so quarterly access reviews filter
+  // each tenant's events independently. Null when the event happened
+  // before tenant resolution (e.g. TOKEN_REJECTED before identity
+  // lookup completes) or in a global context (CONFIG_CHANGE on boot).
+  tenantId?: string | null;
   // When called from a route handler (NextRequest), pass the headers
   // through so we can extract ip + user-agent.
   requestHeaders?: { ip?: string | null; userAgent?: string | null };
@@ -74,6 +81,7 @@ export async function logAuditEvent(input: AuditLogInput): Promise<void> {
 
     await prisma.auditLog.create({
       data: {
+        tenantId: input.tenantId ?? null,
         eventType: input.eventType,
         action: input.action,
         outcome: input.outcome ?? "SUCCESS",
@@ -182,6 +190,12 @@ export async function auditTokenUse(input: {
   endpoint: string;
   reason?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Tenant the token was resolved against. Null when resolution failed
+   * (TOKEN_REJECTED before identity lookup) — the audit row still
+   * captures the rejection but isn't tied to a tenant.
+   */
+  tenantId?: string | null;
   requestHeaders?: { ip?: string | null; userAgent?: string | null };
 }) {
   return logAuditEvent({
@@ -190,6 +204,7 @@ export async function auditTokenUse(input: {
     outcome: input.success ? "SUCCESS" : "FAILURE",
     resource: "InternalAPI",
     resourceId: input.endpoint,
+    tenantId: input.tenantId ?? null,
     metadata: { reason: input.reason, ...(input.metadata ?? {}) },
     requestHeaders: input.requestHeaders,
   });

@@ -45,6 +45,7 @@ import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { auditTokenUse } from "@/lib/audit/log";
+import { resolveBearerToken } from "@/lib/auth/token";
 import {
   UnbalancedEntryError,
   InvalidLineError,
@@ -53,6 +54,8 @@ import {
   UnknownBookError,
   PeriodClosedError,
   AccountBookScopeError,
+  TenantScopeMismatchError,
+  EntityMissingTenantError,
   type JournalEntryInput,
   type JournalLineInput,
 } from "@/lib/accounting/types";
@@ -119,34 +122,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
     userAgent: req.headers.get("user-agent"),
   };
-  const token = process.env.INTERNAL_API_TOKEN;
-  if (!token) {
-    await auditTokenUse({
-      success: false,
-      endpoint: "POST /api/internal/journal-entries",
-      reason: "INTERNAL_API_TOKEN not set — endpoint disabled",
-      requestHeaders: reqHeaders,
-    });
-    return err(
-      "UNAUTHORIZED",
-      "INTERNAL_API_TOKEN env var is not set — endpoint disabled. Set it in the deployment env to enable.",
-      503
-    );
-  }
+  // Multi-tenancy token binding (Phase 5):
+  // Resolve the Bearer token to a tenant. Two paths handled in
+  // resolveBearerToken: (1) per-tenant TenantApiToken row, (2) legacy
+  // INTERNAL_API_TOKEN env var → default tenant. If neither matches,
+  // we reject with 401 and audit-log the rejection.
   const authHeader = req.headers.get("authorization") ?? "";
-  if (authHeader !== `Bearer ${token}`) {
+  const bearer = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : "";
+
+  if (!bearer) {
     await auditTokenUse({
       success: false,
       endpoint: "POST /api/internal/journal-entries",
-      reason: authHeader ? "Invalid bearer token" : "Missing bearer token",
+      reason: "Missing bearer token",
       requestHeaders: reqHeaders,
     });
-    return err("UNAUTHORIZED", "Invalid or missing bearer token", 401);
+    return err("UNAUTHORIZED", "Missing bearer token", 401);
   }
-  // Success path — log AFTER we've fully consumed the body + dispatched.
-  // We don't log here to avoid double-logging (one per-request, one
-  // post-create); the actual `postJournalEntry` success branch writes
-  // the row at the bottom of this handler.
+
+  const identity = await resolveBearerToken(bearer);
+  if (!identity) {
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/journal-entries",
+      reason: "Bearer token did not match any TenantApiToken or INTERNAL_API_TOKEN",
+      requestHeaders: reqHeaders,
+    });
+    return err("UNAUTHORIZED", "Invalid or revoked bearer token", 401);
+  }
+  // identity.tenantId is now the authoritative scope for this request.
+  // postJournalEntry asserts the entity belongs to this tenant; cross-
+  // tenant attempts fail with TenantScopeMismatchError → 403.
 
   let body: JsonEntryInput;
   try {
@@ -166,6 +174,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let input: JournalEntryInput;
   try {
     input = {
+      // Token's tenant is the authoritative scope. postJournalEntry
+      // rejects with TenantScopeMismatchError if entity belongs elsewhere.
+      tenantId: identity.tenantId,
       entityCode: body.entityCode,
       bookCode: body.bookCode,
       currencyCode: body.currencyCode,
@@ -213,10 +224,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const result = await postJournalEntry(prisma, input);
     // SOC 2 CC6: log the successful token use + resulting JE.
-    // sourceSystem identifies which sibling repo posted this.
+    // sourceSystem identifies which sibling repo posted this; tenantLabel
+    // identifies which token authorized it (audit reviews use this to
+    // confirm each tenant's tokens are only used by their own systems).
     await auditTokenUse({
       success: true,
       endpoint: "POST /api/internal/journal-entries",
+      tenantId: identity.tenantId,
       metadata: {
         sourceSystem: body.sourceSystem,
         sourceRecordType: body.sourceRecordType,
@@ -224,6 +238,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         entryNumber: result.entryNumber,
         entityCode: body.entityCode,
         bookCode: result.bookCode,
+        tenantId: identity.tenantId,
+        tokenLabel: identity.label,
+        tokenSource: identity.source,
       },
       requestHeaders: reqHeaders,
     });
@@ -263,6 +280,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (e instanceof PeriodClosedError) return err("PERIOD_CLOSED", e.message, 409);
     if (e instanceof AccountBookScopeError)
       return err("ACCOUNT_BOOK_SCOPE", e.message, 422);
+    // SOC 2 CC6: cross-tenant write attempts are SEV-2 — audit + 403.
+    // The token was valid but tried to write to an entity that belongs
+    // to a different tenant. Likely a misconfigured companion repo
+    // (wrong tenant token in its env). Investigate before re-enabling.
+    if (e instanceof TenantScopeMismatchError) {
+      await auditTokenUse({
+        success: false,
+        endpoint: "POST /api/internal/journal-entries",
+        reason: "Tenant scope mismatch — token does not own this entity",
+        // Scope to the TOKEN's tenant — that's where the privacy
+        // boundary lives, even though the request targeted another.
+        tenantId: identity.tenantId,
+        metadata: {
+          tokenLabel: identity.label,
+          tokenTenantId: identity.tenantId,
+          entityCode: body.entityCode,
+        },
+        requestHeaders: reqHeaders,
+      });
+      return err("TENANT_SCOPE_MISMATCH", e.message, 403);
+    }
+    if (e instanceof EntityMissingTenantError) {
+      // Data-integrity bug; refuse rather than silently default. 500 so
+      // monitoring catches it as a server-side condition.
+      return err("DATA_INTEGRITY", e.message, 500);
+    }
     return err(
       "INTERNAL_ERROR",
       e instanceof Error ? e.message : "Unknown error during postJournalEntry",

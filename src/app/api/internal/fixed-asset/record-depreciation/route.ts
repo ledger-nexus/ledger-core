@@ -73,7 +73,11 @@ import {
   UnknownBookError,
   PeriodClosedError,
   AccountBookScopeError,
+  TenantScopeMismatchError,
+  EntityMissingTenantError,
 } from "@/lib/accounting/types";
+import { resolveBearerToken } from "@/lib/auth/token";
+import { auditTokenUse } from "@/lib/audit/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,6 +108,8 @@ type ErrorCode =
   | "UNKNOWN_ENTITY"
   | "PERIOD_CLOSED"
   | "ACCOUNT_BOOK_SCOPE"
+  | "TENANT_SCOPE_MISMATCH"
+  | "DATA_INTEGRITY"
   | "INTERNAL_ERROR";
 
 function err(code: ErrorCode, message: string, status: number) {
@@ -111,17 +117,35 @@ function err(code: ErrorCode, message: string, status: number) {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const token = process.env.INTERNAL_API_TOKEN;
-  if (!token) {
-    return err(
-      "UNAUTHORIZED",
-      "INTERNAL_API_TOKEN env var is not set — endpoint disabled.",
-      503
-    );
-  }
+  // Multi-tenancy token binding (Phase 5). Same pattern as
+  // /api/internal/journal-entries — resolve Bearer to a TenantApiToken
+  // row OR fall back to the legacy INTERNAL_API_TOKEN env value.
+  const reqHeaders = {
+    ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    userAgent: req.headers.get("user-agent"),
+  };
   const authHeader = req.headers.get("authorization") ?? "";
-  if (authHeader !== `Bearer ${token}`) {
-    return err("UNAUTHORIZED", "Invalid or missing bearer token", 401);
+  const bearer = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : "";
+  if (!bearer) {
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/fixed-asset/record-depreciation",
+      reason: "Missing bearer token",
+      requestHeaders: reqHeaders,
+    });
+    return err("UNAUTHORIZED", "Missing bearer token", 401);
+  }
+  const identity = await resolveBearerToken(bearer);
+  if (!identity) {
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/fixed-asset/record-depreciation",
+      reason: "Bearer token did not match any TenantApiToken or INTERNAL_API_TOKEN",
+      requestHeaders: reqHeaders,
+    });
+    return err("UNAUTHORIZED", "Invalid or revoked bearer token", 401);
   }
 
   let body: JsonBody;
@@ -262,6 +286,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           )} (${book.code}) — ${p.periodEnd.toISOString().slice(0, 7)}`;
 
           const result = await postJournalEntry(tx, {
+            // Token's tenant is authoritative — engine rejects if the
+            // asset's entity belongs elsewhere.
+            tenantId: identity.tenantId,
             entityCode: asset.entity.code,
             bookCode: book.code,
             currencyCode,
@@ -333,6 +360,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (e instanceof PeriodClosedError) return err("PERIOD_CLOSED", e.message, 409);
     if (e instanceof AccountBookScopeError)
       return err("ACCOUNT_BOOK_SCOPE", e.message, 422);
+    if (e instanceof TenantScopeMismatchError) {
+      await auditTokenUse({
+        success: false,
+        endpoint: "POST /api/internal/fixed-asset/record-depreciation",
+        reason: "Tenant scope mismatch — token does not own this asset's entity",
+        tenantId: identity.tenantId,
+        metadata: {
+          tokenLabel: identity.label,
+          tokenTenantId: identity.tenantId,
+          entityCode: body.entityCode,
+          assetCode: body.assetCode,
+        },
+        requestHeaders: reqHeaders,
+      });
+      return err("TENANT_SCOPE_MISMATCH", e.message, 403);
+    }
+    if (e instanceof EntityMissingTenantError) {
+      return err("DATA_INTEGRITY", e.message, 500);
+    }
     return err(
       "INTERNAL_ERROR",
       e instanceof Error
