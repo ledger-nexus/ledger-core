@@ -6,10 +6,20 @@ import { prisma } from "@/lib/db";
 import { Label, Select } from "@/components/ui/input";
 import { setScopeAction } from "@/app/actions/set-scope";
 import type { LedgerScope } from "@/lib/scope";
+import { getCurrentTenant } from "@/lib/auth/tenant";
 
 export async function BookSwitcher({ scope }: { scope: LedgerScope }) {
+  // Multi-tenancy (Phase 4c): only show entities belonging to the
+  // current tenant. When no tenant is selectable (signed-out / multi-
+  // tenant user without a chosen tenant), show no entities — the
+  // switcher renders empty options and the layout already handles
+  // the unsigned-in case elsewhere.
+  const tenant = await getCurrentTenant();
+  const entityWhere = tenant ? { tenantId: tenant.id } : { id: "__none__" };
+
   const [entities, books] = await Promise.all([
     prisma.legalEntity.findMany({
+      where: entityWhere,
       select: { code: true, name: true },
       orderBy: { code: "asc" },
     }),

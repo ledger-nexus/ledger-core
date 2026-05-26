@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
+import { getCurrentTenant } from "@/lib/auth/tenant";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -26,8 +27,11 @@ export default async function ConsolidationPage({
   const asOf = searchParams.asOf ?? "2026-06-30";
 
   // List entities that have at least one descendant — those are the only
-  // sensible roots.
+  // sensible roots. Tenant-scoped (Phase 4c): only show the current
+  // tenant's entities so consolidation can't cross tenant boundaries.
+  const tenant = await getCurrentTenant();
   const allEntities = await prisma.legalEntity.findMany({
+    where: tenant ? { tenantId: tenant.id } : { id: "__none__" },
     select: { id: true, code: true, name: true, parentEntityId: true },
     orderBy: { code: "asc" },
   });

@@ -3,6 +3,7 @@
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
+import { getCurrentTenant } from "@/lib/auth/tenant";
 import { openApBalance } from "@/lib/accounting/sub-ledgers/ap";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -14,9 +15,13 @@ import { ReassignApRow } from "./reassign-ap-row";
 
 export default async function ApPage() {
   const scope = getScope();
+  // Tenant scope (Phase 4c).
+  const tenant = await getCurrentTenant();
+  const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
   const [openItems, total, cashAccounts, users, queues] = await Promise.all([
     prisma.apOpenItem.findMany({
       where: {
+        ...tenantFilter,
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },

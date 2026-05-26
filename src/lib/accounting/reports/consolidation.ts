@@ -87,14 +87,24 @@ export async function getConsolidatedTrialBalance(
 ): Promise<ConsolidationReport> {
   const bookCode = input.bookCode ?? "US_GAAP";
 
-  // Walk the entity hierarchy.
-  const allEntities = await prisma.legalEntity.findMany({
-    select: { id: true, code: true, name: true, parentEntityId: true },
+  // Resolve the root first so we can constrain the hierarchy walk to the
+  // root's tenant. Without this, after Phase 4b composite-uniques allow
+  // duplicate codes across tenants, an unscoped findMany would pull
+  // entities from other tenants into the consolidation.
+  const root = await prisma.legalEntity.findFirst({
+    where: { code: input.rootEntityCode },
+    select: { id: true, code: true, name: true, parentEntityId: true, tenantId: true },
   });
-  const root = allEntities.find((e) => e.code === input.rootEntityCode);
   if (!root) {
     throw new Error(`Root entity ${input.rootEntityCode} not found`);
   }
+
+  // Walk the entity hierarchy WITHIN the same tenant only. Cross-tenant
+  // hierarchy traversal is not supported (would be a privacy violation).
+  const allEntities = await prisma.legalEntity.findMany({
+    where: { tenantId: root.tenantId },
+    select: { id: true, code: true, name: true, parentEntityId: true },
+  });
 
   const included: typeof allEntities = [root];
   const queue = [root.id];

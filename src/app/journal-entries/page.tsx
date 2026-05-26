@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
+import { getCurrentTenant } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +27,16 @@ export default async function JournalEntriesPage({
   const fromDate = new Date(from);
   const toDate = new Date(to);
 
+  // Tenant-scope (Phase 4c): defense-in-depth against cross-tenant reads.
+  // JournalEntry has a denormalized tenantId; filtering on it cuts the
+  // query plan AND closes the leak when Phase 4b makes entityCode no
+  // longer globally unique.
+  const tenant = await getCurrentTenant();
+  const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
+
   const entries = await prisma.journalEntry.findMany({
     where: {
+      ...tenantFilter,
       entity: { code: scope.entityCode },
       book: { code: scope.bookCode },
       documentDate: { gte: fromDate, lte: toDate },
