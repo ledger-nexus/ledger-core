@@ -10,7 +10,7 @@
 | 2 | Tenant context helpers + Server Actions (`setTenantAction`, `createMyFirstTenantAction`) | ✅ Shipped (`0ff682f`) |
 | 3 | Clerk integration — env-gated dispatch, JIT user provisioning by email, middleware, sign-in/sign-up routes | ✅ Shipped (`274f033`) |
 | 4a | Substrate write enforcement — `postJournalEntry` auto-resolves `tenantId`; `TenantScopeMismatchError` for cross-tenant attempts | ✅ Shipped (`06d185c`) |
-| 4b | `ALTER COLUMN tenantId SET NOT NULL` + composite unique constraints | ⏳ Deferred — forces every entity-by-code lookup to update |
+| 4b | `ALTER COLUMN tenantId SET NOT NULL` on 26 tables (audit_log excluded by design) | ✅ Shipped (`696c003`). Composite `[tenantId, code]` uniques still deferred until customer #2 — preserves the "code globally unique" invariant the legacy entity-by-code lookups depend on. |
 | 4c | Read scoping — high-leverage list queries filter by tenant | ✅ Shipped (`fcb20f8`) |
 | 5 | HTTP boundary — `/api/internal/*` resolves Bearer to TenantApiToken row; legacy env path as fallback | ✅ Shipped (`c411c80`) |
 | 6 | Per-tenant isolation tests | ✅ Folded into Phase 4c |
