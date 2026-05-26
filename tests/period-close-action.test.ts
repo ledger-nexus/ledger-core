@@ -114,6 +114,7 @@ async function seedMasterData() {
     if (!existing) {
       await prisma.account.create({
         data: {
+          tenantId: tenantId,
           entityId: entity.id,
           code: a.code,
           name: a.name,
@@ -126,6 +127,7 @@ async function seedMasterData() {
   const calendar = await prisma.fiscalCalendar.upsert({
     where: { entityId_code: { entityId: entity.id, code: "TEST-CAL-2026" } },
     create: {
+      tenantId: tenantId,
       entityId: entity.id,
       code: "TEST-CAL-2026",
       name: "Test Calendar 2026",
@@ -136,6 +138,7 @@ async function seedMasterData() {
   await prisma.period.upsert({
     where: { calendarId_code: { calendarId: calendar.id, code: "2026-05" } },
     create: {
+      tenantId: tenantId,
       calendarId: calendar.id,
       code: "2026-05",
       ordinal: 5,

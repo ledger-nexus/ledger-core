@@ -81,6 +81,7 @@ async function seedMasterData() {
     if (!existing) {
       await prisma.account.create({
         data: {
+          tenantId: tenantId,
           entityId: entity.id,
           code: a.code,
           name: a.name,
@@ -98,6 +99,7 @@ async function seedMasterData() {
     existingAsset ??
     (await prisma.fixedAsset.create({
       data: {
+        tenantId: tenantId,
         entityId: entity.id,
         code: ASSET_CODE,
         description: "Test laptop fleet",

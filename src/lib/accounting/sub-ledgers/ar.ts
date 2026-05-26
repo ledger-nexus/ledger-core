@@ -160,7 +160,8 @@ export async function applyArPayment(
   return await prisma.$transaction(async (tx) => {
     const item = await tx.arOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
-      select: { currentBalance: true, originalAmount: true, status: true },
+      // tenantId pulled so the application row inherits the same scope.
+      select: { currentBalance: true, originalAmount: true, status: true, tenantId: true },
     });
     if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
       throw new Error(`Cannot apply payment to AR item in ${item.status} state`);
@@ -179,6 +180,7 @@ export async function applyArPayment(
 
     const application = await tx.arApplication.create({
       data: {
+        tenantId: item.tenantId,
         openItemId: input.openItemId,
         appliedByEntryId: input.appliedByEntryId,
         appliedAmount: applied.toFixed(4),
@@ -281,6 +283,7 @@ export async function writeOffArItem(
   await prisma.$transaction([
     prisma.arApplication.create({
       data: {
+        tenantId: item.tenantId,
         openItemId: item.id,
         appliedByEntryId: entry.id,
         appliedAmount: amount.toFixed(4),

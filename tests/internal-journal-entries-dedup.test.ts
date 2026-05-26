@@ -72,6 +72,7 @@ async function seedMasterData() {
     if (!existing) {
       await prisma.account.create({
         data: {
+          tenantId: tenantId,
           entityId: entity.id,
           code: a.code,
           name: a.name,

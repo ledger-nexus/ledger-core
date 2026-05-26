@@ -35,6 +35,13 @@ export interface NotifyInput {
   actorUserId?: string;
   recordType?: string;
   recordId?: string;
+  /**
+   * Tenant the notification belongs to. Optional during the migration
+   * window — resolves to the default tenant when omitted. Reassignment
+   * paths SHOULD pass the source record's tenantId so cross-tenant
+   * notification leakage is impossible.
+   */
+  tenantId?: string;
 }
 
 export interface NotifyResult {
@@ -81,8 +88,12 @@ export async function notify(
     return { emittedCount: 0 };
   }
 
+  const tenantId =
+    input.tenantId ??
+    (await (await import("@/lib/seed/default-tenant")).getDefaultTenantId(prisma));
   await prisma.notification.createMany({
     data: recipientUserIds.map((recipientUserId) => ({
+      tenantId,
       recipientUserId,
       category: input.category,
       title: input.title,

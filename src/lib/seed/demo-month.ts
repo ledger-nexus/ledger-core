@@ -495,25 +495,27 @@ async function seedMasterData(prisma: PrismaClient): Promise<void> {
   const calendar = await prisma.fiscalCalendar.upsert({
     where: { entityId_code: { entityId: entity.id, code: CALENDAR_CODE } },
     create: {
+      tenantId,
       entityId: entity.id,
       code: CALENDAR_CODE,
       name: "Demo 2026 Calendar",
       periodFrequency: "MONTHLY",
     },
-    update: {},
+    update: { tenantId },
   });
   for (let m = 1; m <= 12; m++) {
     const code = `2026-${String(m).padStart(2, "0")}`;
     await prisma.period.upsert({
       where: { calendarId_code: { calendarId: calendar.id, code } },
       create: {
+        tenantId,
         calendarId: calendar.id,
         code,
         ordinal: m,
         startsOn: new Date(Date.UTC(2026, m - 1, 1)),
         endsOn: new Date(Date.UTC(2026, m, 0)),
       },
-      update: {},
+      update: { tenantId },
     });
   }
 }
@@ -551,12 +553,13 @@ const DEMO_ACCOUNTS: Array<{
 async function seedAccounts(prisma: PrismaClient): Promise<void> {
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: ENTITY_CODE },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   for (const a of DEMO_ACCOUNTS) {
     await prisma.account.upsert({
       where: { entityId_code: { entityId: entity.id, code: a.code } },
       create: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code: a.code,
         name: a.name,
@@ -566,7 +569,7 @@ async function seedAccounts(prisma: PrismaClient): Promise<void> {
         isBank: a.isBank ?? false,
         bookScope: ["US_GAAP", "US_TAX"],
       },
-      update: {},
+      update: { tenantId: entity.tenantId },
     });
   }
 }
@@ -574,7 +577,7 @@ async function seedAccounts(prisma: PrismaClient): Promise<void> {
 async function seedParties(prisma: PrismaClient): Promise<void> {
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: ENTITY_CODE },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   for (const p of [
     { code: "ACME", displayName: "Acme Corp", role: "CUSTOMER" as const },
@@ -584,13 +587,18 @@ async function seedParties(prisma: PrismaClient): Promise<void> {
   ]) {
     const party = await prisma.party.upsert({
       where: { entityId_code: { entityId: entity.id, code: p.code } },
-      create: { entityId: entity.id, code: p.code, displayName: p.displayName },
-      update: {},
+      create: {
+        tenantId: entity.tenantId,
+        entityId: entity.id,
+        code: p.code,
+        displayName: p.displayName,
+      },
+      update: { tenantId: entity.tenantId },
     });
     await prisma.partyRole.upsert({
       where: { partyId_role: { partyId: party.id, role: p.role } },
-      create: { partyId: party.id, role: p.role },
-      update: {},
+      create: { tenantId: entity.tenantId, partyId: party.id, role: p.role },
+      update: { tenantId: entity.tenantId },
     });
   }
 }

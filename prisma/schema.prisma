@@ -158,8 +158,8 @@ model LegalEntity {
   id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   // tenantId is nullable during migration (Phase 1); Phase 4 backfills
   // remaining rows, scopes all queries, and applies NOT NULL.
-  tenantId       String?       @db.Uuid
-  tenant         Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId       String        @db.Uuid
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   code           String        @unique
   name           String
   parentEntityId String?       @db.Uuid
@@ -236,8 +236,8 @@ enum BookBasis {
 
 model FiscalCalendar {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String?         @db.Uuid
-  tenant          Tenant?         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId        String          @db.Uuid
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId        String          @db.Uuid
   entity          LegalEntity     @relation(fields: [entityId], references: [id])
   code            String // e.g. "STANDARD_2026"
@@ -264,8 +264,8 @@ enum PeriodFrequency {
 
 model Period {
   id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId   String?        @db.Uuid
-  tenant     Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId   String         @db.Uuid
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   calendarId String         @db.Uuid
   calendar   FiscalCalendar @relation(fields: [calendarId], references: [id])
   code       String // e.g. "2026-01", "2026-Q1"
@@ -288,8 +288,8 @@ model Period {
 // (entity, book, period) tuples.
 model PeriodClose {
   id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String?     @db.Uuid
-  tenant   Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId String      @db.Uuid
   entity   LegalEntity @relation(fields: [entityId], references: [id])
   bookId   String      @db.Uuid
@@ -349,8 +349,8 @@ enum FxRateType {
 
 model Party {
   id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId    String?      @db.Uuid
-  tenant      Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId    String       @db.Uuid
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId    String?      @db.Uuid // null = shared across entities
   entity      LegalEntity? @relation(fields: [entityId], references: [id])
   code        String // human-readable, often source-system code
@@ -387,8 +387,8 @@ model Party {
 
 model PartyRole {
   id       String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String?       @db.Uuid
-  tenant   Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String        @db.Uuid
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   partyId  String        @db.Uuid
   party    Party         @relation(fields: [partyId], references: [id], onDelete: Cascade)
   role     PartyRoleKind
@@ -409,8 +409,8 @@ enum PartyRoleKind {
 
 model Item {
   id                          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId                    String?        @db.Uuid
-  tenant                      Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId                    String         @db.Uuid
+  tenant                      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId                    String?        @db.Uuid
   entity                      LegalEntity?   @relation(fields: [entityId], references: [id])
   code                        String
@@ -462,8 +462,8 @@ enum CostingMethod {
 model Account {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
-  tenantId String? @db.Uuid
-  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   // entityId null = shared across all entities (consolidated chart).
   // Set to a value = entity-specific account.
@@ -528,8 +528,8 @@ enum NormalBalance {
 model JournalEntry {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
-  tenantId String? @db.Uuid
-  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   // entryNumber is a human-readable sequential ID, unique per (entity, book).
   // Format: ENTITY-BOOK-NNNNN (e.g. NORTHWIND-US_GAAP-00001).
@@ -631,8 +631,8 @@ model JournalLine {
   id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   // tenantId denormalized from the parent JournalEntry for query speed.
   // Always equals entry.tenantId; enforced in postJournalEntry.
-  tenantId  String?      @db.Uuid
-  tenant    Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId  String       @db.Uuid
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entryId   String       @db.Uuid
   entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
   lineNo    Int // 1-based, position within entry
@@ -694,8 +694,8 @@ model JournalLine {
 
 model Dimension {
   id                    String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId              String? @db.Uuid
-  tenant                Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId              String  @db.Uuid
+  tenant                Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // Globally unique today (e.g. only one "CLASS" dimension); Phase 4 moves
   // the unique to [tenantId, code] so each tenant defines their own CLASS.
   code                  String  @unique // "DEPARTMENT", "CLASS", "LOCATION", "PROJECT"
@@ -720,8 +720,8 @@ model Dimension {
 
 model DimensionValue {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId    String?   @db.Uuid
-  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   dimensionId String    @db.Uuid
   dimension   Dimension @relation(fields: [dimensionId], references: [id])
   code        String
@@ -738,13 +738,13 @@ model DimensionValue {
 // one DimensionSet. Two lines with identical (Department=ENG, Class=R&D)
 // share the same DimensionSet row.
 model DimensionSet {
-  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String? @db.Uuid
-  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // Stable hash of sorted (dimensionId, dimensionValueId) pairs. Used for
   // dedup lookups during posting. Globally unique today; Phase 4 changes
   // to [tenantId, hash] so identical assignments in different tenants don't collide.
-  hash     String  @unique
+  hash     String @unique
 
   values       DimensionSetValue[]
   journalLines JournalLine[]
@@ -776,8 +776,8 @@ model DimensionSetValue {
 
 model PostingRule {
   id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String? @db.Uuid
-  tenant          Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId        String  @db.Uuid
+  tenant          Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   sourceEventType String // e.g. "QBO_INVOICE"
   bookId          String  @db.Uuid
   book            Book    @relation(fields: [bookId], references: [id])
@@ -804,8 +804,8 @@ model PostingRule {
 
 model CustomFieldDefinition {
   id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId         String?         @db.Uuid
-  tenant           Tenant?         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId         String          @db.Uuid
+  tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // Which entity type this field attaches to ("party", "account", "item",
   // "gl_entry_header", "gl_entry_line", "invoice", ...).
   targetEntityType String
@@ -852,8 +852,8 @@ enum CustomFieldType {
 
 model ArOpenItem {
   id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String?     @db.Uuid
-  tenant   Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId String      @db.Uuid
   entity   LegalEntity @relation(fields: [entityId], references: [id])
   bookId   String      @db.Uuid
@@ -918,8 +918,8 @@ enum OpenItemStatus {
 
 model ArApplication {
   id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId         String?      @db.Uuid
-  tenant           Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId         String       @db.Uuid
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   openItemId       String       @db.Uuid
   openItem         ArOpenItem   @relation(fields: [openItemId], references: [id], onDelete: Cascade)
   appliedByEntryId String       @db.Uuid
@@ -938,8 +938,8 @@ model ArApplication {
 
 model ApOpenItem {
   id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String?     @db.Uuid
-  tenant   Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId String      @db.Uuid
   entity   LegalEntity @relation(fields: [entityId], references: [id])
   bookId   String      @db.Uuid
@@ -991,8 +991,8 @@ model ApOpenItem {
 
 model ApApplication {
   id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId         String?      @db.Uuid
-  tenant           Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId         String       @db.Uuid
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   openItemId       String       @db.Uuid
   openItem         ApOpenItem   @relation(fields: [openItemId], references: [id], onDelete: Cascade)
   appliedByEntryId String       @db.Uuid
@@ -1011,8 +1011,8 @@ model ApApplication {
 
 model FixedAsset {
   id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String?     @db.Uuid
-  tenant   Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId String      @db.Uuid
   entity   LegalEntity @relation(fields: [entityId], references: [id])
 
@@ -1098,8 +1098,8 @@ enum DepreciationMethod {
 
 model Lease {
   id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String?     @db.Uuid
-  tenant   Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId String      @db.Uuid
   entity   LegalEntity @relation(fields: [entityId], references: [id])
 
@@ -1179,8 +1179,8 @@ model LeaseBookAttributes {
 
 model RevenueContract {
   id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String?     @db.Uuid
-  tenant   Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   entityId String      @db.Uuid
   entity   LegalEntity @relation(fields: [entityId], references: [id])
 
@@ -1315,8 +1315,8 @@ model User {
 
 model Queue {
   id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId             String?   @db.Uuid
-  tenant               Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId             String    @db.Uuid
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // Globally unique today; Phase 4 changes to [tenantId, code].
   code                 String    @unique // e.g. "AR_COLLECTIONS", "GL_UNASSIGNED"
   name                 String
@@ -1358,8 +1358,8 @@ model QueueMember {
 // (owner change carries ownerId; state change carries status; etc.).
 model RecordEvent {
   id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId      String?         @db.Uuid
-  tenant        Tenant?         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId      String          @db.Uuid
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   recordType    String // e.g. "JournalEntry"
   recordId      String          @db.Uuid
   eventType     RecordEventType
@@ -1418,9 +1418,17 @@ enum RecordEventType {
 // shapes. Conventions documented in src/lib/audit/log.ts.
 model AuditLog {
   id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  // tenantId is critical here — cross-tenant audit log visibility would
-  // leak which actions other firms took. Quarterly access reviews scope
-  // queries to the actor's own tenant.
+  // tenantId is critical for tenant-scoped events (PRIVILEGED_ACTION,
+  // JE posts, DATA_EXPORT, etc.) — cross-tenant audit log visibility
+  // would leak which actions other firms took. Quarterly access reviews
+  // scope by tenant.
+  //
+  // Intentionally NULLABLE so pre-identity events (TOKEN_REJECTED with
+  // garbage Bearer, missing Bearer, malformed token) can still be logged
+  // without forcing a synthetic tenant assignment. These platform-level
+  // events are visible only to platform admins (default-tenant owner).
+  // Phase 4b kept this column nullable; every other tenant-scoped table
+  // is NOT NULL.
   tenantId    String?        @db.Uuid
   tenant      Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   eventType   AuditEventType
@@ -1487,8 +1495,8 @@ enum AuditOutcome {
 // via src/lib/rules/validator.ts.
 model ReassignmentRule {
   id                    String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId              String?              @db.Uuid
-  tenant                Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenantId              String               @db.Uuid
+  tenant                Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   ruleId                String // human-readable, stable across versions
   ruleVersion           Int                  @default(1)
   recordType            String // "JournalEntry", "ArOpenItem", etc.
@@ -1556,11 +1564,11 @@ enum ReassignmentTrigger {
 // "/journal-entries/abc"). recordType + recordId let the bell group
 // multiple notifications for the same target.
 model Notification {
-  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String? @db.Uuid
-  tenant          Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  recipientUserId String  @db.Uuid
-  recipient       User    @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String @db.Uuid
+  tenant          Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  recipientUserId String @db.Uuid
+  recipient       User   @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
 
   category NotificationCategory
   title    String

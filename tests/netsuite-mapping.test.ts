@@ -98,6 +98,7 @@ async function seedMasterData() {
   const calendar = await prisma.fiscalCalendar.upsert({
     where: { entityId_code: { entityId: entity.id, code: "STANDARD_2026" } },
     create: {
+      tenantId: tenantId,
       entityId: entity.id,
       code: "STANDARD_2026",
       name: "2026",
@@ -110,6 +111,7 @@ async function seedMasterData() {
     await prisma.period.upsert({
       where: { calendarId_code: { calendarId: calendar.id, code } },
       create: {
+        tenantId: tenantId,
         calendarId: calendar.id,
         code,
         ordinal: m,

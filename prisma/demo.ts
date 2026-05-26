@@ -21,7 +21,7 @@ const prisma = new PrismaClient();
 async function closeMayPeriod(): Promise<void> {
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: DEMO_ENTITY_CODE },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   const gaapBook = await prisma.book.findUniqueOrThrow({
     where: { code: "US_GAAP" },
@@ -50,6 +50,7 @@ async function closeMayPeriod(): Promise<void> {
 
   await prisma.periodClose.create({
     data: {
+      tenantId: entity.tenantId,
       entityId: entity.id,
       bookId: gaapBook.id,
       periodId: mayPeriod.id,

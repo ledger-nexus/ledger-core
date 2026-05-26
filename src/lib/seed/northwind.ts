@@ -104,12 +104,13 @@ async function seedMasterData(prisma: PrismaClient) {
   const calendar = await prisma.fiscalCalendar.upsert({
     where: { entityId_code: { entityId: entity.id, code: FISCAL_CALENDAR_CODE } },
     create: {
+      tenantId: entity.tenantId,
       entityId: entity.id,
       code: FISCAL_CALENDAR_CODE,
       name: "Standard 2026 Calendar",
       periodFrequency: "MONTHLY",
     },
-    update: {},
+    update: { tenantId: entity.tenantId },
   });
 
   for (let m = 1; m <= 12; m++) {
@@ -117,13 +118,14 @@ async function seedMasterData(prisma: PrismaClient) {
     await prisma.period.upsert({
       where: { calendarId_code: { calendarId: calendar.id, code } },
       create: {
+        tenantId: entity.tenantId,
         calendarId: calendar.id,
         code,
         ordinal: m,
         startsOn: new Date(Date.UTC(2026, m - 1, 1)),
         endsOn: new Date(Date.UTC(2026, m, 0)),
       },
-      update: {},
+      update: { tenantId: entity.tenantId },
     });
   }
 }
@@ -131,6 +133,7 @@ async function seedMasterData(prisma: PrismaClient) {
 async function seedAccounts(prisma: PrismaClient) {
   // Shared-chart accounts (entityId=null). Prisma 5.22 rejects null in
   // compound unique-key upsert, so use findFirst + create pattern.
+  const tenantId = await getDefaultTenantId(prisma);
   for (const acct of CHART_OF_ACCOUNTS) {
     const existing = await prisma.account.findFirst({
       where: { entityId: null, code: acct.code },
@@ -139,6 +142,7 @@ async function seedAccounts(prisma: PrismaClient) {
     if (existing) continue;
     await prisma.account.create({
       data: {
+        tenantId,
         code: acct.code,
         name: acct.name,
         type: acct.type,
@@ -155,7 +159,7 @@ async function seedAccounts(prisma: PrismaClient) {
 async function seedParties(prisma: PrismaClient) {
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: ENTITY_CODE },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
 
   for (const p of [
@@ -166,13 +170,18 @@ async function seedParties(prisma: PrismaClient) {
   ]) {
     const party = await prisma.party.upsert({
       where: { entityId_code: { entityId: entity.id, code: p.code } },
-      create: { entityId: entity.id, code: p.code, displayName: p.displayName },
-      update: {},
+      create: {
+        tenantId: entity.tenantId,
+        entityId: entity.id,
+        code: p.code,
+        displayName: p.displayName,
+      },
+      update: { tenantId: entity.tenantId },
     });
     await prisma.partyRole.upsert({
       where: { partyId_role: { partyId: party.id, role: p.role } },
-      create: { partyId: party.id, role: p.role },
-      update: {},
+      create: { tenantId: entity.tenantId, partyId: party.id, role: p.role },
+      update: { tenantId: entity.tenantId },
     });
   }
 }
@@ -711,11 +720,13 @@ export async function seedTestUsersAndQueues(
       isUnassignedFallback: true,
     },
   ];
+  const tenantIdForQueues = await getDefaultTenantId(prisma);
   for (const spec of queueSpecs) {
     await prisma.queue.upsert({
       where: { code: spec.code },
-      create: spec,
+      create: { tenantId: tenantIdForQueues, ...spec },
       update: {
+        tenantId: tenantIdForQueues,
         name: spec.name,
         description: spec.description,
         isUnassignedFallback: spec.isUnassignedFallback,
@@ -878,13 +889,15 @@ export async function seedReassignmentRules(
     },
   ];
 
+  const tenantIdForRules = await getDefaultTenantId(prisma);
   for (const spec of specs) {
     await prisma.reassignmentRule.upsert({
       where: {
         ruleId_ruleVersion: { ruleId: spec.ruleId, ruleVersion: spec.ruleVersion },
       },
-      create: spec,
+      create: { tenantId: tenantIdForRules, ...spec },
       update: {
+        tenantId: tenantIdForRules,
         priority: spec.priority,
         criteriaJson: spec.criteriaJson,
         targetType: spec.targetType,

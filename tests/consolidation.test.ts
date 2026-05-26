@@ -60,27 +60,6 @@ async function seedHierarchy() {
     create: { code: BOOK, name: "US GAAP", basis: "US_GAAP", reportingCurrencyId: "USD" },
     update: {},
   });
-  // Prisma 5.22 rejects null in compound unique-key upsert. Use
-  // findFirst + create to upsert shared-chart accounts (entityId=null).
-  for (const a of CHART_OF_ACCOUNTS) {
-    const existing = await prisma.account.findFirst({
-      where: { entityId: null, code: a.code },
-      select: { id: true },
-    });
-    if (existing) continue;
-    await prisma.account.create({
-      data: {
-        code: a.code,
-        name: a.name,
-        type: a.type,
-        normalBalance: a.normalBalance,
-        isContra: a.isContra ?? false,
-        isControlAccount: a.isControlAccount ?? false,
-        isBank: a.isBank ?? false,
-        subtype: a.subtype,
-      },
-    });
-  }
   // Multi-tenancy (Phase 1+): every entity must belong to a tenant.
   // For tests we use the default tenant created by the Phase 1 migration.
   const defaultTenant = await prisma.tenant.findUnique({
@@ -93,6 +72,29 @@ async function seedHierarchy() {
     );
   }
   const tenantId = defaultTenant.id;
+
+  // Prisma 5.22 rejects null in compound unique-key upsert. Use
+  // findFirst + create to upsert shared-chart accounts (entityId=null).
+  for (const a of CHART_OF_ACCOUNTS) {
+    const existing = await prisma.account.findFirst({
+      where: { entityId: null, code: a.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.account.create({
+      data: {
+        tenantId,
+        code: a.code,
+        name: a.name,
+        type: a.type,
+        normalBalance: a.normalBalance,
+        isContra: a.isContra ?? false,
+        isControlAccount: a.isControlAccount ?? false,
+        isBank: a.isBank ?? false,
+        subtype: a.subtype,
+      },
+    });
+  }
   const parent = await prisma.legalEntity.create({
     data: { tenantId, code: PARENT, name: "Parent Co", functionalCurrencyId: "USD" },
   });
@@ -107,6 +109,7 @@ async function seedHierarchy() {
   for (const e of [parent, subA, subB]) {
     const cal = await prisma.fiscalCalendar.create({
       data: {
+        tenantId: tenantId,
         entityId: e.id,
         code: "STANDARD_2026",
         name: "2026",
@@ -116,6 +119,7 @@ async function seedHierarchy() {
     for (let m = 1; m <= 12; m++) {
       await prisma.period.create({
         data: {
+          tenantId: tenantId,
           calendarId: cal.id,
           code: `2026-${String(m).padStart(2, "0")}`,
           ordinal: m,

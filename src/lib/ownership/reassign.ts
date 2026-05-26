@@ -215,6 +215,7 @@ async function reassignJournalEntry(
       status: true,
       ownerId: true,
       ownerType: true,
+      tenantId: true,
     },
   });
   if (!je) throw new ReassignError("RECORD_NOT_FOUND", `JournalEntry ${input.recordId} not found`);
@@ -244,6 +245,7 @@ async function reassignJournalEntry(
     });
     const event = await tx.recordEvent.create({
       data: {
+        tenantId: je.tenantId,
         recordType: "JournalEntry",
         recordId: input.recordId,
         eventType: "OWNER_CHANGED",
@@ -279,6 +281,7 @@ async function reassignArOpenItem(
       status: true,
       ownerId: true,
       ownerType: true,
+      tenantId: true,
     },
   });
   if (!item)
@@ -314,6 +317,7 @@ async function reassignArOpenItem(
     });
     const event = await tx.recordEvent.create({
       data: {
+        tenantId: item.tenantId,
         recordType: "ArOpenItem",
         recordId: input.recordId,
         eventType: "OWNER_CHANGED",
@@ -349,6 +353,7 @@ async function reassignApOpenItem(
       status: true,
       ownerId: true,
       ownerType: true,
+      tenantId: true,
     },
   });
   if (!item)
@@ -382,6 +387,7 @@ async function reassignApOpenItem(
     });
     const event = await tx.recordEvent.create({
       data: {
+        tenantId: item.tenantId,
         recordType: "ApOpenItem",
         recordId: input.recordId,
         eventType: "OWNER_CHANGED",
@@ -416,6 +422,36 @@ export async function clearReassignmentLock(
   actorUserId: string,
   reason: string
 ): Promise<void> {
+  // Resolve the record's tenantId up-front so the RecordEvent inherits it.
+  // Each record type's row carries its own denormalized tenantId.
+  let tenantId: string;
+  switch (recordType) {
+    case "JournalEntry": {
+      const r = await prisma.journalEntry.findUniqueOrThrow({
+        where: { id: recordId },
+        select: { tenantId: true },
+      });
+      tenantId = r.tenantId;
+      break;
+    }
+    case "ArOpenItem": {
+      const r = await prisma.arOpenItem.findUniqueOrThrow({
+        where: { id: recordId },
+        select: { tenantId: true },
+      });
+      tenantId = r.tenantId;
+      break;
+    }
+    case "ApOpenItem": {
+      const r = await prisma.apOpenItem.findUniqueOrThrow({
+        where: { id: recordId },
+        select: { tenantId: true },
+      });
+      tenantId = r.tenantId;
+      break;
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     switch (recordType) {
       case "JournalEntry":
@@ -439,6 +475,7 @@ export async function clearReassignmentLock(
     }
     await tx.recordEvent.create({
       data: {
+        tenantId,
         recordType,
         recordId,
         eventType: "REASSIGNMENT_UNLOCKED",

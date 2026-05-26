@@ -54,7 +54,7 @@ export async function importFromQbo(
 
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: input.entityCode },
-    select: { id: true, code: true },
+    select: { id: true, code: true, tenantId: true },
   });
 
   const result: ImportFromQboResult = {
@@ -88,6 +88,7 @@ export async function importFromQbo(
     }
     await prisma.account.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code: m.code,
         name: m.name,
@@ -126,6 +127,7 @@ export async function importFromQbo(
     }
     const party = await prisma.party.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code: m.code,
         displayName: m.displayName,
@@ -138,7 +140,7 @@ export async function importFromQbo(
     });
     await prisma.partyRole.upsert({
       where: { partyId_role: { partyId: party.id, role: "CUSTOMER" } },
-      create: { partyId: party.id, role: "CUSTOMER" },
+      create: { tenantId: entity.tenantId, partyId: party.id, role: "CUSTOMER" },
       update: {},
     });
     result.partiesImported += 1;
@@ -160,6 +162,7 @@ export async function importFromQbo(
     }
     const party = await prisma.party.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code: m.code,
         displayName: m.displayName,
@@ -172,7 +175,7 @@ export async function importFromQbo(
     });
     await prisma.partyRole.upsert({
       where: { partyId_role: { partyId: party.id, role: "VENDOR" } },
-      create: { partyId: party.id, role: "VENDOR" },
+      create: { tenantId: entity.tenantId, partyId: party.id, role: "VENDOR" },
       update: {},
     });
     result.partiesImported += 1;

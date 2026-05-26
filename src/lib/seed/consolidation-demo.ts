@@ -80,25 +80,27 @@ export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void>
     const cal = await prisma.fiscalCalendar.upsert({
       where: { entityId_code: { entityId: ent.id, code: "STANDARD_2026" } },
       create: {
+        tenantId,
         entityId: ent.id,
         code: "STANDARD_2026",
         name: "Standard 2026",
         periodFrequency: "MONTHLY",
       },
-      update: {},
+      update: { tenantId },
     });
     for (let m = 1; m <= 12; m++) {
       const code = `2026-${String(m).padStart(2, "0")}`;
       await prisma.period.upsert({
         where: { calendarId_code: { calendarId: cal.id, code } },
         create: {
+          tenantId,
           calendarId: cal.id,
           code,
           ordinal: m,
           startsOn: new Date(Date.UTC(2026, m - 1, 1)),
           endsOn: new Date(Date.UTC(2026, m, 0)),
         },
-        update: {},
+        update: { tenantId },
       });
     }
   }

@@ -118,6 +118,8 @@ afterAll(async () => {
   await prisma.account.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  // RecordEvent.tenantId is RESTRICT; clean before tenant delete.
+  await prisma.recordEvent.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenantMembership.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
   await prisma.user.deleteMany({

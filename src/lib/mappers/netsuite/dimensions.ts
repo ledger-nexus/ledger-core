@@ -12,6 +12,7 @@
 // DimensionSet row.
 
 import { PrismaClient } from "@prisma/client";
+import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 
 // Sort assignments + concatenate. The hash is the dedup key for
 // DimensionSet — every line with the same (dim, value) combo shares one
@@ -38,9 +39,11 @@ export async function setupDimension(
   input: SetupDimensionInput
 ): Promise<{ id: string }> {
   const applies = input.appliesToAccountTypes ?? [];
+  const tenantId = await getDefaultTenantId(prisma);
   return await prisma.dimension.upsert({
     where: { code: input.code },
     create: {
+      tenantId,
       code: input.code,
       name: input.name,
       description: input.description,
@@ -48,6 +51,7 @@ export async function setupDimension(
       appliesToAccountTypes: applies as unknown as any,
     },
     update: {
+      tenantId,
       name: input.name,
       description: input.description,
       isRequired: input.isRequired ?? false,
@@ -69,18 +73,19 @@ export async function setupDimensionValue(
 ): Promise<{ id: string }> {
   const dimension = await prisma.dimension.findUniqueOrThrow({
     where: { code: input.dimensionCode },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   return await prisma.dimensionValue.upsert({
     where: {
       dimensionId_code: { dimensionId: dimension.id, code: input.code },
     },
     create: {
+      tenantId: dimension.tenantId,
       dimensionId: dimension.id,
       code: input.code,
       name: input.name,
     },
-    update: { name: input.name },
+    update: { tenantId: dimension.tenantId, name: input.name },
     select: { id: true },
   });
 }
@@ -139,8 +144,10 @@ export async function getOrCreateDimensionSet(
   // the function safe to call concurrently and across multiple test runs
   // where the same hash gets seeded repeatedly.
   try {
+    const tenantId = await getDefaultTenantId(prisma);
     const created = await prisma.dimensionSet.create({
       data: {
+        tenantId,
         hash,
         values: {
           create: resolved.map((r) => ({

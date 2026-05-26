@@ -103,7 +103,7 @@ export async function importFromNs(
 
   const entity = await prisma.legalEntity.findUniqueOrThrow({
     where: { code: input.entityCode },
-    select: { id: true, code: true },
+    select: { id: true, code: true, tenantId: true },
   });
 
   const result: ImportFromNsResult = {
@@ -136,6 +136,7 @@ export async function importFromNs(
         },
       },
       create: {
+        tenantId: entity.tenantId,
         targetEntityType: mapNsAppliesTo(fd.appliesto),
         fieldKey: fd.internalid,
         label: fd.label,
@@ -143,7 +144,7 @@ export async function importFromNs(
         validation: fd.options ? ({ enum: fd.options } as unknown as any) : undefined,
         sourceErpField: fd.internalid,
       },
-      update: { label: fd.label },
+      update: { tenantId: entity.tenantId, label: fd.label },
     });
     result.customFieldsRegistered += 1;
   }
@@ -232,6 +233,7 @@ export async function importFromNs(
     }
     await prisma.account.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code: m.code,
         name: m.name,
@@ -274,6 +276,7 @@ export async function importFromNs(
 
     const party = await prisma.party.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code,
         displayName,
@@ -290,7 +293,7 @@ export async function importFromNs(
     });
     await prisma.partyRole.upsert({
       where: { partyId_role: { partyId: party.id, role } },
-      create: { partyId: party.id, role },
+      create: { tenantId: entity.tenantId, partyId: party.id, role },
       update: {},
     });
     return true;
@@ -343,6 +346,7 @@ export async function importFromNs(
     }
     await prisma.item.create({
       data: {
+        tenantId: entity.tenantId,
         entityId: entity.id,
         code: m.code,
         name: m.name,

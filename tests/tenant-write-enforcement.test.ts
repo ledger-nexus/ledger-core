@@ -12,10 +12,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
-import {
-  TenantScopeMismatchError,
-  EntityMissingTenantError,
-} from "@/lib/accounting/types";
+import { TenantScopeMismatchError } from "@/lib/accounting/types";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";
 import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
 import { createFixedAsset } from "@/lib/accounting/sub-ledgers/fixed-assets";
@@ -111,6 +108,8 @@ afterAll(async () => {
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  // RecordEvent.tenantId is RESTRICT; clean before tenant delete.
+  await prisma.recordEvent.deleteMany({ where: { tenantId: { in: tenantIds } } });
 
   // Scope by this run's tenant IDs (not the `enforce-` slug prefix) so
   // we don't try to delete leftover tenants from prior aborted test runs.
@@ -200,59 +199,15 @@ describe("postJournalEntry: tenantId auto-resolution", () => {
   });
 });
 
-describe("postJournalEntry: EntityMissingTenantError", () => {
-  it("throws when the entity has no tenantId (data-integrity bug)", async () => {
-    // Create an entity with tenantId set then NULL it back via raw SQL —
-    // simulates an unbackfilled row (shouldn't happen post-migration, but
-    // the engine must refuse rather than silently default).
-    const orphan = await prisma.legalEntity.create({
-      data: {
-        tenantId: tenantA.id,
-        code: `ORPHAN-${SUFFIX}`,
-        name: "Orphan Entity",
-        functionalCurrencyId: "USD",
-      },
-    });
-    await prisma.$executeRawUnsafe(
-      `UPDATE legal_entity SET "tenantId" = NULL WHERE id = '${orphan.id}'::uuid`
-    );
-    await prisma.account.createMany({
-      data: [
-        {
-          entityId: orphan.id,
-          code: "1000",
-          name: "Cash",
-          type: "ASSET",
-          normalBalance: "DEBIT",
-        },
-        {
-          entityId: orphan.id,
-          code: "3000",
-          name: "Equity",
-          type: "EQUITY",
-          normalBalance: "CREDIT",
-        },
-      ],
-    });
-
-    await expect(
-      postJournalEntry(prisma, {
-        entityCode: orphan.code,
-        bookCode: "US_GAAP",
-        documentDate: new Date("2026-01-04"),
-        memo: "orphan attempt",
-        lines: [
-          { accountCode: "1000", debit: "1" },
-          { accountCode: "3000", credit: "1" },
-        ],
-      })
-    ).rejects.toBeInstanceOf(EntityMissingTenantError);
-
-    // Clean up.
-    await prisma.account.deleteMany({ where: { entityId: orphan.id } });
-    await prisma.legalEntity.delete({ where: { id: orphan.id } });
-  });
-});
+// EntityMissingTenantError test obsolete after Phase 4b: the DB now
+// has `tenantId NOT NULL` on legal_entity, so even raw SQL can't
+// create or update an entity row with NULL tenantId. The application-
+// layer guard in postJournalEntry remains as defense-in-depth (e.g.
+// against a future schema regression), but the impossible-data
+// scenario can no longer be set up in a test.
+//
+// describe.skip("postJournalEntry: EntityMissingTenantError") — kept
+// for posterity; un-skip if NOT NULL is ever relaxed.
 
 describe("Sub-ledger writes: tenantId denormalization", () => {
   // For these we need a JournalEntry to point openedByEntryId at + parties.
@@ -306,7 +261,7 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
         entityId: entityA.id,
         code: `CUST-${SUFFIX}`,
         displayName: "Test Customer",
-        roles: { create: { role: "CUSTOMER" } },
+        roles: { create: { tenantId: tenantA.id, role: "CUSTOMER" } },
       },
     });
     const vendor = await prisma.party.create({
@@ -315,7 +270,7 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
         entityId: entityA.id,
         code: `VEND-${SUFFIX}`,
         displayName: "Test Vendor",
-        roles: { create: { role: "VENDOR" } },
+        roles: { create: { tenantId: tenantA.id, role: "VENDOR" } },
       },
     });
     customerId = customer.id;

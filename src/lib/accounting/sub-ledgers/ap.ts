@@ -148,7 +148,7 @@ export async function applyApPayment(
   return await prisma.$transaction(async (tx) => {
     const item = await tx.apOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
-      select: { currentBalance: true, status: true },
+      select: { currentBalance: true, status: true, tenantId: true },
     });
     if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
       throw new Error(`Cannot apply payment to AP item in ${item.status} state`);
@@ -167,6 +167,7 @@ export async function applyApPayment(
 
     const application = await tx.apApplication.create({
       data: {
+        tenantId: item.tenantId,
         openItemId: input.openItemId,
         appliedByEntryId: input.appliedByEntryId,
         appliedAmount: applied.toFixed(4),

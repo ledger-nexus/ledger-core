@@ -106,6 +106,12 @@ export interface RegisterPostingRuleInput {
   bookCode: string;
   template: RuleTemplate;
   ruleVersion?: number;          // default 1
+  /**
+   * Tenant the rule belongs to. Optional during the migration window —
+   * resolves to the default tenant when omitted. New callers should pass
+   * explicitly so cross-tenant misregistration is caught at write time.
+   */
+  tenantId?: string;
 }
 
 export async function registerPostingRule(
@@ -116,6 +122,7 @@ export async function registerPostingRule(
     where: { code: input.bookCode },
     select: { id: true },
   });
+  const tenantId = input.tenantId ?? (await (await import("@/lib/seed/default-tenant")).getDefaultTenantId(prisma));
   const version = input.ruleVersion ?? 1;
   return await prisma.postingRule.upsert({
     where: {
@@ -126,6 +133,7 @@ export async function registerPostingRule(
       },
     },
     create: {
+      tenantId,
       sourceEventType: input.sourceEventType,
       bookId: book.id,
       ruleVersion: version,
@@ -133,6 +141,7 @@ export async function registerPostingRule(
       isActive: true,
     },
     update: {
+      tenantId,
       template: input.template as unknown as any,
       isActive: true,
     },

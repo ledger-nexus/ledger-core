@@ -71,6 +71,7 @@ async function seedMasterData() {
   const calendar = await prisma.fiscalCalendar.upsert({
     where: { entityId_code: { entityId: entity.id, code: "STANDARD_2026" } },
     create: {
+      tenantId: tenantId,
       entityId: entity.id,
       code: "STANDARD_2026",
       name: "2026",
@@ -83,6 +84,7 @@ async function seedMasterData() {
     await prisma.period.upsert({
       where: { calendarId_code: { calendarId: calendar.id, code } },
       create: {
+        tenantId: tenantId,
         calendarId: calendar.id,
         code,
         ordinal: m,
@@ -102,6 +104,7 @@ async function seedMasterData() {
     if (existing) continue;
     await prisma.account.create({
       data: {
+        tenantId: tenantId,
         code: a.code,
         name: a.name,
         type: a.type,
@@ -120,13 +123,13 @@ async function seedMasterData() {
   ]) {
     const party = await prisma.party.upsert({
       where: { entityId_code: { entityId: entity.id, code: p.code } },
-      create: { entityId: entity.id, code: p.code, displayName: p.displayName },
-      update: {},
+      create: { tenantId, entityId: entity.id, code: p.code, displayName: p.displayName },
+      update: { tenantId },
     });
     await prisma.partyRole.upsert({
       where: { partyId_role: { partyId: party.id, role: p.role } },
-      create: { partyId: party.id, role: p.role },
-      update: {},
+      create: { tenantId, partyId: party.id, role: p.role },
+      update: { tenantId },
     });
   }
 }

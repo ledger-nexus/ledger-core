@@ -90,6 +90,7 @@ async function seedMasterData() {
   const calendar = await prisma.fiscalCalendar.upsert({
     where: { entityId_code: { entityId: entity.id, code: "STANDARD_2026" } },
     create: {
+      tenantId: tenantId,
       entityId: entity.id,
       code: "STANDARD_2026",
       name: "Standard 2026",
@@ -103,6 +104,7 @@ async function seedMasterData() {
     await prisma.period.upsert({
       where: { calendarId_code: { calendarId: calendar.id, code } },
       create: {
+        tenantId: tenantId,
         calendarId: calendar.id,
         code,
         ordinal: m,
@@ -117,6 +119,7 @@ async function seedMasterData() {
 async function seedAccountsOnly() {
   // Prisma 5.22 rejects null in compound unique-key upsert. Use
   // findFirst + create to upsert shared-chart accounts (entityId=null).
+  const tenantId = await getDefaultTenantId(prisma);
   for (const a of CHART_OF_ACCOUNTS) {
     const existing = await prisma.account.findFirst({
       where: { entityId: null, code: a.code },
@@ -125,6 +128,7 @@ async function seedAccountsOnly() {
     if (existing) continue;
     await prisma.account.create({
       data: {
+        tenantId,
         code: a.code,
         name: a.name,
         type: a.type,
