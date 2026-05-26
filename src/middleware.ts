@@ -24,6 +24,11 @@ const isClerkEnabled = () => {
 };
 
 // Routes that don't require sign-in even when Clerk is on.
+//
+// Note: /onboarding IS sign-in-required (you need to be a signed-in
+// User to create a Tenant). It's NOT in this list — middleware will
+// redirect unauthenticated users to /sign-in first. The page itself
+// then handles the "signed-in but no memberships" case.
 const PUBLIC_PATH_PATTERNS: RegExp[] = [
   /^\/sign-in(\/.*)?$/,
   /^\/sign-up(\/.*)?$/,

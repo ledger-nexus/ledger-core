@@ -7,6 +7,8 @@ import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { listMyTenants } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -23,6 +25,27 @@ const YEAR_START = new Date("2026-01-01");
 
 export default async function DashboardPage() {
   const scope = getScope();
+
+  // Onboarding gate: signed-in user with zero TenantMemberships sees
+  // a workspace-creation prompt instead of the empty dashboard. Once
+  // they create their first tenant the layout's getCurrentTenant
+  // resolves and the regular dashboard renders.
+  const user = await getCurrentUser();
+  if (user) {
+    const tenants = await listMyTenants();
+    if (tenants.length === 0) {
+      return (
+        <div className="flex flex-col gap-4">
+          <h2 className="text-xl font-semibold text-ink-900">Welcome</h2>
+          <EmptyState
+            title="Create your first workspace to get started"
+            description="A workspace owns one or more legal entities, their books, and journal entries. You can invite teammates after the first workspace is created."
+            action={{ href: "/onboarding", label: "Create workspace" }}
+          />
+        </div>
+      );
+    }
+  }
 
   // Bail early with an empty state if the seed hasn't been run.
   const entryCount = await prisma.journalEntry.count({

@@ -3,8 +3,10 @@ import { Sidebar } from "@/components/nav/sidebar";
 import { BookSwitcher } from "@/components/nav/book-switcher";
 import { UserSwitcher } from "@/components/nav/user-switcher";
 import { NotificationBell } from "@/components/nav/notification-bell";
+import { TenantSwitcher } from "@/components/nav/tenant-switcher";
 import { getScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
 import { isClerkEnabled } from "@/lib/auth/clerk";
 import { getRecentNotifications } from "@/lib/notifications";
 import { prisma } from "@/lib/db";
@@ -18,8 +20,9 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const scope = getScope();
-  const [currentUser, users] = await Promise.all([
+  const [currentUser, currentTenant, users] = await Promise.all([
     getCurrentUser(),
+    getCurrentTenant(),
     prisma.user.findMany({
       where: { isActive: true },
       select: { id: true, email: true, displayName: true },
@@ -46,6 +49,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <header className="flex items-center justify-between border-b border-ink-200 bg-white px-8 py-3">
               <div>
                 <h1 className="text-lg font-semibold text-ink-900">
+                  {currentTenant && (
+                    <>
+                      <span className="text-ink-500">{currentTenant.name}</span>
+                      <span className="mx-2 text-ink-300">·</span>
+                    </>
+                  )}
                   {scope.entityCode} <span className="text-ink-400">/</span>{" "}
                   <span className="text-ink-700">{scope.bookCode}</span>
                 </h1>
@@ -61,6 +70,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     unreadCount={notifications.unreadCount}
                   />
                 )}
+                <div className="w-48">
+                  <Card className="shadow-none">
+                    <CardContent className="px-3 py-2">
+                      {/* Renders nothing for single-tenant users. */}
+                      <TenantSwitcher />
+                    </CardContent>
+                  </Card>
+                </div>
                 <div className="w-56">
                   <Card className="shadow-none">
                     <CardContent className="px-3 py-2">
