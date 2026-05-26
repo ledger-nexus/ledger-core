@@ -193,9 +193,12 @@ describe("QBO import: structural invariants", () => {
     });
     expect(entriesWithLineage).toBe(6);
 
-    // Pick one and verify sourcePayload is populated.
+    // Pick the LOWEST sourceRecordId so the assertion is deterministic.
+    // Without an explicit orderBy, findFirst's order depends on table
+    // state + vacuum state and flakes under concurrent test pollution.
     const sample = await prisma.journalEntry.findFirst({
       where: { entity: { code: ENTITY }, sourceSystem: "QBO", sourceRecordType: "Invoice" },
+      orderBy: { sourceRecordId: "asc" },
       select: { sourceRecordId: true, sourcePayload: true, mappingVersion: true },
     });
     expect(sample).toBeDefined();

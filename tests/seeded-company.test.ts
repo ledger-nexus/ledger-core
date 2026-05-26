@@ -25,22 +25,55 @@ const TAX = { entityCode: ENTITY, bookCode: "US_TAX" };
 const IFRS = { entityCode: ENTITY, bookCode: "IFRS" };
 
 beforeAll(async () => {
-  // Self-heal: if Northwind has been wiped by another test's cleanup
-  // (or by a fresh db:push), re-seed it before running these assertions.
-  // The seed is now idempotent (clears entity-scoped sub-ledger rows
-  // at the top) so calling it on top of stale data is safe.
+  // Self-heal: re-seed Northwind whenever the data looks incomplete.
+  //
+  // The previous threshold (`jeCount === 0`) didn't catch the case
+  // where a prior partial run left a few JEs but no AR / depreciation /
+  // revenue-recognition state. The result was silent: tests would see
+  // partial data and fail with confusing "$40k expected, got $0"
+  // mismatches.
+  //
+  // The seed is idempotent (it wipes entity-scoped sub-ledger rows at
+  // the top), so re-running on top of stale data is safe + cheap. A
+  // full Northwind seed is ~30 seconds; we accept that overhead per
+  // file run rather than risk the partial-data ambiguity.
+  //
+  // We check a compound signal: entity exists, has ≥ a sensible JE
+  // count, AND has the post-seed sub-ledger state populated. Any
+  // missing piece triggers a re-seed.
   const northwind = await prisma.legalEntity.findUnique({
     where: { code: ENTITY },
     select: { id: true },
   });
-  const jeCount = northwind
-    ? await prisma.journalEntry.count({ where: { entityId: northwind.id } })
-    : 0;
-  if (jeCount === 0) {
+
+  let looksComplete = false;
+  if (northwind) {
+    const [jeCount, arCount, faCount, rcRecognized] = await Promise.all([
+      prisma.journalEntry.count({ where: { entityId: northwind.id } }),
+      prisma.arOpenItem.count({ where: { entityId: northwind.id } }),
+      prisma.fixedAsset.count({ where: { entityId: northwind.id } }),
+      prisma.performanceObligation.findFirst({
+        where: { contract: { entityId: northwind.id } },
+        select: { recognizedToDate: true },
+      }),
+    ]);
+    // A fully-seeded Northwind has ~180 JEs, 21 AR open items, 1 FA,
+    // and a non-zero recognizedToDate on the Globex revenue contract.
+    // Conservative thresholds — anything substantially below triggers
+    // a re-seed.
+    looksComplete =
+      jeCount > 50 &&
+      arCount > 5 &&
+      faCount >= 1 &&
+      !!rcRecognized &&
+      rcRecognized.recognizedToDate.toString() !== "0";
+  }
+
+  if (!looksComplete) {
     const { seedNorthwind } = await import("../src/lib/seed/northwind");
     await seedNorthwind(prisma);
   }
-});
+}, 300_000); // hookTimeout — full seed against remote Neon takes ~2 min
 
 afterAll(async () => {
   await prisma.$disconnect();
