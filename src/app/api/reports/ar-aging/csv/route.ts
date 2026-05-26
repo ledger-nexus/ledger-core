@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { arAging, openArBalance } from "@/lib/accounting/sub-ledgers/ar";
 import { getScope } from "@/lib/scope";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { auditDataExport } from "@/lib/audit/log";
 import { toCsv, csvFilename } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
@@ -33,6 +36,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       },
     }),
   ]);
+
+  const tenant = await getCurrentTenant();
+  const currentUser = await getCurrentUser();
+  await auditDataExport({
+    actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
+    format: "csv",
+    resource: "ArAging",
+    rowCount: items.length,
+    tenantId: tenant?.id ?? null,
+    requestHeaders: {
+      ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      userAgent: req.headers.get("user-agent"),
+    },
+  });
 
   const rows = [
     ["AR Aging", scope.entityCode, scope.bookCode, `as of ${asOf}`],

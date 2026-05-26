@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getIncomeStatement } from "@/lib/accounting/reports";
 import { getScope } from "@/lib/scope";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { auditDataExport } from "@/lib/audit/log";
 import { toCsv, csvFilename } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
@@ -13,6 +16,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const to = url.searchParams.get("to") ?? new Date().toISOString().slice(0, 10);
   const scope = getScope();
   const pnl = await getIncomeStatement(prisma, scope, new Date(from), new Date(to));
+
+  const tenant = await getCurrentTenant();
+  const currentUser = await getCurrentUser();
+  await auditDataExport({
+    actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
+    format: "csv",
+    resource: "IncomeStatement",
+    rowCount: pnl.revenue.length + pnl.expenses.length,
+    tenantId: tenant?.id ?? null,
+    requestHeaders: {
+      ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      userAgent: req.headers.get("user-agent"),
+    },
+  });
 
   const rows = [
     ["Income Statement", scope.entityCode, scope.bookCode, `${from} to ${to}`],

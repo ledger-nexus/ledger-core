@@ -3,6 +3,9 @@ import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
 import { getScope } from "@/lib/scope";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { auditDataExport } from "@/lib/audit/log";
 import { toCsv, csvFilename } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
@@ -23,6 +26,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   });
 
   const subCodes = report.entitiesIncluded.filter((e) => !e.isRoot).map((e) => e.code);
+
+  const tenant = await getCurrentTenant();
+  const currentUser = await getCurrentUser();
+  await auditDataExport({
+    actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
+    format: "csv",
+    resource: "Consolidation",
+    resourceId: root,
+    rowCount: report.rows.length,
+    tenantId: tenant?.id ?? null,
+    requestHeaders: {
+      ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      userAgent: req.headers.get("user-agent"),
+    },
+  });
 
   const rows = [
     ["Consolidation", report.rootEntityName, report.bookCode, `as of ${asOf}`],

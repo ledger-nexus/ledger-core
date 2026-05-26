@@ -11,6 +11,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { prisma } from "@/lib/db";
 import { resolveScope } from "@/lib/scope";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { auditDataExport } from "@/lib/audit/log";
 import {
   getTrialBalance,
   getIncomeStatement,
@@ -91,6 +94,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
   const bsTies = bs.totalAssets.equals(bs.totalLiabilities.plus(bs.totalEquity));
+
+  const tenant = await getCurrentTenant();
+  const currentUser = await getCurrentUser();
+  await auditDataExport({
+    actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
+    format: "pdf",
+    resource: "MonthEndPacket",
+    resourceId: `${entity.code}/${book.code}/${selected.code}`,
+    rowCount: tb.rows.length,
+    tenantId: tenant?.id ?? null,
+    requestHeaders: {
+      ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      userAgent: req.headers.get("user-agent"),
+    },
+  });
 
   // React-PDF expects plain-data props (Decimal → string). Marshal here
   // so the component file stays JSON-shaped.
