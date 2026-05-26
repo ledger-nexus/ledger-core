@@ -41,7 +41,7 @@ beforeAll(async () => {
   // We check a compound signal: entity exists, has ≥ a sensible JE
   // count, AND has the post-seed sub-ledger state populated. Any
   // missing piece triggers a re-seed.
-  const northwind = await prisma.legalEntity.findUnique({
+  const northwind = await prisma.legalEntity.findFirst({
     where: { code: ENTITY },
     select: { id: true },
   });

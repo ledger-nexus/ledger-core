@@ -43,7 +43,7 @@ const DEBIT_ACCOUNTS = ["1000", "1010", "1200", "1500"] as const;
 const CREDIT_ACCOUNTS = ["2000", "2100", "3000", "3100", "4000"] as const;
 
 async function clearLedger() {
-  const ent = await prisma.legalEntity.findUnique({
+  const ent = await prisma.legalEntity.findFirst({
     where: { code: ENTITY },
     select: { id: true },
   });
@@ -71,7 +71,7 @@ async function seedMasterData() {
   });
   const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY },
+    where: { tenantId_code: { tenantId, code: ENTITY } },
     create: { tenantId, code: ENTITY, name: "Fuzz Test Co.", functionalCurrencyId: "USD" },
     update: { tenantId },
   });
@@ -508,7 +508,7 @@ describe("property: multi-book parallel posting — each book balances independe
         // Each book's TB individually balances. Books NOT posted to
         // also balance (trivially — no rows in this entity).
         for (const bookCode of BOOKS) {
-          const entity = await prisma.legalEntity.findUniqueOrThrow({
+          const entity = await prisma.legalEntity.findFirstOrThrow({
             where: { code: ENTITY },
             select: { id: true },
           });

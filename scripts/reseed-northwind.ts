@@ -18,7 +18,7 @@ const prisma = new PrismaClient();
     }
   }
   // Post-seed inventory.
-  const ent = await prisma.legalEntity.findUnique({ where: { code: "NORTHWIND" }, select: { id: true } });
+  const ent = await prisma.legalEntity.findFirst({ where: { code: "NORTHWIND" }, select: { id: true } });
   if (ent) {
     const je = await prisma.journalEntry.count({ where: { entityId: ent.id } });
     const ar = await prisma.arOpenItem.count({ where: { entityId: ent.id } });

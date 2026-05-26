@@ -53,7 +53,7 @@ async function seedMasterData() {
   });
   const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY },
+    where: { tenantId_code: { tenantId, code: ENTITY } },
     create: { tenantId, code: ENTITY, name: "Sub-ledger Test Co.", functionalCurrencyId: "USD" },
     update: { tenantId },
   });

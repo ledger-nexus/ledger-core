@@ -41,7 +41,7 @@ async function clearLedger() {
   // applications, period closes, journal lines) must be deleted before
   // their parent JEs. Same discipline as the consolidation test's
   // clearAll().
-  const testEntity = await prisma.legalEntity.findUnique({
+  const testEntity = await prisma.legalEntity.findFirst({
     where: { code: ENTITY_CODE },
     select: { id: true },
   });
@@ -70,7 +70,7 @@ async function seedMasterData() {
 
   const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY_CODE },
+    where: { tenantId_code: { tenantId, code: ENTITY_CODE } },
     create: { tenantId, code: ENTITY_CODE, name: "Test Co.", functionalCurrencyId: "USD" },
     update: { tenantId },
   });

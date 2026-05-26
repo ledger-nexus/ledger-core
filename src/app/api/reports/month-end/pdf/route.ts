@@ -31,7 +31,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // as the CSV route).
   const scope = resolveScope(url.searchParams);
 
-  const entity = await prisma.legalEntity.findUnique({
+  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  const entity = await prisma.legalEntity.findFirst({
     where: { code: scope.entityCode },
     select: { id: true, code: true, name: true },
   });

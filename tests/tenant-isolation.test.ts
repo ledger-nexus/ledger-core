@@ -217,7 +217,12 @@ describe("tenant isolation: consolidation hierarchy walk", () => {
 
 describe("tenant isolation: cross-tenant write attempt", () => {
   it("rejects a JE that asserts tenantA but targets tenantB's entity", async () => {
-    const { TenantScopeMismatchError } = await import("@/lib/accounting/types");
+    // Phase 4b: postJournalEntry scopes its entity lookup to the caller's
+    // tenant. tenantA asking for tenantB's entity code finds nothing →
+    // UnknownEntityError. The previous TenantScopeMismatchError surface
+    // leaked information about another tenant's namespace; this is the
+    // correct, isolation-preserving error now.
+    const { UnknownEntityError } = await import("@/lib/accounting/types");
     await expect(
       postJournalEntry(prisma, {
         tenantId: tenantA.tenantId,
@@ -230,6 +235,6 @@ describe("tenant isolation: cross-tenant write attempt", () => {
           { accountCode: "3000", credit: "1" },
         ],
       })
-    ).rejects.toBeInstanceOf(TenantScopeMismatchError);
+    ).rejects.toBeInstanceOf(UnknownEntityError);
   });
 });

@@ -6,7 +6,7 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 (async () => {
-  const entity = await prisma.legalEntity.findUnique({
+  const entity = await prisma.legalEntity.findFirst({
     where: { code: "NORTHWIND" },
     select: { id: true, tenantId: true },
   });

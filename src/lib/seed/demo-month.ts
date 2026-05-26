@@ -434,7 +434,8 @@ async function postParallelCount(
 }
 
 async function wipeDemoEntity(prisma: PrismaClient): Promise<void> {
-  const existing = await prisma.legalEntity.findUnique({
+  // Phase 4b: entity code unique per [tenantId, code]; findFirst.
+  const existing = await prisma.legalEntity.findFirst({
     where: { code: ENTITY_CODE },
     select: { id: true },
   });
@@ -467,8 +468,9 @@ async function seedMasterData(prisma: PrismaClient): Promise<void> {
     update: {},
   });
   const tenantId = await getDefaultTenantId(prisma);
+  // Phase 4b: legalEntity.code unique per [tenantId, code]; composite upsert.
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY_CODE },
+    where: { tenantId_code: { tenantId, code: ENTITY_CODE } },
     create: {
       tenantId,
       code: ENTITY_CODE,
@@ -551,7 +553,8 @@ const DEMO_ACCOUNTS: Array<{
 ];
 
 async function seedAccounts(prisma: PrismaClient): Promise<void> {
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code unique per [tenantId, code]; findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: ENTITY_CODE },
     select: { id: true, tenantId: true },
   });
@@ -575,7 +578,8 @@ async function seedAccounts(prisma: PrismaClient): Promise<void> {
 }
 
 async function seedParties(prisma: PrismaClient): Promise<void> {
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code unique per [tenantId, code]; findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: ENTITY_CODE },
     select: { id: true, tenantId: true },
   });

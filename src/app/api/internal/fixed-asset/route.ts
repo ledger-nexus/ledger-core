@@ -142,8 +142,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Resolve entity for the dedup check.
-  const entity = await prisma.legalEntity.findUnique({
+  // Resolve entity for the dedup check. Phase 4b: code unique per
+  // [tenantId, code], use findFirst.
+  const entity = await prisma.legalEntity.findFirst({
     where: { code: body.entityCode },
     select: { id: true, code: true },
   });

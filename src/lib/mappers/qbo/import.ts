@@ -52,7 +52,8 @@ export async function importFromQbo(
   const mappingVersion = input.mappingVersion ?? "qbo-v1";
   const source = input.source ?? "IMPORT";
 
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: input.entityCode },
     select: { id: true, code: true, tenantId: true },
   });

@@ -39,7 +39,7 @@ const TAX = { entityCode: ENTITY, bookCode: "US_TAX" };
 
 async function clearAll() {
   // Scope to V04_TEST only — preserves seed data + other tests' state.
-  const testEntity = await prisma.legalEntity.findUnique({
+  const testEntity = await prisma.legalEntity.findFirst({
     where: { code: ENTITY },
     select: { id: true },
   });
@@ -87,7 +87,7 @@ async function seedMasterData() {
   });
   const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY },
+    where: { tenantId_code: { tenantId, code: ENTITY } },
     create: { tenantId, code: ENTITY, name: "v0.4 Test Co.", functionalCurrencyId: "USD" },
     update: { tenantId },
   });

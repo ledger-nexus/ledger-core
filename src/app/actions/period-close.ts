@@ -75,7 +75,11 @@ export async function closePeriodAction(
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
     }
 
-    const entity = await prisma.legalEntity.findUnique({
+    // Phase 4b: legalEntity.code is unique per [tenantId, code]. Use
+    // findFirst — admin auth check already ensures the caller has a
+    // tenant, but we accept the entity belonging to any tenant the
+    // admin has access to (rare cross-tenant admin scenarios).
+    const entity = await prisma.legalEntity.findFirst({
       where: { code: input.entityCode },
       // tenantId pulled so the PeriodClose row is tenant-tagged.
       select: { id: true, code: true, tenantId: true },
@@ -209,7 +213,8 @@ export async function reopenPeriodAction(
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
     }
 
-    const entity = await prisma.legalEntity.findUnique({
+    // Phase 4b: see closePeriodAction above; findFirst by code.
+    const entity = await prisma.legalEntity.findFirst({
       where: { code: input.entityCode },
       select: { id: true, tenantId: true },
     });

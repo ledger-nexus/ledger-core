@@ -32,7 +32,7 @@ const ACCOUNTS = ["1000", "1010", "1200", "2000", "2100", "3000", "3100"] as con
 
 async function clearLedger() {
   // Scope to the property-test entity only — never wipe seed data.
-  const testEntity = await prisma.legalEntity.findUnique({
+  const testEntity = await prisma.legalEntity.findFirst({
     where: { code: ENTITY },
     select: { id: true },
   });
@@ -60,7 +60,7 @@ async function seedMasterData() {
   });
   const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY },
+    where: { tenantId_code: { tenantId, code: ENTITY } },
     create: { tenantId, code: ENTITY, name: "Property Test Co.", functionalCurrencyId: "USD" },
     update: { tenantId },
   });

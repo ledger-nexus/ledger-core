@@ -33,7 +33,7 @@ function loadFixture(): QboExport {
 
 async function clearAll() {
   // Scope to the QBO test entity — never wipe Northwind / other tests' data.
-  const ent = await prisma.legalEntity.findUnique({
+  const ent = await prisma.legalEntity.findFirst({
     where: { code: ENTITY },
     select: { id: true },
   });
@@ -70,7 +70,7 @@ async function seedMasterData() {
   });
   const tenantId = await getDefaultTenantId(prisma);
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY },
+    where: { tenantId_code: { tenantId, code: ENTITY } },
     create: { tenantId, code: ENTITY, name: "QBO Demo Co.", functionalCurrencyId: "USD" },
     update: { tenantId },
   });

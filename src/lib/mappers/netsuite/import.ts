@@ -101,7 +101,8 @@ export async function importFromNs(
   const mappingVersion = input.mappingVersion ?? "ns-v1";
   const source = input.source ?? "IMPORT";
 
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: input.entityCode },
     select: { id: true, code: true, tenantId: true },
   });
@@ -191,7 +192,8 @@ export async function importFromNs(
   }
 
   for (const dimSetup of dimensionSetups) {
-    const dimensionExisted = await prisma.dimension.findUnique({
+    // Phase 4b: dimension.code unique per [tenantId, code]; use findFirst.
+    const dimensionExisted = await prisma.dimension.findFirst({
       where: { code: dimSetup.code },
       select: { id: true },
     });
@@ -391,7 +393,8 @@ export async function importFromNs(
       .sort((a, b) => a.dimensionCode.localeCompare(b.dimensionCode))
       .map((a) => `${a.dimensionCode}:${a.valueCode}`)
       .join("|");
-    const existed = await prisma.dimensionSet.findUnique({
+    // Phase 4b: dimension_set.hash unique per [tenantId, hash]; findFirst.
+    const existed = await prisma.dimensionSet.findFirst({
       where: { hash },
       select: { id: true },
     });

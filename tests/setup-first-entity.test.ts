@@ -10,9 +10,10 @@
 //   5. Idempotency: re-running on a tenant that already has an entity
 //      is a no-op (returns ok with a "already set up" message; no rows
 //      added).
-//   6. Globally-unique entity code is checked (LegalEntity.code @unique
-//      pre-Phase-4b-followup) — re-using an existing code returns
-//      ok:false with a friendly message.
+//   6. (Phase 4b retired: entity code is unique per [tenantId, code], so
+//      cross-tenant collisions are impossible and the global-uniqueness
+//      check was removed from the action. Within-tenant collisions are
+//      prevented by the idempotency check above.)
 //   7. Audit log: a PRIVILEGED_ACTION row is written with action=
 //      setup-first-entity and metadata.tenantId/entityCode/chartType.
 
@@ -182,7 +183,7 @@ describe("setupFirstEntityAction: standard chart happy path", () => {
     expect(r.entityCode).toBe(code);
 
     // Entity exists, tenant-scoped.
-    const entity = await prisma.legalEntity.findUnique({
+    const entity = await prisma.legalEntity.findFirst({
       where: { code },
       select: { id: true, tenantId: true, functionalCurrencyId: true },
     });
@@ -232,7 +233,7 @@ describe("setupFirstEntityAction: empty chart happy path", () => {
     });
     expect(r.ok).toBe(true);
 
-    const entity = await prisma.legalEntity.findUnique({
+    const entity = await prisma.legalEntity.findFirst({
       where: { code },
       select: { id: true },
     });
@@ -276,7 +277,7 @@ describe("setupFirstEntityAction: idempotency", () => {
     expect(accountsAfter).toBe(accountsBefore);
 
     // And the "different" code was NOT created.
-    const other = await prisma.legalEntity.findUnique({
+    const other = await prisma.legalEntity.findFirst({
       where: { code: `OTHER-${SUFFIX}` },
     });
     expect(other).toBeNull();

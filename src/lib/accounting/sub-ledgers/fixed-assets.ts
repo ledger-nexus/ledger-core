@@ -58,7 +58,8 @@ export async function createFixedAsset(
   prisma: PrismaClient,
   input: CreateFixedAssetInput
 ): Promise<{ id: string }> {
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: input.entityCode },
     select: { id: true, tenantId: true },
   });

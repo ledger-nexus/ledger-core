@@ -86,8 +86,15 @@ export async function postJournalEntry(
 
   // ---- 1. Resolve entity + book + currency by code -------------------------
 
-  const entity = await prisma.legalEntity.findUnique({
-    where: { code: input.entityCode },
+  // Phase 4b: entity code is unique only per [tenantId, code]. When the
+  // caller passes input.tenantId, scope the lookup so we deterministically
+  // get THEIR entity (and not another tenant's same-coded one). When
+  // tenantId is omitted (legacy seeds / single-tenant scripts), fall back
+  // to findFirst by code — acceptable while only one tenant exists.
+  const entity = await prisma.legalEntity.findFirst({
+    where: input.tenantId
+      ? { code: input.entityCode, tenantId: input.tenantId }
+      : { code: input.entityCode },
     select: {
       id: true,
       code: true,

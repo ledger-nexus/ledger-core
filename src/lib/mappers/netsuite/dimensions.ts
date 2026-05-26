@@ -40,8 +40,11 @@ export async function setupDimension(
 ): Promise<{ id: string }> {
   const applies = input.appliesToAccountTypes ?? [];
   const tenantId = await getDefaultTenantId(prisma);
+  // Phase 4b: dimension.code is unique per [tenantId, code]. Upsert
+  // targets the composite key explicitly so different tenants can each
+  // define their own "CLASS" / "DEPARTMENT" / etc.
   return await prisma.dimension.upsert({
-    where: { code: input.code },
+    where: { tenantId_code: { tenantId, code: input.code } },
     create: {
       tenantId,
       code: input.code,
@@ -71,7 +74,8 @@ export async function setupDimensionValue(
   prisma: PrismaClient,
   input: SetupDimensionValueInput
 ): Promise<{ id: string }> {
-  const dimension = await prisma.dimension.findUniqueOrThrow({
+  // Phase 4b: dimension.code unique per [tenantId, code]; findFirst.
+  const dimension = await prisma.dimension.findFirstOrThrow({
     where: { code: input.dimensionCode },
     select: { id: true, tenantId: true },
   });
@@ -103,10 +107,13 @@ export async function getOrCreateDimensionSet(
   }
 
   const hash = dimensionSetHash(assignments);
+  // Resolve tenant up-front so the dedup lookup is tenant-scoped
+  // (Phase 4b: dimension_set.hash is unique per [tenantId, hash]).
+  const tenantId = await getDefaultTenantId(prisma);
 
-  // Fast path: existing set.
+  // Fast path: existing set in THIS tenant.
   const existing = await prisma.dimensionSet.findUnique({
-    where: { hash },
+    where: { tenantId_hash: { tenantId, hash } },
     select: { id: true },
   });
   if (existing) return existing.id;
@@ -144,7 +151,6 @@ export async function getOrCreateDimensionSet(
   // the function safe to call concurrently and across multiple test runs
   // where the same hash gets seeded repeatedly.
   try {
-    const tenantId = await getDefaultTenantId(prisma);
     const created = await prisma.dimensionSet.create({
       data: {
         tenantId,
@@ -164,7 +170,7 @@ export async function getOrCreateDimensionSet(
     const code = (e as { code?: string }).code;
     if (code === "P2002" || code === "23505") {
       const reread = await prisma.dimensionSet.findUnique({
-        where: { hash },
+        where: { tenantId_hash: { tenantId, hash } },
         select: { id: true },
       });
       if (reread) return reread.id;

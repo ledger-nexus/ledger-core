@@ -4,7 +4,9 @@
 //   1. postJournalEntry populates tenantId on JournalEntry from the entity.
 //   2. postJournalEntry denormalizes tenantId onto every JournalLine.
 //   3. When input.tenantId is provided and matches: write succeeds.
-//   4. When input.tenantId is provided and DOESN'T match: TenantScopeMismatchError.
+//   4. When input.tenantId is provided and DOESN'T match: UnknownEntityError
+//      (Phase 4b: lookup is scoped by tenant so cross-tenant entities are
+//      invisible — no information leak about other tenants' codes).
 //   5. When the entity has no tenantId (data-integrity bug): EntityMissingTenantError.
 //   6. Sub-ledger writes (openArItem, openApItem, createFixedAsset,
 //      createLease, createRevenueContract) also populate tenantId.
@@ -12,7 +14,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
-import { TenantScopeMismatchError } from "@/lib/accounting/types";
+import { UnknownEntityError } from "@/lib/accounting/types";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";
 import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
 import { createFixedAsset } from "@/lib/accounting/sub-ledgers/fixed-assets";
@@ -183,6 +185,13 @@ describe("postJournalEntry: tenantId auto-resolution", () => {
   });
 
   it("rejects when input.tenantId mismatches the entity's tenantId", async () => {
+    // Phase 4b: postJournalEntry now scopes the entity lookup to the
+    // caller's tenant. A cross-tenant attempt (input.tenantId=B but
+    // entity lives in A) returns no entity → UnknownEntityError. This
+    // is the security improvement: the rejected caller can't even
+    // discover whether another tenant owns "ACME" — the error doesn't
+    // leak that information. Pre-Phase-4b this surfaced as
+    // TenantScopeMismatchError.
     await expect(
       postJournalEntry(prisma, {
         tenantId: tenantB.id, // wrong tenant
@@ -195,7 +204,7 @@ describe("postJournalEntry: tenantId auto-resolution", () => {
           { accountCode: "3000", credit: "100" },
         ],
       })
-    ).rejects.toBeInstanceOf(TenantScopeMismatchError);
+    ).rejects.toBeInstanceOf(UnknownEntityError);
   });
 });
 

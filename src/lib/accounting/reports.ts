@@ -23,8 +23,12 @@ async function resolveEntityBook(
   entityCode: string,
   bookCode: string
 ): Promise<{ entityId: string; bookId: string }> {
+  // Phase 4b: legalEntity.code is unique per [tenantId, code]. Reports
+  // are read-only; in the single-tenant world findFirst by code alone
+  // is deterministic. Multi-tenant callers should scope by tenant
+  // upstream (Server Component → requireCurrentTenant).
   const [entity, book] = await Promise.all([
-    prisma.legalEntity.findUnique({
+    prisma.legalEntity.findFirst({
       where: { code: entityCode },
       select: { id: true },
     }),

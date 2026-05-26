@@ -160,7 +160,9 @@ model LegalEntity {
   // remaining rows, scopes all queries, and applies NOT NULL.
   tenantId       String        @db.Uuid
   tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  code           String        @unique
+  // Phase 4b: code is unique PER tenant. Two tenants can both own
+  // an entity coded "ACME" — collisions are isolated by tenantId.
+  code           String
   name           String
   parentEntityId String?       @db.Uuid
   parent         LegalEntity?  @relation("EntityHierarchy", fields: [parentEntityId], references: [id])
@@ -193,6 +195,7 @@ model LegalEntity {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([tenantId, code])
   @@index([tenantId])
   @@map("legal_entity")
 }
@@ -533,9 +536,9 @@ model JournalEntry {
 
   // entryNumber is a human-readable sequential ID, unique per (entity, book).
   // Format: ENTITY-BOOK-NNNNN (e.g. NORTHWIND-US_GAAP-00001).
-  // Globally unique today; Phase 4 changes the constraint to
-  // [tenantId, entryNumber] so each tenant can have its own NORTHWIND-US_GAAP-00001.
-  entryNumber String @unique
+  // Phase 4b: unique per [tenantId, entryNumber] — each tenant can have
+  // its own NORTHWIND-US_GAAP-00001 without colliding.
+  entryNumber String
 
   entityId String      @db.Uuid
   entity   LegalEntity @relation(fields: [entityId], references: [id])
@@ -604,6 +607,7 @@ model JournalEntry {
   // Backref to ownership events.
   recordEvents RecordEvent[] @relation("JournalEntryEvents")
 
+  @@unique([tenantId, entryNumber])
   @@index([ownerId])
   @@index([entityId, bookId, documentDate])
   @@index([entityId, bookId, periodId])
@@ -696,9 +700,8 @@ model Dimension {
   id                    String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId              String  @db.Uuid
   tenant                Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  // Globally unique today (e.g. only one "CLASS" dimension); Phase 4 moves
-  // the unique to [tenantId, code] so each tenant defines their own CLASS.
-  code                  String  @unique // "DEPARTMENT", "CLASS", "LOCATION", "PROJECT"
+  // Phase 4b: unique per tenant so each tenant defines their own CLASS.
+  code                  String // "DEPARTMENT", "CLASS", "LOCATION", "PROJECT"
   name                  String
   // Optional free-form descriptive blurb. Preserved across mapper
   // roundtrips so NS custom-segment definitions survive export/import.
@@ -714,6 +717,7 @@ model Dimension {
 
   createdAt DateTime @default(now())
 
+  @@unique([tenantId, code])
   @@index([tenantId])
   @@map("dimension")
 }
@@ -742,15 +746,16 @@ model DimensionSet {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // Stable hash of sorted (dimensionId, dimensionValueId) pairs. Used for
-  // dedup lookups during posting. Globally unique today; Phase 4 changes
-  // to [tenantId, hash] so identical assignments in different tenants don't collide.
-  hash     String @unique
+  // dedup lookups during posting. Phase 4b: unique per [tenantId, hash]
+  // so identical assignments in different tenants don't collide.
+  hash     String
 
   values       DimensionSetValue[]
   journalLines JournalLine[]
 
   createdAt DateTime @default(now())
 
+  @@unique([tenantId, hash])
   @@index([tenantId])
   @@map("dimension_set")
 }
@@ -1317,8 +1322,8 @@ model Queue {
   id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId             String    @db.Uuid
   tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  // Globally unique today; Phase 4 changes to [tenantId, code].
-  code                 String    @unique // e.g. "AR_COLLECTIONS", "GL_UNASSIGNED"
+  // Phase 4b: unique per tenant. Each tenant defines its own queue codes.
+  code                 String // e.g. "AR_COLLECTIONS", "GL_UNASSIGNED"
   name                 String
   description          String?
   // When isUnassignedFallback is true, this queue is the module's dead-letter
@@ -1333,6 +1338,7 @@ model Queue {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([tenantId, code])
   @@index([tenantId])
   @@map("queue")
 }

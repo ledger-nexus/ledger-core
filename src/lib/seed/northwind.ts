@@ -73,8 +73,9 @@ async function seedMasterData(prisma: PrismaClient) {
   // the migration-created "default" tenant (the single-tenant fallback
   // for non-multi-tenant deployments).
   const tenantId = await getDefaultTenantId(prisma);
+  // Phase 4b: legalEntity.code unique per [tenantId, code]; composite upsert.
   const entity = await prisma.legalEntity.upsert({
-    where: { code: ENTITY_CODE },
+    where: { tenantId_code: { tenantId, code: ENTITY_CODE } },
     create: {
       tenantId,
       code: ENTITY_CODE,
@@ -157,7 +158,8 @@ async function seedAccounts(prisma: PrismaClient) {
 }
 
 async function seedParties(prisma: PrismaClient) {
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code unique per [tenantId, code]; findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: ENTITY_CODE },
     select: { id: true, tenantId: true },
   });
@@ -603,7 +605,8 @@ export async function seedNorthwind(prisma: PrismaClient): Promise<void> {
   // revenue_contract / lease) — re-seeding then trips P2002 on the
   // (entityId, code) unique constraint. Clearing the same set here
   // makes db:seed a true reset for NORTHWIND.
-  const existing = await prisma.legalEntity.findUnique({
+  // Phase 4b: entity code unique per [tenantId, code]; findFirst.
+  const existing = await prisma.legalEntity.findFirst({
     where: { code: ENTITY_CODE },
     select: { id: true },
   });
@@ -722,8 +725,9 @@ export async function seedTestUsersAndQueues(
   ];
   const tenantIdForQueues = await getDefaultTenantId(prisma);
   for (const spec of queueSpecs) {
+    // Phase 4b: queue.code unique per [tenantId, code]; composite upsert.
     await prisma.queue.upsert({
-      where: { code: spec.code },
+      where: { tenantId_code: { tenantId: tenantIdForQueues, code: spec.code } },
       create: { tenantId: tenantIdForQueues, ...spec },
       update: {
         tenantId: tenantIdForQueues,
@@ -751,7 +755,8 @@ export async function seedTestUsersAndQueues(
       where: { email: m.userEmail },
       select: { id: true },
     });
-    const queue = await prisma.queue.findUniqueOrThrow({
+    // Phase 4b: queue.code unique per [tenantId, code]; findFirst.
+    const queue = await prisma.queue.findFirstOrThrow({
       where: { code: m.queueCode },
       select: { id: true },
     });
@@ -784,19 +789,20 @@ export async function seedTestUsersAndQueues(
 export async function seedReassignmentRules(
   prisma: PrismaClient
 ): Promise<void> {
-  const arSenior = await prisma.queue.findUniqueOrThrow({
+  // Phase 4b: queue.code unique per [tenantId, code]; findFirst.
+  const arSenior = await prisma.queue.findFirstOrThrow({
     where: { code: "AR_SENIOR_COLLECTORS" },
     select: { id: true },
   });
-  const arCollections = await prisma.queue.findUniqueOrThrow({
+  const arCollections = await prisma.queue.findFirstOrThrow({
     where: { code: "AR_COLLECTIONS" },
     select: { id: true },
   });
-  const glApproval = await prisma.queue.findUniqueOrThrow({
+  const glApproval = await prisma.queue.findFirstOrThrow({
     where: { code: "GL_APPROVAL" },
     select: { id: true },
   });
-  const glUnassigned = await prisma.queue.findUniqueOrThrow({
+  const glUnassigned = await prisma.queue.findFirstOrThrow({
     where: { code: "GL_UNASSIGNED" },
     select: { id: true },
   });
@@ -960,7 +966,8 @@ async function seedGlobexUnpaidArInvoice(prisma: PrismaClient): Promise<void> {
 // reference open items reference journal entries; sub-ledger records
 // reference entities; etc.
 export async function resetNorthwindData(prisma: PrismaClient): Promise<void> {
-  const entity = await prisma.legalEntity.findUnique({
+  // Phase 4b: entity code unique per [tenantId, code]; findFirst.
+  const entity = await prisma.legalEntity.findFirst({
     where: { code: ENTITY_CODE },
     select: { id: true },
   });

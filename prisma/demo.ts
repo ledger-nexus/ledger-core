@@ -19,7 +19,8 @@ import {
 const prisma = new PrismaClient();
 
 async function closeMayPeriod(): Promise<void> {
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code unique per [tenantId, code]; findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: DEMO_ENTITY_CODE },
     select: { id: true, tenantId: true },
   });

@@ -61,7 +61,8 @@ export async function openApItem(
 ): Promise<OpenApItemResult> {
   // Entity first → tenant-scoped party lookup. Same rationale as
   // ar.ts; cross-tenant party leakage on shared (entityId=null) parties.
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: code is unique per [tenantId, code], so findFirst.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: input.entityCode },
     select: { id: true, tenantId: true },
   });

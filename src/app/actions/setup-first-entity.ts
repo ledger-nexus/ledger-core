@@ -119,20 +119,11 @@ export async function setupFirstEntityAction(
     };
   }
 
-  // ─── Global uniqueness check (Phase 4b followup deferred) ────────────
-  // LegalEntity.code is still @unique globally. If another tenant has
-  // claimed this code, fail with a friendly message — telling the user
-  // to pick another rather than crashing on the DB error.
-  const codeTaken = await prisma.legalEntity.findUnique({
-    where: { code },
-    select: { id: true },
-  });
-  if (codeTaken) {
-    return {
-      ok: false,
-      message: `Entity code "${code}" is already taken. Pick another (codes are globally unique pending Phase 4b followup).`,
-    };
-  }
+  // Phase 4b complete: LegalEntity.code is unique per [tenantId, code].
+  // Cross-tenant collisions are no longer possible. The idempotency
+  // check above (existingEntityCount > 0) guarantees the calling tenant
+  // has no entities yet, so the upcoming create can't collide within
+  // its own namespace either.
 
   // ─── Ensure USD currency + US_GAAP book exist ────────────────────────
   // These are platform-level (shared across tenants) and may already

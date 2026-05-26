@@ -63,7 +63,10 @@ export async function openArItem(
   // have a shared party (entityId=null) with the same code — Postgres
   // treats NULL != NULL in the [entityId, code] unique. Found by
   // tests/tenant-party-resolution.test.ts.
-  const entity = await prisma.legalEntity.findUniqueOrThrow({
+  // Phase 4b: entity code is unique per [tenantId, code]. Single-tenant
+  // world today, so findFirst by code alone is deterministic. Multi-tenant
+  // callers should ensure they only pass codes they own.
+  const entity = await prisma.legalEntity.findFirstOrThrow({
     where: { code: input.entityCode },
     select: { id: true, tenantId: true },
   });

@@ -40,9 +40,10 @@ export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void>
 
   const tenantId = await getDefaultTenantId(prisma);
 
-  // Create parent entity first so child rows can FK to it.
+  // Phase 4b: legalEntity.code unique per [tenantId, code]; upserts
+  // target the composite key.
   const parent = await prisma.legalEntity.upsert({
-    where: { code: PARENT_CODE },
+    where: { tenantId_code: { tenantId, code: PARENT_CODE } },
     create: {
       tenantId,
       code: PARENT_CODE,
@@ -53,7 +54,7 @@ export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void>
   });
 
   const usSub = await prisma.legalEntity.upsert({
-    where: { code: SUB_US_CODE },
+    where: { tenantId_code: { tenantId, code: SUB_US_CODE } },
     create: {
       tenantId,
       code: SUB_US_CODE,
@@ -64,7 +65,7 @@ export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void>
     update: { tenantId, parentEntityId: parent.id },
   });
   const ukSub = await prisma.legalEntity.upsert({
-    where: { code: SUB_UK_CODE },
+    where: { tenantId_code: { tenantId, code: SUB_UK_CODE } },
     create: {
       tenantId,
       code: SUB_UK_CODE,
