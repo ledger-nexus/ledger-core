@@ -170,16 +170,30 @@ export default async function AuditLogPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Filter</CardTitle>
-          <span className="text-xs text-ink-500">
-            {totalCount.toLocaleString()} event{totalCount === 1 ? "" : "s"} match
-            current filters · scope:{" "}
-            {tenant ? (
-              <span className="font-medium">{tenant.name}</span>
-            ) : (
-              <span className="text-ink-400">none</span>
-            )}
-          </span>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <CardTitle>Filter</CardTitle>
+              <span className="text-xs text-ink-500">
+                {totalCount.toLocaleString()} event{totalCount === 1 ? "" : "s"} match
+                current filters · scope:{" "}
+                {tenant ? (
+                  <span className="font-medium">{tenant.name}</span>
+                ) : (
+                  <span className="text-ink-400">none</span>
+                )}
+              </span>
+            </div>
+            <a
+              href={cleanUrl(searchParams, { cursor: undefined }).replace(
+                "/admin/audit-log",
+                "/api/admin/audit-log/csv"
+              )}
+              className="h-8 inline-flex items-center rounded-md border border-ink-200 px-3 text-xs font-medium text-ink-700 hover:bg-ink-100 whitespace-nowrap"
+              download
+            >
+              ↓ Download CSV
+            </a>
+          </div>
         </CardHeader>
         <CardContent>
           <form

@@ -217,6 +217,12 @@ export async function auditDataExport(input: {
   resource: string;
   resourceId?: string;
   rowCount?: number;
+  /**
+   * Tenant the exported data belongs to. Required for tenant-scoped
+   * audit queries (SOC 2 CC4 quarterly reviews filter by tenant).
+   * Null only for platform-level exports.
+   */
+  tenantId?: string | null;
   requestHeaders?: { ip?: string | null; userAgent?: string | null };
 }) {
   return logAuditEvent({
@@ -226,6 +232,7 @@ export async function auditDataExport(input: {
     actorEmail: input.actor?.email ?? null,
     resource: input.resource,
     resourceId: input.resourceId,
+    tenantId: input.tenantId ?? null,
     metadata: { format: input.format, rowCount: input.rowCount },
     requestHeaders: input.requestHeaders,
   });
