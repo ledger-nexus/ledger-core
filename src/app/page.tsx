@@ -26,10 +26,15 @@ const YEAR_START = new Date("2026-01-01");
 export default async function DashboardPage() {
   const scope = getScope();
 
-  // Onboarding gate: signed-in user with zero TenantMemberships sees
-  // a workspace-creation prompt instead of the empty dashboard. Once
-  // they create their first tenant the layout's getCurrentTenant
-  // resolves and the regular dashboard renders.
+  // Onboarding gate: three states the signed-in user can be in.
+  //
+  //   1. Zero TenantMemberships → /onboarding (create workspace)
+  //   2. Has a tenant but the tenant has zero LegalEntity rows →
+  //      /onboarding/setup (set up first entity)
+  //   3. Has a tenant + at least one entity → normal dashboard
+  //
+  // Without (2) the user lands on a dashboard scoped to the seed-default
+  // entityCode (NORTHWIND), sees data that isn't theirs, and gets confused.
   const user = await getCurrentUser();
   if (user) {
     const tenants = await listMyTenants();
@@ -41,6 +46,32 @@ export default async function DashboardPage() {
             title="Create your first workspace to get started"
             description="A workspace owns one or more legal entities, their books, and journal entries. You can invite teammates after the first workspace is created."
             action={{ href: "/onboarding", label: "Create workspace" }}
+          />
+        </div>
+      );
+    }
+    // Check current tenant's entity count; route to /onboarding/setup
+    // if the tenant exists but no entity has been provisioned yet.
+    // listMyTenants already filtered to active memberships, so we only
+    // need the count call (cheap).
+    const currentTenantId = tenants[0].id; // single-tenant user fallback
+    // For a multi-tenant user we'd resolve current via getCurrentTenant,
+    // but at this point they have memberships → layout's getCurrentTenant
+    // already resolved; using listMyTenants[0] for single is fine and
+    // we only block when EVERY accessible tenant has zero entities.
+    const entityCount = await prisma.legalEntity.count({
+      where: { tenantId: { in: tenants.map((t) => t.id) } },
+    });
+    if (entityCount === 0) {
+      return (
+        <div className="flex flex-col gap-4">
+          <h2 className="text-xl font-semibold text-ink-900">
+            Almost there
+          </h2>
+          <EmptyState
+            title="Set up your first entity to start using the workspace"
+            description="A workspace needs at least one legal entity (company / subsidiary / client) with its books and chart of accounts. Takes about 30 seconds."
+            action={{ href: "/onboarding/setup", label: "Set up entity" }}
           />
         </div>
       );

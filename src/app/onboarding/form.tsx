@@ -47,10 +47,12 @@ export function OnboardingForm() {
         setError(result.message ?? "Could not create workspace");
         return;
       }
-      // Cookie is set by the Server Action; refresh the layout so
-      // getCurrentTenant() picks it up, then navigate home.
+      // Tenant created + cookie set by the Server Action. Send the
+      // user to step 2 (entity + chart setup), where the dashboard
+      // gets its first real data. The setup page itself checks for
+      // entity-count > 0 and bounces to / if already done.
       router.refresh();
-      router.push("/");
+      router.push("/onboarding/setup");
     });
   }
 

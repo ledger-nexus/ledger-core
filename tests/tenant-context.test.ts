@@ -108,17 +108,20 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Best-effort cleanup. The FK from audit_log → app_user is intentional
-  // RESTRICT (see schema comment — audit logs survive user deletion via
-  // the actorEmail denorm). For tests we accept this orphans the test user
-  // row when audit rows accumulate; emails are unique-prefixed so no
-  // collision across runs.
-  await prisma.tenant.deleteMany({
+  // Best-effort cleanup. After auditPrivilegedAction added tenant scoping,
+  // audit_log rows reference tenant via FK — must drop them before the
+  // tenant. Order: actor-scoped audit rows → tenant-scoped audit rows →
+  // tenants → user.
+  const testTenants = await prisma.tenant.findMany({
     where: { slug: { startsWith: `test-tenant-` } },
+    select: { id: true },
   });
-  // Drop only the specific test user we created this run; leave anyone
-  // from prior runs alone (audit_log FK would block them anyway).
+  const tenantIds = testTenants.map((t) => t.id);
   await prisma.auditLog.deleteMany({ where: { actorUserId: testUser.id } });
+  if (tenantIds.length > 0) {
+    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  }
+  await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
   await prisma.user.deleteMany({ where: { id: testUser.id } }).catch(() => {});
   await prisma.$disconnect();
 });
@@ -380,7 +383,9 @@ describe("createMyFirstTenantAction", () => {
 
     expect(mockCookieStore.get(TENANT_COOKIE_NAME)?.value).toBe(slug);
 
-    // Clean up.
+    // Clean up. auditPrivilegedAction now writes a tenant-scoped row;
+    // FK blocks tenant delete unless audit_log rows are gone first.
+    await prisma.auditLog.deleteMany({ where: { tenantId: dbTenant!.id } });
     await prisma.tenant.delete({ where: { id: dbTenant!.id } });
   });
 
@@ -392,7 +397,13 @@ describe("createMyFirstTenantAction", () => {
     const r2 = await createMyFirstTenantAction({ slug, name: "second" });
     expect(r2.ok).toBe(false);
     expect(r2.message).toMatch(/already exists/i);
-    // Clean up.
-    await prisma.tenant.deleteMany({ where: { slug } });
+    // Clean up — same FK-aware pattern as above.
+    const created = await prisma.tenant.findMany({ where: { slug }, select: { id: true } });
+    if (created.length > 0) {
+      await prisma.auditLog.deleteMany({
+        where: { tenantId: { in: created.map((t) => t.id) } },
+      });
+      await prisma.tenant.deleteMany({ where: { slug } });
+    }
   });
 });

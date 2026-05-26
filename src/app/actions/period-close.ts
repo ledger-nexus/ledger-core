@@ -149,6 +149,7 @@ export async function closePeriodAction(
       action: "close-period",
       resource: "Period",
       resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      tenantId: entity.tenantId,
       metadata: { journalEntryCount: jeCount },
     });
 
@@ -210,7 +211,7 @@ export async function reopenPeriodAction(
 
     const entity = await prisma.legalEntity.findUnique({
       where: { code: input.entityCode },
-      select: { id: true },
+      select: { id: true, tenantId: true },
     });
     if (!entity) return { ok: false, message: `Unknown entity: ${input.entityCode}` };
 
@@ -263,6 +264,7 @@ export async function reopenPeriodAction(
       action: "reopen-period",
       resource: "Period",
       resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      tenantId: entity.tenantId,
     });
 
     revalidatePath("/periods");

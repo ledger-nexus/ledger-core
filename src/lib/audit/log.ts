@@ -152,6 +152,12 @@ export async function auditPrivilegedAction(input: {
   resource: string;
   resourceId?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Tenant the action operates within. Required for tenant-scoped audit
+   * reviews; null only for platform-level actions (system config changes
+   * etc.). Callers in Server Actions can pull from requireCurrentTenant.
+   */
+  tenantId?: string | null;
 }) {
   return logAuditEvent({
     eventType: "PRIVILEGED_ACTION",
@@ -160,6 +166,7 @@ export async function auditPrivilegedAction(input: {
     actorEmail: input.actor.email,
     resource: input.resource,
     resourceId: input.resourceId,
+    tenantId: input.tenantId ?? null,
     metadata: input.metadata,
   });
 }

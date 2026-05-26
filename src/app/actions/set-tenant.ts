@@ -44,11 +44,14 @@ export async function setTenantAction(formData: FormData): Promise<void> {
   });
 
   // Best-effort audit log — see lib/audit/log.ts contract: never throws.
+  // Scope the row to the TARGET tenant (the one being switched TO) so it
+  // appears in their access-review audit trail.
   await auditPrivilegedAction({
     actor: { id: user.id, email: user.email },
     action: "switch-tenant",
     resource: "Tenant",
     resourceId: membership.tenant.id,
+    tenantId: membership.tenant.id,
     metadata: { tenantSlug: membership.tenant.slug },
   });
 
@@ -139,6 +142,7 @@ export async function createMyFirstTenantAction(
     action: "create-tenant",
     resource: "Tenant",
     resourceId: created.id,
+    tenantId: created.id, // newly-created tenant scope
     metadata: { tenantSlug: created.slug, tenantName: created.name },
   });
 
