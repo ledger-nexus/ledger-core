@@ -54,6 +54,7 @@ const ADMIN_SECTION = {
   items: [
     { href: "/admin/users", label: "Users", hint: "lifecycle" },
     { href: "/admin/orphans", label: "Orphan records", hint: "ownership" },
+    { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
   ],
 } as const;
 
