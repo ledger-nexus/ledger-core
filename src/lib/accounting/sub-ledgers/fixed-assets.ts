@@ -65,8 +65,10 @@ export async function createFixedAsset(
   const vendor = input.vendorPartyCode
     ? await prisma.party.findFirstOrThrow({
         where: {
+          // Tenant-scoped party lookup; same rationale as ar.ts/ap.ts.
+          tenantId: entity.tenantId,
           code: input.vendorPartyCode,
-          OR: [{ entityId: null }, { entity: { code: input.entityCode } }],
+          OR: [{ entityId: null }, { entityId: entity.id }],
         },
         select: { id: true },
       })

@@ -61,8 +61,9 @@ export async function createRevenueContract(
   });
   const customer = await prisma.party.findFirstOrThrow({
     where: {
+      tenantId: entity.tenantId,
       code: input.customerPartyCode,
-      OR: [{ entityId: null }, { entity: { code: input.entityCode } }],
+      OR: [{ entityId: null }, { entityId: entity.id }],
     },
     select: { id: true },
   });

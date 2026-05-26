@@ -59,19 +59,22 @@ export async function openApItem(
   prisma: PrismaClient,
   input: OpenApItemInput
 ): Promise<OpenApItemResult> {
-  const [entity, book, party] = await Promise.all([
-    prisma.legalEntity.findUniqueOrThrow({
-      where: { code: input.entityCode },
-      select: { id: true, tenantId: true },
-    }),
+  // Entity first → tenant-scoped party lookup. Same rationale as
+  // ar.ts; cross-tenant party leakage on shared (entityId=null) parties.
+  const entity = await prisma.legalEntity.findUniqueOrThrow({
+    where: { code: input.entityCode },
+    select: { id: true, tenantId: true },
+  });
+  const [book, party] = await Promise.all([
     prisma.book.findUniqueOrThrow({
       where: { code: input.bookCode },
       select: { id: true },
     }),
     prisma.party.findFirstOrThrow({
       where: {
+        tenantId: entity.tenantId,
         code: input.partyCode,
-        OR: [{ entityId: null }, { entity: { code: input.entityCode } }],
+        OR: [{ entityId: null }, { entityId: entity.id }],
       },
       select: { id: true },
     }),

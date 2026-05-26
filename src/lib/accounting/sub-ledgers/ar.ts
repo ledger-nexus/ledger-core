@@ -58,21 +58,25 @@ export async function openArItem(
   prisma: PrismaClient,
   input: OpenArItemInput
 ): Promise<OpenArItemResult> {
-  const [entity, book, party] = await Promise.all([
-    prisma.legalEntity.findUniqueOrThrow({
-      where: { code: input.entityCode },
-      // tenantId pulled so we can denormalize onto the open-item row
-      // (Phase 4 of docs/multi-tenancy.md).
-      select: { id: true, tenantId: true },
-    }),
+  // Resolve entity first so the party lookup can scope by tenantId.
+  // Cross-tenant party leakage is otherwise possible when both tenants
+  // have a shared party (entityId=null) with the same code — Postgres
+  // treats NULL != NULL in the [entityId, code] unique. Found by
+  // tests/tenant-party-resolution.test.ts.
+  const entity = await prisma.legalEntity.findUniqueOrThrow({
+    where: { code: input.entityCode },
+    select: { id: true, tenantId: true },
+  });
+  const [book, party] = await Promise.all([
     prisma.book.findUniqueOrThrow({
       where: { code: input.bookCode },
       select: { id: true },
     }),
     prisma.party.findFirstOrThrow({
       where: {
+        tenantId: entity.tenantId,
         code: input.partyCode,
-        OR: [{ entityId: null }, { entityId: undefined }, { entity: { code: input.entityCode } }],
+        OR: [{ entityId: null }, { entityId: entity.id }],
       },
       select: { id: true },
     }),

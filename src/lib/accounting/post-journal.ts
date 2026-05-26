@@ -191,10 +191,18 @@ export async function postJournalEntry(
   }
 
   // ---- 3. Resolve accounts (entity-specific OR shared chart) ---------------
+  //
+  // Tenant filter is non-negotiable. Without it, two tenants that each
+  // have a shared-chart account with code "1000" (entityId=null) would
+  // both match — Postgres treats NULL != NULL in unique constraints, so
+  // the [entityId, code] unique allows the duplicate. The dedup map below
+  // would then pick whichever row Postgres surfaced last, non-deterministic
+  // across tenants. Found by tests/tenant-account-resolution.test.ts.
 
   const codes = Array.from(new Set(normalizedLines.map((l) => l.accountCode)));
   const accounts = await prisma.account.findMany({
     where: {
+      tenantId,
       code: { in: codes },
       active: true,
       OR: [{ entityId: null }, { entityId: entity.id }],
@@ -226,8 +234,10 @@ export async function postJournalEntry(
   );
   const partyMap = new Map<string, string>();
   if (partyCodes.length > 0) {
+    // Same tenant filter as the account lookup above.
     const parties = await prisma.party.findMany({
       where: {
+        tenantId,
         code: { in: partyCodes },
         OR: [{ entityId: null }, { entityId: entity.id }],
       },
@@ -246,6 +256,7 @@ export async function postJournalEntry(
   if (itemCodes.length > 0) {
     const items = await prisma.item.findMany({
       where: {
+        tenantId,
         code: { in: itemCodes },
         OR: [{ entityId: null }, { entityId: entity.id }],
       },

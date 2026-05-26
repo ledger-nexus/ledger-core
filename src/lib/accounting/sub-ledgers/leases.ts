@@ -75,8 +75,9 @@ export async function createLease(
   const lessor = input.lessorPartyCode
     ? await prisma.party.findFirstOrThrow({
         where: {
+          tenantId: entity.tenantId,
           code: input.lessorPartyCode,
-          OR: [{ entityId: null }, { entity: { code: input.entityCode } }],
+          OR: [{ entityId: null }, { entityId: entity.id }],
         },
         select: { id: true },
       })
