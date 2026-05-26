@@ -1,6 +1,29 @@
 # Multi-tenancy design
 
-**Status:** Design — being implemented. Read this before touching any query in `src/lib/accounting/`.
+**Status:** Phases 1, 2, 3, 4a, 4c, 5, 6, 7, 8 shipped. Phase 4b (NOT NULL + composite uniques) deferred. Read this before touching any query in `src/lib/accounting/`.
+
+## Phase status (as of 2026-05-26)
+
+| Phase | What | Status |
+|---|---|---|
+| 1 | Tenant + TenantMembership + TenantApiToken models; `tenantId String?` added to every tenant-scoped table; default tenant created; backfill migration | ✅ Shipped (`d557795`) |
+| 2 | Tenant context helpers + Server Actions (`setTenantAction`, `createMyFirstTenantAction`) | ✅ Shipped (`0ff682f`) |
+| 3 | Clerk integration — env-gated dispatch, JIT user provisioning by email, middleware, sign-in/sign-up routes | ✅ Shipped (`274f033`) |
+| 4a | Substrate write enforcement — `postJournalEntry` auto-resolves `tenantId`; `TenantScopeMismatchError` for cross-tenant attempts | ✅ Shipped (`06d185c`) |
+| 4b | `ALTER COLUMN tenantId SET NOT NULL` + composite unique constraints | ⏳ Deferred — forces every entity-by-code lookup to update |
+| 4c | Read scoping — high-leverage list queries filter by tenant | ✅ Shipped (`fcb20f8`) |
+| 5 | HTTP boundary — `/api/internal/*` resolves Bearer to TenantApiToken row; legacy env path as fallback | ✅ Shipped (`c411c80`) |
+| 6 | Per-tenant isolation tests | ✅ Folded into Phase 4c |
+| 7 | UI — tenant switcher in header + onboarding flow + dashboard CTA | ✅ Shipped (`2dc931b`) |
+| 8 | Companion repos — Clerk dispatch + middleware + sign-in/sign-up mirrored to recon, revenue-rec, integrations, fa-amort | ✅ Shipped (one commit per repo) |
+
+## What's deferred (and why)
+
+**Phase 4b (NOT NULL + composite uniques):** applying `ALTER COLUMN tenantId SET NOT NULL` forces every `legalEntity.findUnique({ where: { code } })` call to update because the unique constraint becomes `[tenantId, code]`. ~20 cross-cutting call sites; mechanical but reviewable as its own phase.
+
+**Per-tenant token rotation in companion repos:** Phase 5 ships the backward-compat env path so companion repos keep working unchanged. When the platform goes multi-tenant, `bin/deploy.sh` will provision per-tenant tokens via `scripts/provision-tenant-token.ts` and inject into each Vercel env. Until then, every companion repo authenticates as the default tenant — correct in a single-tenant world.
+
+**Companion repo tenant context UI:** companion repos don't own a User table — they share ledger-core's DB. Resolving a Clerk session to a `TenantMembership` requires duplicating or extracting ledger-core's `getCurrentTenant` logic. Revisit when a real multi-tenant customer is onboarded.
 
 ## What "tenant" means here
 
