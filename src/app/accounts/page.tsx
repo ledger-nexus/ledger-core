@@ -1,12 +1,17 @@
 // Chart of accounts list. Grouped by account type, ordered by code.
 // Shows the lineage badge so QBO/NS-imported accounts are visible at a
-// glance.
+// glance. Phase 7: parent column + "+ New account" CTA + Edit links.
 
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const TYPE_LABEL: Record<string, string> = {
   ASSET: "Assets",
@@ -17,9 +22,21 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default async function AccountsPage() {
+  const tenant = await getCurrentTenant();
+  if (!tenant) {
+    return (
+      <EmptyState
+        title="No active tenant"
+        description="Sign in and select a tenant to view the chart of accounts."
+      />
+    );
+  }
+  const user = await getCurrentUser();
+  const admin = isAdmin(user);
   const scope = getScope();
   const accounts = await prisma.account.findMany({
     where: {
+      tenantId: tenant.id,
       active: true,
       OR: [
         { entityId: null },
@@ -38,6 +55,7 @@ export default async function AccountsPage() {
       subtype: true,
       sourceSystem: true,
       entityId: true,
+      parent: { select: { code: true } },
     },
   });
 
@@ -51,11 +69,18 @@ export default async function AccountsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-xl font-semibold text-ink-900">Chart of Accounts</h2>
-        <p className="text-sm text-ink-500">
-          {accounts.length} active accounts in scope ({scope.entityCode})
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-ink-900">Chart of Accounts</h2>
+          <p className="text-sm text-ink-500">
+            {accounts.length} active accounts in scope ({scope.entityCode})
+          </p>
+        </div>
+        {admin && (
+          <Link href="/accounts/new">
+            <Button>+ New account</Button>
+          </Link>
+        )}
       </div>
 
       {(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"] as const).map((type) => {
@@ -73,6 +98,7 @@ export default async function AccountsPage() {
                   <tr>
                     <TH>Code</TH>
                     <TH>Name</TH>
+                    <TH>Parent</TH>
                     <TH>Normal balance</TH>
                     <TH>Subtype</TH>
                     <TH>Flags</TH>
@@ -82,8 +108,15 @@ export default async function AccountsPage() {
                 <TBody>
                   {list.map((a) => (
                     <TR key={a.code}>
-                      <TD className="font-mono text-xs text-ink-700">{a.code}</TD>
+                      <TD className="font-mono text-xs text-ink-700">
+                        <Link href={`/accounts/${a.code}`} className="text-link hover:underline">
+                          {a.code}
+                        </Link>
+                      </TD>
                       <TD className="text-ink-900">{a.name}</TD>
+                      <TD className="font-mono text-xs text-ink-500">
+                        {a.parent ? a.parent.code : "—"}
+                      </TD>
                       <TD className="text-ink-500">{a.normalBalance}</TD>
                       <TD className="text-ink-500">{a.subtype ?? "—"}</TD>
                       <TD>
