@@ -47,13 +47,28 @@ export function NewEntryForm({
   accounts,
   parties,
   scopeLabel,
+  initialLines,
+  initialMemo,
 }: {
   accounts: AccountOption[];
   parties: PartyOption[];
   scopeLabel: string;
+  /**
+   * Prefilled draft lines (used by the duplicate-JE flow). When provided,
+   * the form starts with these instead of the default empty Dr + Cr pair.
+   * Each line gets a fresh `uid` here so React's keyed list stays stable.
+   */
+  initialLines?: Array<Omit<DraftLine, "uid">>;
+  /** Prefilled memo (duplicate-JE: source memo, user editable). */
+  initialMemo?: string;
 }) {
   const [state, formAction] = useFormState(createJournalEntryAction, initialState);
-  const [lines, setLines] = useState<DraftLine[]>([newLine("DEBIT"), newLine("CREDIT")]);
+  const [lines, setLines] = useState<DraftLine[]>(() => {
+    if (initialLines && initialLines.length >= 2) {
+      return initialLines.map((l) => ({ ...l, uid: crypto.randomUUID() }));
+    }
+    return [newLine("DEBIT"), newLine("CREDIT")];
+  });
 
   function updateLine(uid: string, patch: Partial<DraftLine>) {
     setLines((prev) => prev.map((l) => (l.uid === uid ? { ...l, ...patch } : l)));
@@ -145,7 +160,13 @@ export function NewEntryForm({
           </div>
           <div className="sm:col-span-3">
             <Label htmlFor="memo">Memo</Label>
-            <Input name="memo" id="memo" required placeholder="What is this entry for?" />
+            <Input
+              name="memo"
+              id="memo"
+              required
+              placeholder="What is this entry for?"
+              defaultValue={initialMemo ?? ""}
+            />
           </div>
         </CardContent>
       </Card>

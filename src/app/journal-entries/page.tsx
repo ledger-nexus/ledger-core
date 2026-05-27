@@ -1,6 +1,12 @@
 // Journal entries list — paginated table for the current scope. Filters
 // by date range (defaults to 2026 YTD) via URL search params so links and
 // browser back/forward work naturally.
+//
+// Optional `?q=` search: matches against memo (header), entryNumber,
+// any line.description, and any line.party.code. Case-insensitive; works
+// across the whole date range. Designed for "where did I book that
+// vacation accrual" — typing "vacation" surfaces every entry whose memo
+// or any line description contains the word.
 
 import Link from "next/link";
 import { Decimal } from "decimal.js";
@@ -19,11 +25,12 @@ const PAGE_SIZE = 50;
 export default async function JournalEntriesPage({
   searchParams,
 }: {
-  searchParams: { from?: string; to?: string };
+  searchParams: { from?: string; to?: string; q?: string };
 }) {
   const scope = getScope();
   const from = searchParams.from ?? "2026-01-01";
   const to = searchParams.to ?? "2026-12-31";
+  const q = (searchParams.q ?? "").trim();
   const fromDate = new Date(from);
   const toDate = new Date(to);
 
@@ -34,12 +41,36 @@ export default async function JournalEntriesPage({
   const tenant = await getCurrentTenant();
   const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
 
+  // Search predicate. Postgres' `mode: "insensitive"` does an ILIKE
+  // under the hood; for v1 we accept the full-table scan (the date
+  // range already narrows the rows substantially). If this gets slow
+  // we'd add a tsvector + GIN index on memo + description.
+  const searchFilter = q
+    ? {
+        OR: [
+          { memo: { contains: q, mode: "insensitive" as const } },
+          { entryNumber: { contains: q, mode: "insensitive" as const } },
+          {
+            lines: {
+              some: {
+                OR: [
+                  { description: { contains: q, mode: "insensitive" as const } },
+                  { party: { code: { contains: q, mode: "insensitive" as const } } },
+                ],
+              },
+            },
+          },
+        ],
+      }
+    : {};
+
   const entries = await prisma.journalEntry.findMany({
     where: {
       ...tenantFilter,
       entity: { code: scope.entityCode },
       book: { code: scope.bookCode },
       documentDate: { gte: fromDate, lte: toDate },
+      ...searchFilter,
     },
     orderBy: [{ documentDate: "desc" }, { entryNumber: "desc" }],
     take: PAGE_SIZE,
@@ -61,10 +92,28 @@ export default async function JournalEntriesPage({
         <div>
           <h2 className="text-xl font-semibold text-ink-900">Journal entries</h2>
           <p className="text-sm text-ink-500">
-            {scope.entityCode} / {scope.bookCode} · {entries.length} entries · {formatDate(fromDate)} → {formatDate(toDate)}
+            {scope.entityCode} / {scope.bookCode} · {entries.length}
+            {entries.length === PAGE_SIZE ? "+" : ""} entries · {formatDate(fromDate)} →{" "}
+            {formatDate(toDate)}
+            {q && (
+              <>
+                {" "}
+                · matching <span className="font-mono">{q}</span>
+              </>
+            )}
           </p>
         </div>
         <form method="GET" className="flex items-end gap-2">
+          <div className="min-w-[200px]">
+            <Label htmlFor="q">Search</Label>
+            <Input
+              type="search"
+              name="q"
+              id="q"
+              defaultValue={q}
+              placeholder="memo · description · party"
+            />
+          </div>
           <div>
             <Label htmlFor="from">From</Label>
             <Input type="date" name="from" id="from" defaultValue={from} />
@@ -86,12 +135,17 @@ export default async function JournalEntriesPage({
         <CardHeader>
           <CardTitle>Posted entries (newest first)</CardTitle>
           <span className="text-xs text-ink-500">
-            Showing up to {PAGE_SIZE}; refine date range for older entries
+            {q
+              ? `Searching memo / description / party / entry number across the date range`
+              : `Showing up to ${PAGE_SIZE}; refine date range for older entries`}
           </span>
         </CardHeader>
         <CardContent>
           {entries.length === 0 ? (
-            <EmptyState title="No entries match this filter" />
+            <EmptyState
+              title={q ? `No entries matching "${q}"` : "No entries match this filter"}
+              description={q ? "Try a shorter or different search term." : undefined}
+            />
           ) : (
             <Table>
               <THead>

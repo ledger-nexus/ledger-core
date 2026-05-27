@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 
 export default async function JournalEntryDetailPage({
@@ -46,7 +47,7 @@ export default async function JournalEntryDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <Link
             href="/journal-entries"
@@ -57,10 +58,32 @@ export default async function JournalEntryDetailPage({
           <h2 className="mt-2 font-mono text-xl text-ink-900">{entry.entryNumber}</h2>
           <p className="text-sm text-ink-500">{entry.memo}</p>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <Badge tone="info">{entry.status}</Badge>
-          <Badge tone="neutral">{entry.source}</Badge>
-          {entry.sourceSystem && <Badge tone="neutral">{entry.sourceSystem} · {entry.sourceRecordType}</Badge>}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-1.5">
+            <Badge tone="info">{entry.status}</Badge>
+            <Badge tone="neutral">{entry.source}</Badge>
+            {entry.sourceSystem && (
+              <Badge tone="neutral">
+                {entry.sourceSystem} · {entry.sourceRecordType}
+              </Badge>
+            )}
+          </div>
+          {/* Quick actions. Duplicate links to the new-entry form with
+              ?duplicate=<id> so the user lands on a prefilled draft.
+              Export-CSV is a plain anchor to the CSV route — the route
+              writes a DATA_EXPORT audit row server-side. */}
+          <div className="flex items-center gap-1.5">
+            <Link href={`/journal-entries/new?duplicate=${entry.id}`}>
+              <Button size="sm" variant="outline">
+                Duplicate
+              </Button>
+            </Link>
+            <a href={`/api/journal-entries/${entry.id}/csv`} download>
+              <Button size="sm" variant="ghost">
+                Export CSV
+              </Button>
+            </a>
+          </div>
         </div>
       </div>
 
