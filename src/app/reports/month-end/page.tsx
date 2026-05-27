@@ -25,6 +25,7 @@ import {
   getIncomeStatement,
   getBalanceSheet,
 } from "@/lib/accounting/reports";
+import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -121,8 +122,9 @@ export default async function MonthEndPage({
   });
   const isClosed = !!close;
 
-  // Run the three reports in parallel — they're independent SQL queries.
-  const [tb, is, bs] = await Promise.all([
+  // Run the three reports + sub-ledger tie checks in parallel. All
+  // are independent reads against (entity, book, periodEnd).
+  const [tb, is, bs, subledgerTies] = await Promise.all([
     getTrialBalance(
       prisma,
       { entityCode: entity.code, bookCode: book.code },
@@ -139,10 +141,21 @@ export default async function MonthEndPage({
       { entityCode: entity.code, bookCode: book.code },
       selectedPeriod.endsOn
     ),
+    checkSubledgerTies(prisma, {
+      entityCode: entity.code,
+      bookCode: book.code,
+      asOf: selectedPeriod.endsOn,
+    }),
   ]);
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
   const bsTies = bs.totalAssets.equals(bs.totalLiabilities.plus(bs.totalEquity));
+  const allSubTies = subledgerTies.every(
+    (t) => t.status === "ok" || t.status === "no_control_account"
+  );
+  const checkedSubTies = subledgerTies.filter(
+    (t) => t.status !== "no_control_account"
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -194,6 +207,15 @@ export default async function MonthEndPage({
             <span className={bsTies ? "text-emerald-700" : "text-red-700"}>
               {bsTies ? "✓" : "✗"} BS A = L + E
             </span>
+            {checkedSubTies.length > 0 && (
+              <>
+                {" "}
+                ·{" "}
+                <span className={allSubTies ? "text-emerald-700" : "text-red-700"}>
+                  {allSubTies ? "✓" : "✗"} Sub-ledger ties
+                </span>
+              </>
+            )}
           </span>
         </CardHeader>
         <CardContent>
@@ -248,6 +270,65 @@ export default async function MonthEndPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* Sub-ledger ties detail. Renders only when there's at least one
+          checked tie (i.e. the chart has a control account for AR or AP).
+          Surfaces the math behind the green/red flag in the tie-out
+          checks line — CPAs want to see the numbers, not just a check. */}
+      {checkedSubTies.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Sub-ledger reconciliation
+              <Badge tone={allSubTies ? "positive" : "negative"}>
+                {allSubTies ? "All ties OK" : "Drift detected"}
+              </Badge>
+            </CardTitle>
+            <span className="text-xs text-ink-500">
+              GL control account vs sum of open sub-ledger items, as of{" "}
+              {formatDate(selectedPeriod.endsOn)}.
+            </span>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Tie</TH>
+                  <TH>Control account</TH>
+                  <TH className="text-right">GL balance</TH>
+                  <TH className="text-right">Sub-ledger sum</TH>
+                  <TH className="text-right">Δ</TH>
+                  <TH>Status</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {checkedSubTies.map((tie) => (
+                  <TR key={tie.name}>
+                    <TD className="text-ink-900">{tie.name}</TD>
+                    <TD className="font-mono text-xs text-ink-700">
+                      {tie.controlAccount?.code} — {tie.controlAccount?.name}
+                    </TD>
+                    <TD className="amount-cell text-right">
+                      {formatMoney(tie.controlBalance)}
+                    </TD>
+                    <TD className="amount-cell text-right">
+                      {formatMoney(tie.subledgerSum)}
+                    </TD>
+                    <TD className="amount-cell text-right">
+                      {formatMoney(tie.delta)}
+                    </TD>
+                    <TD>
+                      <Badge tone={tie.status === "ok" ? "positive" : "negative"}>
+                        {tie.status === "ok" ? "ok" : "broken"}
+                      </Badge>
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Income statement */}
       <Card>

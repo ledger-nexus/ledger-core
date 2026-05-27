@@ -20,6 +20,7 @@ import { openApBalance } from "@/lib/accounting/sub-ledgers/ap";
 import { netBookValue } from "@/lib/accounting/sub-ledgers/fixed-assets";
 import { getBookTaxDifference } from "@/lib/accounting/reports/book-tax-difference";
 import { enumerateDueDates } from "@/lib/accounting/recurring";
+import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
 
 const ASOF = new Date("2026-06-30"); // demo cutoff matching the seed
 const YEAR_START = new Date("2026-01-01");
@@ -108,6 +109,7 @@ export default async function DashboardPage() {
     recurringTemplates,
     lastClose,
     openPeriodCount,
+    subledgerTies,
   ] = await Promise.all([
     getBalanceSheet(prisma, scope, ASOF),
     getIncomeStatement(prisma, scope, YEAR_START, ASOF),
@@ -191,7 +193,19 @@ export default async function DashboardPage() {
         },
       },
     }),
+    // Sub-ledger ties: AR control vs sum-of-open-AR, AP control vs
+    // sum-of-open-AP. Broken ties point at a real bug — either a JE
+    // posted to a control account without flowing through the sub-
+    // ledger, or a sub-ledger write that drifted from the JE total.
+    checkSubledgerTies(prisma, {
+      entityCode: scope.entityCode,
+      bookCode: scope.bookCode,
+      asOf: ASOF,
+    }),
   ]);
+
+  // Count of broken ties for the dashboard badge.
+  const brokenTies = subledgerTies.filter((t) => t.status === "broken").length;
 
   // Compute "due today" count from the active recurring templates.
   // Pure client-side math — the runner uses the same helper.
@@ -302,6 +316,56 @@ export default async function DashboardPage() {
               urgentLabel="ready to post"
               emptyLabel="nothing due"
             />
+            {/* Sub-ledger ties: one row per checked tie. Broken ties are
+                URGENT — they indicate the books don't reconcile, which
+                is a real CPA concern. When everything ties we show a
+                compact "all 2 ties ok ✓" affordance instead of two
+                green rows so the panel stays scannable. */}
+            {brokenTies === 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-sm text-ink-900">Sub-ledger ties</span>
+                  <span className="text-xs text-ink-500">
+                    {subledgerTies.length === 0
+                      ? "—"
+                      : `${
+                          subledgerTies.filter((t) => t.status === "ok").length
+                        } of ${
+                          subledgerTies.filter(
+                            (t) => t.status !== "no_control_account"
+                          ).length
+                        } tie OK`}
+                  </span>
+                </div>
+                <Badge tone="positive">✓</Badge>
+              </div>
+            ) : (
+              <>
+                {subledgerTies
+                  .filter((t) => t.status === "broken")
+                  .map((tie) => (
+                    <div
+                      key={tie.name}
+                      className="flex items-start justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-2"
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-sm text-ink-900">
+                          {tie.name} drift
+                        </span>
+                        <span className="text-xs text-ink-500">
+                          {tie.controlAccount?.code} {formatMoney(tie.controlBalance)} ≠ sub-ledger {formatMoney(tie.subledgerSum)} (Δ {formatMoney(tie.delta)})
+                        </span>
+                      </div>
+                      <Link
+                        href={tie.investigateHref}
+                        className="text-xs font-medium text-accent-600 hover:underline"
+                      >
+                        Open →
+                      </Link>
+                    </div>
+                  ))}
+              </>
+            )}
           </CardContent>
         </Card>
 
