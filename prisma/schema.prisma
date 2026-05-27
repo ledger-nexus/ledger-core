@@ -61,6 +61,18 @@ model Tenant {
   name        String
   ownerUserId String @db.Uuid
 
+  /// Maximum Anthropic spend per calendar month, in USD.
+  /// Enforced by the companion repos' AI Server Actions (recon's
+  /// proposeMatches, revenue-rec's extractContract, fa-amort's
+  /// classify-* actions) before they call the API. Null means
+  /// "fall back to env default AI_TENANT_MONTHLY_CAP_USD"
+  /// (defaults to 50 in companion-repo helpers). The cap is checked
+  /// post-flight on the prior calls — i.e. if cumulative tenant
+  /// spend this month already exceeds the cap, the next call is
+  /// refused. A single call can push spend over the cap by its own
+  /// cost; subsequent calls then refuse until the calendar rolls.
+  monthlyAiSpendCapUsd Decimal? @db.Decimal(10, 2)
+
   memberships TenantMembership[]
   apiTokens   TenantApiToken[]
 
