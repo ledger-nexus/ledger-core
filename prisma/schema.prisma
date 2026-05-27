@@ -96,6 +96,7 @@ model Tenant {
   reassignmentRules      ReassignmentRule[]
   notifications          Notification[]
   recurringEntries       RecurringEntry[]
+  journalEntryNotes      JournalEntryNote[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -611,6 +612,9 @@ model JournalEntry {
   // Backref to ownership events.
   recordEvents RecordEvent[] @relation("JournalEntryEvents")
 
+  // Backref to inline notes (review comments, follow-up flags).
+  notes JournalEntryNote[]
+
   @@unique([tenantId, entryNumber])
   @@index([ownerId])
   @@index([entityId, bookId, documentDate])
@@ -691,6 +695,50 @@ model JournalLine {
   @@index([partyId])
   @@index([tenantId])
   @@map("gl_entry_line")
+}
+
+// =========================================================================
+// Journal entry notes (inline review comments)
+// =========================================================================
+// A lightweight comment thread on a JE. Real workflow: one CPA reviews the
+// month, flags "verify this accrual" on an entry; another CPA sees the
+// note on their next pass and either fixes the entry, posts an adjustment,
+// or resolves the note.
+//
+// Notes do NOT change the entry's lines. They're metadata for human review.
+// Resolving a note is a soft state — the note stays visible (audit) but
+// renders de-emphasized. Deleting is admin-only.
+
+model JournalEntryNote {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String       @db.Uuid
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entryId      String       @db.Uuid
+  entry        JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  // Author: links to User but kept nullable for the case where a user
+  // is later deactivated. authorEmail is snapshotted at write time so
+  // the note's authorship survives even if the user row goes away.
+  authorUserId String?      @db.Uuid
+  author       User?        @relation(fields: [authorUserId], references: [id])
+  authorEmail  String?
+
+  // Plain-text body for v1. No markdown / no rich text — keeps the audit
+  // surface clean. CPAs write short prose.
+  body String
+
+  // Resolution: anyone in the tenant can resolve. The note stays in the
+  // DB; the UI renders resolved notes muted.
+  resolvedAt    DateTime?
+  resolvedBy    String? // email snapshot (same rationale as authorEmail)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entryId])
+  @@index([tenantId])
+  @@index([resolvedAt])
+  @@map("journal_entry_note")
 }
 
 // =========================================================================
@@ -1406,6 +1454,7 @@ model User {
   notifications      Notification[] @relation("NotificationRecipient")
   notificationsActed Notification[] @relation("NotificationActor")
   auditEvents        AuditLog[]     @relation("AuditLogActor")
+  journalEntryNotes  JournalEntryNote[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

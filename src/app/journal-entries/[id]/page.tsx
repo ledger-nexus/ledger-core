@@ -9,8 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import ReverseButton from "./reverse-button";
+import NotesCard from "./notes-card";
 
 export default async function JournalEntryDetailPage({
   params,
@@ -32,8 +34,21 @@ export default async function JournalEntryDetailPage({
         },
         orderBy: { lineNo: "asc" },
       },
+      notes: {
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          body: true,
+          authorEmail: true,
+          authorUserId: true,
+          resolvedAt: true,
+          resolvedBy: true,
+          createdAt: true,
+        },
+      },
     },
   });
+  const currentUser = await getCurrentUser();
 
   if (!entry) {
     notFound();
@@ -197,6 +212,22 @@ export default async function JournalEntryDetailPage({
           </Table>
         </CardContent>
       </Card>
+
+      <NotesCard
+        entryId={entry.id}
+        notes={entry.notes.map((n) => ({
+          id: n.id,
+          body: n.body,
+          authorEmail: n.authorEmail,
+          authorUserId: n.authorUserId,
+          // Dates serialized to ISO strings for the client component.
+          createdAt: n.createdAt.toISOString(),
+          resolvedAt: n.resolvedAt ? n.resolvedAt.toISOString() : null,
+          resolvedBy: n.resolvedBy,
+        }))}
+        currentUserId={currentUser?.id ?? null}
+        currentUserIsAdmin={isAdmin(currentUser)}
+      />
 
       {entry.sourcePayload && (
         <Card>

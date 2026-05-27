@@ -92,6 +92,14 @@ export default async function JournalEntriesPage({
         sourceSystem: true,
         sourceRecordType: true,
         lines: { select: { debit: true } },
+        // Count unresolved notes per entry. Tiny query addition — Prisma
+        // batches it into one COUNT(*) per row. Surface a badge on rows
+        // with open review questions.
+        _count: {
+          select: {
+            notes: { where: { resolvedAt: null } },
+          },
+        },
       },
     }),
     prisma.journalEntry.count({ where: whereClause }),
@@ -203,6 +211,11 @@ export default async function JournalEntriesPage({
                         {entry.status !== "POSTED" && (
                           <Badge tone={entry.status === "REVERSED" ? "warning" : "neutral"} className="ml-2">
                             {entry.status}
+                          </Badge>
+                        )}
+                        {entry._count.notes > 0 && (
+                          <Badge tone="warning" className="ml-2" title="Open review notes">
+                            {entry._count.notes} note{entry._count.notes === 1 ? "" : "s"}
                           </Badge>
                         )}
                       </TD>
