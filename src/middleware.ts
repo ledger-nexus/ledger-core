@@ -15,6 +15,14 @@
 // When Clerk is NOT enabled (dev / tests), we export a no-op middleware
 // so the Next.js build still produces a valid output. The dev cookie
 // stub is still used by getCurrentUser in that case.
+//
+// SECURITY (pen-test pass 4 follow-up): in production, if Clerk env is
+// missing we refuse every non-public route with 503. ledger-core's
+// fallback auth path is a signed `lc-user` cookie set by
+// setCurrentUserAction — an action that lets any caller impersonate
+// any user (intentional in dev for the UserSwitcher dropdown). Without
+// the prod fail-closed gate, an unset CLERK_SECRET_KEY in prod would
+// leave that impersonation surface exposed.
 
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -22,6 +30,8 @@ const isClerkEnabled = () => {
   const k = process.env.CLERK_SECRET_KEY;
   return k != null && k.length > 0;
 };
+
+const isProd = () => process.env.NODE_ENV === "production";
 
 // Routes that don't require sign-in even when Clerk is on.
 //
@@ -44,6 +54,21 @@ function isPublic(pathname: string): boolean {
 
 export default async function middleware(req: NextRequest) {
   if (!isClerkEnabled()) {
+    // Fail closed in production. Dev / CI without Clerk passes through
+    // so local work doesn't require Clerk credentials, but the moment
+    // prod is missing CLERK_SECRET_KEY, every non-public request
+    // returns 503 — closing the dev-impersonation cookie path that
+    // would otherwise be reachable.
+    if (isProd() && !isPublic(req.nextUrl.pathname)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Auth is not configured in this environment (CLERK_SECRET_KEY missing). Refusing to serve requests.",
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.next();
   }
 
