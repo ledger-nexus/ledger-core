@@ -135,9 +135,10 @@ model TenantMembership {
 }
 
 enum TenantRole {
-  OWNER // cannot be removed; can delete the tenant
-  ADMIN // full read+write+admin (period close, user lifecycle)
-  MEMBER // read+write, no admin actions
+  OWNER  // cannot be removed; can delete the tenant + change billing
+  ADMIN  // full read+write+admin (period close, user lifecycle, AI budget config)
+  MEMBER // read+write, no admin actions (the default for new members)
+  VIEWER // read-only; cannot post JEs, approve AI suggestions, or run mutations
 }
 
 // Per-tenant API tokens for companion-repo authentication.

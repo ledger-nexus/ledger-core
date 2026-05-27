@@ -154,17 +154,17 @@ export async function listMyTenants(): Promise<CurrentTenant[]> {
 }
 
 /**
- * Admin-tier check within the current tenant. ADMIN and OWNER are
- * both admin-level; MEMBER is not. Mirrors the role rubric in
- * docs/multi-tenancy.md.
+ * Admin-tier check within the current tenant. Delegates to the policy
+ * module's canViewAdminPages helper — change the rubric there, not here.
  *
- * NOTE: this is distinct from the global isAdmin() in current-user.ts
- * which today checks an email allowlist. Once Clerk + per-tenant
- * RBAC lands, the global isAdmin retires and callers move to this.
+ * VIEWER, MEMBER → false. ADMIN, OWNER → true.
  */
 export function isTenantAdmin(tenant: CurrentTenant | null): boolean {
-  if (!tenant) return false;
-  return tenant.role === "OWNER" || tenant.role === "ADMIN";
+  // Lazy import to avoid a circular import at the type level (policy
+  // imports nothing from this module, but keeping the boundary clean).
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { canViewAdminPages } = require("./policy") as typeof import("./policy");
+  return canViewAdminPages(tenant?.role ?? null);
 }
 
 export class NotTenantAdminError extends Error {

@@ -128,35 +128,81 @@ export async function requireCurrentUser(): Promise<CurrentUser> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Admin authorization (stub)
+// Admin authorization
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Until the full role/permission catalog from docs/ownership-and-rules.md
-// lands, admin-only pages gate on an email allowlist. Replace this with a
-// proper `can_access:admin.<feature>` permission check when the catalog is
-// built. The exports stay the same; only the implementation changes.
+// Migrated from the email allowlist (former STUB) to per-tenant RBAC:
+// admin status is now a function of the user's role in the CURRENT
+// tenant, resolved via the policy module in ./policy.ts.
+//
+// The exported surface stays compatible:
+//   - isAdmin(user) — SYNC; falls back to the legacy email allowlist
+//     when called without tenant context. New code should call the
+//     async isCurrentTenantAdmin() helper below, or use policy helpers
+//     against a CurrentTenant.
+//   - requireAdmin() — ASYNC; the source-of-truth gate. Loads the
+//     current tenant and refuses unless role >= ADMIN. This is what
+//     Server Actions should use.
+//
+// Why keep isAdmin(user) at all: ~15 page-level callers use it for
+// UI gating ("show this button or not"). Migrating them to async +
+// tenant-aware is a separate pass; in the meantime the email allowlist
+// remains a UI-only gate. Defense-in-depth holds because every
+// Server Action they enable also goes through requireAdmin() server-side.
 
-const ADMIN_EMAIL_ALLOWLIST = new Set<string>([
+const LEGACY_ADMIN_EMAIL_ALLOWLIST = new Set<string>([
   "controller@northwind.test",
-  // Add more emails here as the test cohort grows. In production this list
-  // becomes irrelevant — real role grants take over.
+  // Legacy: kept for SYNC UI gating in pages that haven't been migrated
+  // to load the current tenant. Server Actions ignore this list — they
+  // use requireAdmin() which checks the real per-tenant role.
 ]);
 
 export class NotAuthorizedError extends Error {
-  constructor(message = "This page requires admin access") {
+  constructor(message = "This action requires ADMIN or OWNER role in this tenant") {
     super(message);
     this.name = "NotAuthorizedError";
   }
 }
 
+/**
+ * SYNC, user-only admin check. Used by pages for UI gating (button
+ * visibility). DOES NOT check tenant role — that requires loading the
+ * tenant, which can't happen synchronously here. The "real" gate is
+ * requireAdmin() server-side and the policy.ts helpers against a
+ * CurrentTenant.
+ *
+ * @deprecated for new code — use isCurrentTenantAdmin() or
+ * canViewAdminPages(tenant.role) from policy.ts.
+ */
 export function isAdmin(user: CurrentUser | null): boolean {
   if (!user) return false;
-  return ADMIN_EMAIL_ALLOWLIST.has(user.email);
+  return LEGACY_ADMIN_EMAIL_ALLOWLIST.has(user.email);
 }
 
+/**
+ * ASYNC, tenant-aware admin check. The source-of-truth gate for
+ * Server Actions. Loads the current tenant and uses the policy
+ * module's canViewAdminPages helper.
+ */
+export async function isCurrentTenantAdmin(): Promise<boolean> {
+  const { getCurrentTenant } = await import("./tenant");
+  const { canViewAdminPages } = await import("./policy");
+  const tenant = await getCurrentTenant();
+  return canViewAdminPages(tenant?.role ?? null);
+}
+
+/**
+ * Refuse unless the current user has ADMIN+ role in the current tenant.
+ * Server Actions on admin surfaces (period close, user lifecycle,
+ * recurring entries, account create/edit, AI budget config) call this.
+ *
+ * The behavioral change vs the previous email-allowlist implementation:
+ * an admin in tenant A is NOT automatically an admin in tenant B. Each
+ * tenant manages its own admin grants via TenantMembership.role.
+ */
 export async function requireAdmin(): Promise<CurrentUser> {
   const u = await requireCurrentUser();
-  if (!isAdmin(u)) throw new NotAuthorizedError();
+  if (!(await isCurrentTenantAdmin())) throw new NotAuthorizedError();
   return u;
 }
 
