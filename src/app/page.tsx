@@ -19,6 +19,7 @@ import { openArBalance } from "@/lib/accounting/sub-ledgers/ar";
 import { openApBalance } from "@/lib/accounting/sub-ledgers/ap";
 import { netBookValue } from "@/lib/accounting/sub-ledgers/fixed-assets";
 import { getBookTaxDifference } from "@/lib/accounting/reports/book-tax-difference";
+import { enumerateDueDates } from "@/lib/accounting/recurring";
 
 const ASOF = new Date("2026-06-30"); // demo cutoff matching the seed
 const YEAR_START = new Date("2026-01-01");
@@ -94,8 +95,20 @@ export default async function DashboardPage() {
     );
   }
 
-  // Parallel data fetches for the KPI cards.
-  const [bs, pnl, arOpen, apOpen, nbv, recent] = await Promise.all([
+  // Parallel data fetches: KPIs + activity-surfaces ("what needs my
+  // attention") for the dashboard's secondary panels.
+  const [
+    bs,
+    pnl,
+    arOpen,
+    apOpen,
+    nbv,
+    recent,
+    openNoteCount,
+    recurringTemplates,
+    lastClose,
+    openPeriodCount,
+  ] = await Promise.all([
     getBalanceSheet(prisma, scope, ASOF),
     getIncomeStatement(prisma, scope, YEAR_START, ASOF),
     openArBalance(prisma, scope.entityCode, scope.bookCode),
@@ -119,7 +132,89 @@ export default async function DashboardPage() {
         lines: { select: { debit: true } },
       },
     }),
+    // Open review notes attached to JEs in the active scope. A pure
+    // count is enough for the badge; the user clicks through to find
+    // them in /journal-entries (filtered list shows the "N open" badge).
+    prisma.journalEntryNote.count({
+      where: {
+        resolvedAt: null,
+        entry: {
+          entity: { code: scope.entityCode },
+          book: { code: scope.bookCode },
+        },
+      },
+    }),
+    // Active recurring templates for this (entity, book). We compute
+    // "due today" client-side via enumerateDueDates so the cadence
+    // math stays in one place.
+    prisma.recurringEntry.findMany({
+      where: {
+        isActive: true,
+        entity: { code: scope.entityCode },
+        book: { code: scope.bookCode },
+      },
+      select: {
+        cadence: true,
+        startDate: true,
+        endDate: true,
+        lastPostedDate: true,
+      },
+    }),
+    // Most recent period close for this (entity, book). Lets the
+    // dashboard show "May 2026 closed 4 days ago by …".
+    prisma.periodClose.findFirst({
+      where: {
+        entity: { code: scope.entityCode },
+        book: { code: scope.bookCode },
+      },
+      orderBy: { closedAt: "desc" },
+      select: {
+        closedAt: true,
+        closedBy: true,
+        period: { select: { code: true } },
+      },
+    }),
+    // Count of periods on the entity's calendar that don't have a
+    // close row for this book. "Open periods" = posting still allowed
+    // there. Useful at month-end: "you have 3 open periods — close
+    // April before you close May."
+    prisma.period.count({
+      where: {
+        calendar: { entity: { code: scope.entityCode } },
+        // No close row for THIS book.
+        NOT: {
+          closes: {
+            some: {
+              book: { code: scope.bookCode },
+            },
+          },
+        },
+      },
+    }),
   ]);
+
+  // Compute "due today" count from the active recurring templates.
+  // Pure client-side math — the runner uses the same helper.
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const recurringDueCount = recurringTemplates.reduce((sum, t) => {
+    const due = enumerateDueDates({
+      cadence: t.cadence,
+      startDate: t.startDate,
+      lastPostedDate: t.lastPostedDate,
+      endDate: t.endDate,
+      throughDate: today,
+    });
+    return sum + due.length;
+  }, 0);
+
+  // Days since last close (for the "closed N days ago" tooltip).
+  const daysSinceClose =
+    lastClose != null
+      ? Math.floor(
+          (Date.now() - lastClose.closedAt.getTime()) / (1000 * 60 * 60 * 24)
+        )
+      : null;
 
   // Aggregate cash from bank-flagged accounts on the BS.
   const cash = bs.assets
@@ -178,6 +273,84 @@ export default async function DashboardPage() {
         )}
       </div>
 
+      {/* Action items + Close status — surfaces the activity panels for
+          features shipped this session (notes, recurring entries, period
+          close). At-a-glance "what needs my attention" alongside the
+          KPI numbers. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Action items</CardTitle>
+            <span className="text-xs text-ink-500">
+              What needs attention in {scope.entityCode} / {scope.bookCode}
+            </span>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <ActionRow
+              label="Open review notes"
+              count={openNoteCount}
+              href="/journal-entries?q="
+              urgentAt={1}
+              urgentLabel="needs review"
+              emptyLabel="no open notes"
+            />
+            <ActionRow
+              label="Recurring entries due"
+              count={recurringDueCount}
+              href="/recurring-entries"
+              urgentAt={1}
+              urgentLabel="ready to post"
+              emptyLabel="nothing due"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Close status</CardTitle>
+            <span className="text-xs text-ink-500">
+              Period-close state for {scope.bookCode}
+            </span>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {lastClose ? (
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-ink-500">
+                  Last closed
+                </div>
+                <div className="mt-0.5 text-sm">
+                  <span className="font-mono text-ink-900">
+                    {lastClose.period.code}
+                  </span>{" "}
+                  <span className="text-ink-500">
+                    {daysSinceClose === 0
+                      ? "(today)"
+                      : `(${daysSinceClose} day${daysSinceClose === 1 ? "" : "s"} ago)`}
+                  </span>
+                </div>
+                {lastClose.closedBy && (
+                  <div className="mt-0.5 text-xs text-ink-500">
+                    by {lastClose.closedBy}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-sm text-ink-500">
+                No periods closed yet on this book.
+              </div>
+            )}
+            <ActionRow
+              label="Open periods"
+              count={openPeriodCount}
+              href="/periods"
+              urgentAt={4}
+              urgentLabel="behind on closes"
+              emptyLabel="everything closed"
+            />
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Recent entries */}
       <Card>
         <CardHeader>
@@ -229,6 +402,55 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * One row in the "Action items" card. Renders as a flex row with the
+ * label, a count badge (amber when > urgentAt, neutral otherwise),
+ * and a click-through link. When count is 0, shows `emptyLabel` muted.
+ */
+function ActionRow({
+  label,
+  count,
+  href,
+  urgentAt,
+  urgentLabel,
+  emptyLabel,
+}: {
+  label: string;
+  count: number;
+  href: string;
+  /** count >= urgentAt → amber tone (default 1). */
+  urgentAt: number;
+  /** Caption shown next to the count when urgent. */
+  urgentLabel: string;
+  /** Replacement caption when count === 0. */
+  emptyLabel: string;
+}) {
+  const urgent = count >= urgentAt;
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col">
+        <span className="text-sm text-ink-900">{label}</span>
+        <span className="text-xs text-ink-500">
+          {count === 0 ? emptyLabel : urgentLabel}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        {count > 0 ? (
+          <Badge tone={urgent ? "warning" : "info"}>{count}</Badge>
+        ) : (
+          <Badge tone="neutral">{count}</Badge>
+        )}
+        <Link
+          href={href}
+          className="text-xs font-medium text-accent-600 hover:underline"
+        >
+          Open →
+        </Link>
+      </div>
     </div>
   );
 }
