@@ -25,12 +25,16 @@ const PAGE_SIZE = 50;
 export default async function JournalEntriesPage({
   searchParams,
 }: {
-  searchParams: { from?: string; to?: string; q?: string };
+  searchParams: { from?: string; to?: string; q?: string; page?: string };
 }) {
   const scope = getScope();
   const from = searchParams.from ?? "2026-01-01";
   const to = searchParams.to ?? "2026-12-31";
   const q = (searchParams.q ?? "").trim();
+  // Page is 1-indexed for the URL (CPAs read "page 1 of 12" naturally);
+  // we'll convert to offset for the query.
+  const pageRaw = Number.parseInt(searchParams.page ?? "1", 10);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
   const fromDate = new Date(from);
   const toDate = new Date(to);
 
@@ -64,27 +68,49 @@ export default async function JournalEntriesPage({
       }
     : {};
 
-  const entries = await prisma.journalEntry.findMany({
-    where: {
-      ...tenantFilter,
-      entity: { code: scope.entityCode },
-      book: { code: scope.bookCode },
-      documentDate: { gte: fromDate, lte: toDate },
-      ...searchFilter,
-    },
-    orderBy: [{ documentDate: "desc" }, { entryNumber: "desc" }],
-    take: PAGE_SIZE,
-    select: {
-      id: true,
-      entryNumber: true,
-      documentDate: true,
-      memo: true,
-      source: true,
-      sourceSystem: true,
-      sourceRecordType: true,
-      lines: { select: { debit: true } },
-    },
-  });
+  const whereClause = {
+    ...tenantFilter,
+    entity: { code: scope.entityCode },
+    book: { code: scope.bookCode },
+    documentDate: { gte: fromDate, lte: toDate },
+    ...searchFilter,
+  };
+
+  const [entries, totalCount] = await Promise.all([
+    prisma.journalEntry.findMany({
+      where: whereClause,
+      orderBy: [{ documentDate: "desc" }, { entryNumber: "desc" }],
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      select: {
+        id: true,
+        entryNumber: true,
+        documentDate: true,
+        memo: true,
+        source: true,
+        status: true,
+        sourceSystem: true,
+        sourceRecordType: true,
+        lines: { select: { debit: true } },
+      },
+    }),
+    prisma.journalEntry.count({ where: whereClause }),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  // Clamp the page so a stale URL with too-high page doesn't show empty.
+  const currentPage = Math.min(page, totalPages);
+
+  // Build a query-string for the prev/next links that preserves filter
+  // params (date range + search). Just rewrite the `page` field.
+  function pageUrl(p: number): string {
+    const params = new URLSearchParams();
+    params.set("from", from);
+    params.set("to", to);
+    if (q) params.set("q", q);
+    if (p > 1) params.set("page", String(p));
+    return `?${params.toString()}`;
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -92,8 +118,8 @@ export default async function JournalEntriesPage({
         <div>
           <h2 className="text-xl font-semibold text-ink-900">Journal entries</h2>
           <p className="text-sm text-ink-500">
-            {scope.entityCode} / {scope.bookCode} · {entries.length}
-            {entries.length === PAGE_SIZE ? "+" : ""} entries · {formatDate(fromDate)} →{" "}
+            {scope.entityCode} / {scope.bookCode} · {totalCount} entr
+            {totalCount === 1 ? "y" : "ies"} · {formatDate(fromDate)} →{" "}
             {formatDate(toDate)}
             {q && (
               <>
@@ -133,11 +159,11 @@ export default async function JournalEntriesPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Posted entries (newest first)</CardTitle>
+          <CardTitle>Entries (newest first)</CardTitle>
           <span className="text-xs text-ink-500">
             {q
               ? `Searching memo / description / party / entry number across the date range`
-              : `Showing up to ${PAGE_SIZE}; refine date range for older entries`}
+              : `Page ${currentPage} of ${totalPages}, ${PAGE_SIZE} per page`}
           </span>
         </CardHeader>
         <CardContent>
@@ -172,7 +198,14 @@ export default async function JournalEntriesPage({
                         </Link>
                       </TD>
                       <TD className="text-ink-500">{formatDate(entry.documentDate)}</TD>
-                      <TD className="text-ink-800">{entry.memo}</TD>
+                      <TD className="text-ink-800">
+                        {entry.memo}
+                        {entry.status !== "POSTED" && (
+                          <Badge tone={entry.status === "REVERSED" ? "warning" : "neutral"} className="ml-2">
+                            {entry.status}
+                          </Badge>
+                        )}
+                      </TD>
                       <TD>
                         <Badge tone="neutral">{entry.source}</Badge>
                       </TD>
@@ -191,6 +224,43 @@ export default async function JournalEntriesPage({
                 })}
               </TBody>
             </Table>
+          )}
+          {entries.length > 0 && totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between text-sm text-ink-500">
+              <span>
+                Showing {(currentPage - 1) * PAGE_SIZE + 1}–
+                {Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount}
+              </span>
+              <div className="flex items-center gap-2">
+                {currentPage > 1 ? (
+                  <Link
+                    href={pageUrl(currentPage - 1)}
+                    className="rounded-md border border-ink-200 px-3 py-1.5 hover:bg-ink-50"
+                  >
+                    ← Prev
+                  </Link>
+                ) : (
+                  <span className="rounded-md border border-ink-200 px-3 py-1.5 text-ink-300">
+                    ← Prev
+                  </span>
+                )}
+                <span className="font-mono text-xs">
+                  {currentPage} / {totalPages}
+                </span>
+                {currentPage < totalPages ? (
+                  <Link
+                    href={pageUrl(currentPage + 1)}
+                    className="rounded-md border border-ink-200 px-3 py-1.5 hover:bg-ink-50"
+                  >
+                    Next →
+                  </Link>
+                ) : (
+                  <span className="rounded-md border border-ink-200 px-3 py-1.5 text-ink-300">
+                    Next →
+                  </span>
+                )}
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

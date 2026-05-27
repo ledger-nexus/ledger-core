@@ -10,6 +10,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatMoney } from "@/lib/utils/format";
+import ReverseButton from "./reverse-button";
 
 export default async function JournalEntryDetailPage({
   params,
@@ -22,6 +23,8 @@ export default async function JournalEntryDetailPage({
       entity: { select: { code: true } },
       book: { select: { code: true } },
       currency: { select: { code: true } },
+      reversalOf: { select: { id: true, entryNumber: true } },
+      reversedBy: { select: { id: true, entryNumber: true } },
       lines: {
         include: {
           account: { select: { code: true, name: true } },
@@ -70,6 +73,7 @@ export default async function JournalEntryDetailPage({
           </div>
           {/* Quick actions. Duplicate links to the new-entry form with
               ?duplicate=<id> so the user lands on a prefilled draft.
+              Reverse posts a sign-flipped JE through the substrate.
               Export-CSV is a plain anchor to the CSV route — the route
               writes a DATA_EXPORT audit row server-side. */}
           <div className="flex items-center gap-1.5">
@@ -78,6 +82,12 @@ export default async function JournalEntryDetailPage({
                 Duplicate
               </Button>
             </Link>
+            <ReverseButton
+              id={entry.id}
+              entryNumber={entry.entryNumber}
+              status={entry.status}
+              reversedByEntryNumber={entry.reversedBy[0]?.entryNumber}
+            />
             <a href={`/api/journal-entries/${entry.id}/csv`} download>
               <Button size="sm" variant="ghost">
                 Export CSV
@@ -97,6 +107,36 @@ export default async function JournalEntryDetailPage({
           <Field label="Source record ID" value={entry.sourceRecordId} className="font-mono" />
         )}
         {entry.mappingVersion && <Field label="Mapping version" value={entry.mappingVersion} />}
+        {entry.reversalOf && (
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
+              Reverses
+            </div>
+            <div className="mt-0.5 text-sm">
+              <Link
+                href={`/journal-entries/${entry.reversalOf.id}`}
+                className="font-mono text-link hover:underline"
+              >
+                {entry.reversalOf.entryNumber}
+              </Link>
+            </div>
+          </div>
+        )}
+        {entry.reversedBy.length > 0 && (
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
+              Reversed by
+            </div>
+            <div className="mt-0.5 text-sm">
+              <Link
+                href={`/journal-entries/${entry.reversedBy[0].id}`}
+                className="font-mono text-link hover:underline"
+              >
+                {entry.reversedBy[0].entryNumber}
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
 
       <Card>
