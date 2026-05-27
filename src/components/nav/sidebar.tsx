@@ -59,6 +59,7 @@ const ADMIN_SECTION = {
     { href: "/admin/orphans", label: "Orphan records", hint: "ownership" },
     { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
     { href: "/admin/ai-budget", label: "AI budget", hint: "Anthropic spend" },
+    { href: "/admin/billing", label: "Billing", hint: "Stripe subscription" },
   ],
 } as const;
 

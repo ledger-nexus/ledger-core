@@ -61,6 +61,31 @@ model Tenant {
   name        String
   ownerUserId String @db.Uuid
 
+  // ─── Billing (Stripe) ────────────────────────────────────────────────
+  //
+  // Three columns mirror the Stripe-side state so the app can render
+  // a billing page without round-tripping to Stripe on every request.
+  // The webhook (POST /api/billing/webhook) keeps them in sync; this
+  // table is the read source-of-truth for "what plan am I on?".
+  //
+  // Null on all three = tenant has never gone through checkout (free
+  // tier / pre-launch). After checkout completes Stripe fires
+  // customer.subscription.created and the webhook fills these in.
+
+  /// Stripe Customer id (cus_...). Set once on first checkout; reused
+  /// for subsequent subscription / portal sessions.
+  stripeCustomerId      String?  @unique
+  /// Active subscription id (sub_...). Null when no active subscription.
+  stripeSubscriptionId  String?  @unique
+  /// Plan key (matches the Stripe Price lookup_key — "free", "starter",
+  /// "growth", etc.). Hardcoded plan catalog lives in src/lib/billing/plans.ts.
+  billingPlan           String?
+  /// Stripe-reported status — "active", "trialing", "past_due", "canceled", etc.
+  subscriptionStatus    String?
+  /// End of the current billing period — used to show "renews on X"
+  /// on the billing page. Mirrors stripe Subscription.current_period_end.
+  currentPeriodEnd      DateTime?
+
   /// Maximum Anthropic spend per calendar month, in USD.
   /// Enforced by the companion repos' AI Server Actions (recon's
   /// proposeMatches, revenue-rec's extractContract, fa-amort's
