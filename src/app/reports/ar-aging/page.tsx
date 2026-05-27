@@ -5,7 +5,7 @@
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { arAging, openArBalance } from "@/lib/accounting/sub-ledgers/ar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -27,7 +27,17 @@ export default async function ArAgingPage({
 }: {
   searchParams: { asOf?: string };
 }) {
-  const scope = getScope();
+  // Tenant-verified scope (closes the cross-tenant read leak the raw
+  // lc-scope cookie used to enable).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing reports."
+      />
+    );
+  }
   const asOf = searchParams.asOf ?? "2026-06-30";
 
   const [buckets, total, items] = await Promise.all([

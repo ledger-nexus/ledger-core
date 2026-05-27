@@ -202,10 +202,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Idempotency check: full lineage triple → look up existing entry first.
+  // SECURITY (pen-test fix): scope the lookup to the authenticated
+  // tenant. Without this, two tenants using the same lineage triple
+  // (entirely plausible — Plaid transaction ids are tenant-agnostic;
+  // a hostile actor could probe known ids) would deduplicate against
+  // each other and the caller would receive another tenant's JE id.
   const hasFullLineage =
     !!body.sourceSystem && !!body.sourceRecordType && !!body.sourceRecordId;
   if (hasFullLineage) {
     const existing = await findByLineage(
+      identity.tenantId,
       body.sourceSystem!,
       body.sourceRecordType!,
       body.sourceRecordId!
@@ -258,6 +264,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // index exists; harmless otherwise.
     if (hasFullLineage && isUniqueViolation(e)) {
       const existing = await findByLineage(
+        identity.tenantId,
         body.sourceSystem!,
         body.sourceRecordType!,
         body.sourceRecordId!
@@ -275,7 +282,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (e instanceof UnbalancedEntryError) return err("UNBALANCED", e.message, 422);
     if (e instanceof InvalidLineError) return err("INVALID_LINE", e.message, 422);
     if (e instanceof UnknownAccountError) return err("UNKNOWN_ACCOUNT", e.message, 422);
-    if (e instanceof UnknownEntityError) return err("UNKNOWN_ENTITY", e.message, 422);
+    if (e instanceof UnknownEntityError) {
+      // Audit cross-tenant probe attempts. If the entity actually
+      // exists in some OTHER tenant, this is a "wrong-tenant token"
+      // event — the same SEV-2 incident the legacy
+      // TenantScopeMismatchError used to surface, except now the
+      // entity lookup is tenant-scoped so the error name shifted.
+      // We probe by looking up the entity GLOBALLY (rare path —
+      // only fires when the tenant-scoped lookup missed). If found,
+      // the attempt was cross-tenant; we audit + still return the
+      // information-leak-safe UNKNOWN_ENTITY response to the caller.
+      const elsewhere = await prisma.legalEntity.findFirst({
+        where: { code: body.entityCode },
+        select: { tenantId: true },
+      });
+      if (elsewhere && elsewhere.tenantId !== identity.tenantId) {
+        await auditTokenUse({
+          success: false,
+          endpoint: "POST /api/internal/journal-entries",
+          reason: "Tenant scope mismatch — token does not own this entity",
+          tenantId: identity.tenantId,
+          metadata: {
+            tokenLabel: identity.label,
+            tokenTenantId: identity.tenantId,
+            entityCode: body.entityCode,
+            elsewhereTenantId: elsewhere.tenantId,
+          },
+          requestHeaders: reqHeaders,
+        });
+      }
+      return err("UNKNOWN_ENTITY", e.message, 422);
+    }
     if (e instanceof UnknownBookError) return err("UNKNOWN_BOOK", e.message, 422);
     if (e instanceof PeriodClosedError) return err("PERIOD_CLOSED", e.message, 409);
     if (e instanceof AccountBookScopeError)
@@ -314,14 +351,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-// Look up an existing entry by lineage triple. Returns null if none.
+// Look up an existing entry by lineage triple, tenant-scoped. Returns
+// null if none. Without the tenantId filter, two tenants posting the
+// same lineage triple (e.g. identical Plaid transaction ids) would
+// dedup against each other and cross-tenant-leak the resulting id.
 async function findByLineage(
+  tenantId: string,
   sourceSystem: string,
   sourceRecordType: string,
   sourceRecordId: string
 ): Promise<{ id: string; entryNumber: string; bookCode: string } | null> {
   const found = await prisma.journalEntry.findFirst({
-    where: { sourceSystem, sourceRecordType, sourceRecordId },
+    where: { tenantId, sourceSystem, sourceRecordType, sourceRecordId },
     select: { id: true, entryNumber: true, book: { select: { code: true } } },
   });
   if (!found) return null;

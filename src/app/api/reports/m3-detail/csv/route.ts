@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getM3Detail } from "@/lib/accounting/reports/m3-detail";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { auditDataExport } from "@/lib/audit/log";
@@ -14,7 +14,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
   const from = url.searchParams.get("from") ?? "2026-01-01";
   const to = url.searchParams.get("to") ?? new Date().toISOString().slice(0, 10);
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
+  }
   const bookFrom = url.searchParams.get("bookFrom") ?? "US_GAAP";
   const bookTo = url.searchParams.get("bookTo") ?? "US_TAX";
 

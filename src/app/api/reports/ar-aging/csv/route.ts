@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { arAging, openArBalance } from "@/lib/accounting/sub-ledgers/ar";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { auditDataExport } from "@/lib/audit/log";
@@ -13,7 +13,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
   const asOf = url.searchParams.get("asOf") ?? new Date().toISOString().slice(0, 10);
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
+  }
 
   const [buckets, total, items] = await Promise.all([
     arAging(prisma, scope.entityCode, scope.bookCode, new Date(asOf)),

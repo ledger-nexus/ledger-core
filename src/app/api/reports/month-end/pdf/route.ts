@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { prisma } from "@/lib/db";
-import { resolveScope } from "@/lib/scope";
+import { resolveCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { auditDataExport } from "@/lib/audit/log";
@@ -29,7 +29,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const periodParam = url.searchParams.get("period");
   // Accept ?entity=&book= overrides for shareable URLs (same pattern
   // as the CSV route).
-  const scope = resolveScope(url.searchParams);
+  const scope = await resolveCurrentScope(url.searchParams);
+  if (!scope) {
+    return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
+  }
 
   // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
   const entity = await prisma.legalEntity.findFirst({

@@ -177,12 +177,17 @@ describe("/api/internal/journal-entries: tenant-scoped token enforcement", () =>
     expect(je!.tenantId).toBe(tenantA.id);
   });
 
-  it("Tenant A's token posting to B's entity → 403 TENANT_SCOPE_MISMATCH", async () => {
+  it("Tenant A's token posting to B's entity → 422 UNKNOWN_ENTITY (cross-tenant invisible)", async () => {
+    // SECURITY (pen-test era): postJournalEntry's entity lookup is now
+    // scoped to input.tenantId, so a cross-tenant entity is invisible —
+    // the route surfaces UnknownEntityError (422), not the older
+    // TenantScopeMismatchError (403). The new error doesn't leak
+    // whether the entity exists in another tenant.
     const res = await POST(makeReq(tokenA, baseEntry(entityCodeB, "A→B cross-tenant")));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.ok).toBe(false);
-    expect(json.error.code).toBe("TENANT_SCOPE_MISMATCH");
+    expect(json.error.code).toBe("UNKNOWN_ENTITY");
   });
 
   it("Tenant B's token posting to B's entity → 200", async () => {

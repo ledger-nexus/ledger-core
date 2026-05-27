@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { resolveScope } from "@/lib/scope";
+import { resolveCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { auditDataExport } from "@/lib/audit/log";
@@ -39,7 +39,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Accept ?entity=&book= overrides so a shareable demo URL renders
   // the right entity's packet without the user needing to switch
   // their sidebar scope cookie first.
-  const scope = resolveScope(url.searchParams);
+  const scope = await resolveCurrentScope(url.searchParams);
+  if (!scope) {
+    return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
+  }
 
   // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
   const entity = await prisma.legalEntity.findFirst({

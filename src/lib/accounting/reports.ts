@@ -18,18 +18,21 @@ import { AccountType, signFor } from "./types";
 const DEFAULT_BOOK = "US_GAAP";
 
 // Internal helper: resolve (entityCode, bookCode) -> ids in one query.
+//
+// SECURITY: when `tenantId` is provided, the entity lookup is scoped
+// to that tenant. Without it, a caller passing an entityCode that
+// exists in another tenant would silently load THAT tenant's entity.
+// All UI report callers MUST pass tenantId (from getCurrentScope).
+// The optional fallback exists for legacy seed / single-tenant scripts.
 async function resolveEntityBook(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  tenantId?: string
 ): Promise<{ entityId: string; bookId: string }> {
-  // Phase 4b: legalEntity.code is unique per [tenantId, code]. Reports
-  // are read-only; in the single-tenant world findFirst by code alone
-  // is deterministic. Multi-tenant callers should scope by tenant
-  // upstream (Server Component → requireCurrentTenant).
   const [entity, book] = await Promise.all([
     prisma.legalEntity.findFirst({
-      where: { code: entityCode },
+      where: tenantId ? { tenantId, code: entityCode } : { code: entityCode },
       select: { id: true },
     }),
     prisma.book.findUnique({
@@ -45,6 +48,13 @@ async function resolveEntityBook(
 export interface ReportScope {
   entityCode: string;
   bookCode?: string;            // default "US_GAAP"
+  /**
+   * Tenant the entity must belong to. Strongly recommended for any UI
+   * caller (pass from getCurrentScope). Omitting it falls back to the
+   * legacy global lookup; in a multi-tenant world that can match the
+   * wrong tenant's entity. Substrate seeds + scripts omit this.
+   */
+  tenantId?: string;
 }
 
 export interface TrialBalanceRow {
@@ -70,7 +80,8 @@ export async function getTrialBalance(
   const { entityId, bookId } = await resolveEntityBook(
     prisma,
     scope.entityCode,
-    scope.bookCode ?? DEFAULT_BOOK
+    scope.bookCode ?? DEFAULT_BOOK,
+    scope.tenantId
   );
 
   // Pull lines for the (entity, book) on/before asOf, grouped by account.
@@ -173,7 +184,7 @@ export async function getIncomeStatement(
   periodEnd: Date
 ): Promise<IncomeStatement> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
+  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the IS page renderer can
   // build a tree via buildHierarchy() without a second query.
@@ -272,7 +283,7 @@ export async function getBalanceSheet(
   asOf: Date
 ): Promise<BalanceSheet> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
+  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the BS page renderer can
   // build a tree via buildHierarchy() without a second query.
@@ -368,7 +379,7 @@ export async function getBalanceSheet(
   // close periods and roll P&L into RE explicitly.
   const pnl = await getIncomeStatement(
     prisma,
-    { entityCode: scope.entityCode, bookCode },
+    { entityCode: scope.entityCode, bookCode, tenantId: scope.tenantId },
     new Date("1900-01-01"),
     asOf
   );

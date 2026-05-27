@@ -6,7 +6,8 @@
 import { Decimal } from "decimal.js";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
+import { EmptyState } from "@/components/ui/empty-state";
 import { getIncomeStatement, type FinancialStatementRow } from "@/lib/accounting/reports";
 import {
   buildHierarchy,
@@ -24,7 +25,17 @@ export default async function IncomeStatementPage({
 }: {
   searchParams: { from?: string; to?: string; flat?: string };
 }) {
-  const scope = getScope();
+  // Tenant-verified scope (closes the cross-tenant read leak the raw
+  // lc-scope cookie used to enable).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing reports."
+      />
+    );
+  }
   const from = searchParams.from ?? "2026-01-01";
   const to = searchParams.to ?? "2026-06-30";
   const flat = searchParams.flat === "1";

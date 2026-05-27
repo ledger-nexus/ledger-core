@@ -19,7 +19,7 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { resolveScope } from "@/lib/scope";
+import { resolveCurrentScope } from "@/lib/scope";
 import {
   getTrialBalance,
   getIncomeStatement,
@@ -59,10 +59,18 @@ export default async function MonthEndPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const scope = resolveScope({
+  const scope = await resolveCurrentScope({
     entity: searchParams.entity,
     book: searchParams.book,
   });
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing month-end."
+      />
+    );
+  }
 
   // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
   const entity = await prisma.legalEntity.findFirst({

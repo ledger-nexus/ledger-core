@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
-import { getScope } from "@/lib/scope";
+import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requireCurrentScope, NoScopeError } from "@/lib/scope";
 
 export interface NewEntryDraftLine {
   accountCode: string;
@@ -24,6 +25,12 @@ export type CreateJournalEntryState =
 // input). Calls postJournalEntry inside a try/catch so the
 // UnbalancedEntryError / InvalidLineError / UnknownAccountError messages
 // surface inline.
+//
+// SECURITY (pen-test fix): this action used to be unauthenticated and
+// did not enforce tenant scope on the JE write. Anyone with a forged
+// scope cookie could post to any tenant's books. Now: requires a signed-
+// in user, resolves their tenant-verified scope, threads tenantId into
+// postJournalEntry, and stamps createdBy + ownerUserId from the actor.
 export async function createJournalEntryAction(
   _prev: CreateJournalEntryState,
   formData: FormData
@@ -31,6 +38,9 @@ export async function createJournalEntryAction(
   let entryId: string;
 
   try {
+    const user = await requireCurrentUser();
+    const scope = await requireCurrentScope();
+
     const documentDateStr = String(formData.get("documentDate") ?? "");
     const memo = String(formData.get("memo") ?? "").trim();
     const source = (String(formData.get("source") ?? "MANUAL") as
@@ -58,13 +68,15 @@ export async function createJournalEntryAction(
       return { ok: false, error: "Entry must have at least 2 lines" };
     }
 
-    const scope = getScope();
     const result = await postJournalEntry(prisma, {
+      tenantId: scope.tenantId,
       entityCode: scope.entityCode,
       bookCode: scope.bookCode,
       documentDate: new Date(documentDateStr),
       memo,
       source,
+      createdBy: user.email,
+      ownerUserId: user.id,
       lines: lines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.side === "DEBIT" ? l.amount : undefined,
@@ -75,6 +87,12 @@ export async function createJournalEntryAction(
     });
     entryId = result.id;
   } catch (e) {
+    if (e instanceof NotAuthenticatedError) {
+      return { ok: false, error: "You must be signed in to post a journal entry." };
+    }
+    if (e instanceof NoScopeError) {
+      return { ok: false, error: "No active scope — pick an entity + book first." };
+    }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Unknown error during posting",

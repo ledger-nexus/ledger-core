@@ -8,7 +8,8 @@
 import { Decimal } from "decimal.js";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
+import { EmptyState } from "@/components/ui/empty-state";
 import { getTrialBalance, type TrialBalanceRow } from "@/lib/accounting/reports";
 import {
   buildHierarchy,
@@ -26,7 +27,19 @@ export default async function TrialBalancePage({
 }: {
   searchParams: { asOf?: string; flat?: string };
 }) {
-  const scope = getScope();
+  // Tenant-verified scope: this resolves the lc-scope cookie against
+  // the active tenant's entities and falls back to the tenant's first
+  // entity when the cookie names something outside it. Closes the
+  // cross-tenant read leak the raw getScope() opened.
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing reports."
+      />
+    );
+  }
   const asOf = searchParams.asOf ?? "2026-06-30";
   const flat = searchParams.flat === "1";
   const tb = await getTrialBalance(prisma, scope, new Date(asOf));

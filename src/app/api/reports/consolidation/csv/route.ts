@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { auditDataExport } from "@/lib/audit/log";
@@ -18,7 +18,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!root) {
     return NextResponse.json({ error: "Missing ?root parameter" }, { status: 400 });
   }
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
+  }
   const report = await getConsolidatedTrialBalance(prisma, {
     rootEntityCode: root,
     bookCode: scope.bookCode,

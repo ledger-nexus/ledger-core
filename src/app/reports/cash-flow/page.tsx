@@ -7,7 +7,8 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   getCashFlowStatement,
   type CashFlowLine,
@@ -23,7 +24,17 @@ export default async function CashFlowPage({
 }: {
   searchParams: { from?: string; to?: string };
 }) {
-  const scope = getScope();
+  // Tenant-verified scope (closes the cross-tenant read leak the raw
+  // lc-scope cookie used to enable).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing reports."
+      />
+    );
+  }
   const from = searchParams.from ?? "2026-01-01";
   const to = searchParams.to ?? "2026-06-30";
   const cf = await getCashFlowStatement(prisma, scope, new Date(from), new Date(to));

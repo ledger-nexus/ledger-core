@@ -13,7 +13,7 @@ import {
   flattenForDisplay,
   type FlatAccountRow,
 } from "@/lib/accounting/account-hierarchy";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { auditDataExport } from "@/lib/audit/log";
@@ -26,7 +26,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
   const asOf = url.searchParams.get("asOf") ?? new Date().toISOString().slice(0, 10);
   const flat = url.searchParams.get("flat") === "1";
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
+  }
   const tb = await getTrialBalance(prisma, scope, new Date(asOf));
 
   const tenant = await getCurrentTenant();

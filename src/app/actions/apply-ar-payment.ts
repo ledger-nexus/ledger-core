@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { applyArPayment } from "@/lib/accounting/sub-ledgers/ar";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requireCurrentTenant } from "@/lib/auth/tenant";
 
 export type ApplyArPaymentState =
   | { ok?: undefined; error?: undefined }
@@ -21,6 +22,7 @@ export async function applyArPaymentAction(
 ): Promise<ApplyArPaymentState> {
   try {
     const currentUser = await requireCurrentUser();
+    const tenant = await requireCurrentTenant();
     const openItemId = String(formData.get("openItemId") ?? "");
     const cashAccountCode = String(formData.get("cashAccountCode") ?? "1000");
     const amount = String(formData.get("amount") ?? "0");
@@ -33,16 +35,23 @@ export async function applyArPaymentAction(
       return { ok: false, error: "Amount must be positive" };
     }
 
-    const item = await prisma.arOpenItem.findUniqueOrThrow({
-      where: { id: openItemId },
+    // SECURITY (pen-test fix): tenant-scope the lookup so a forged id
+    // from another tenant returns null → "not found" (no cross-tenant
+    // payment application).
+    const item = await prisma.arOpenItem.findFirst({
+      where: { id: openItemId, tenantId: tenant.id },
       include: {
         entity: { select: { code: true } },
         book: { select: { code: true } },
         party: { select: { code: true } },
       },
     });
+    if (!item) {
+      return { ok: false, error: "AR open item not found in this tenant." };
+    }
 
     const entry = await postJournalEntry(prisma, {
+      tenantId: tenant.id,
       entityCode: item.entity.code,
       bookCode: item.book.code,
       currencyCode: item.currencyId,

@@ -10,6 +10,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import ReverseButton from "./reverse-button";
 import NotesCard from "./notes-card";
@@ -19,8 +20,15 @@ export default async function JournalEntryDetailPage({
 }: {
   params: { id: string };
 }) {
-  const entry = await prisma.journalEntry.findUnique({
-    where: { id: params.id },
+  // Tenant-scope the lookup. A forged id from another tenant returns
+  // null → 404. Without this gate, a signed-in user from tenant A
+  // could load any JE id from tenant B's URLs.
+  const tenant = await getCurrentTenant();
+  const entry = await prisma.journalEntry.findFirst({
+    where: {
+      id: params.id,
+      ...(tenant ? { tenantId: tenant.id } : {}),
+    },
     include: {
       entity: { select: { code: true } },
       book: { select: { code: true } },

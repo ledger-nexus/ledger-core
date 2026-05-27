@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { apAging, openApBalance } from "@/lib/accounting/sub-ledgers/ap";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -24,7 +24,17 @@ export default async function ApAgingPage({
 }: {
   searchParams: { asOf?: string };
 }) {
-  const scope = getScope();
+  // Tenant-verified scope (closes the cross-tenant read leak the raw
+  // lc-scope cookie used to enable).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing reports."
+      />
+    );
+  }
   const asOf = searchParams.asOf ?? "2026-06-30";
   const asOfDate = new Date(asOf);
 
