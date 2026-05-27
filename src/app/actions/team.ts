@@ -33,6 +33,7 @@ import {
   requirePermission,
 } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import { sendInviteEmail } from "@/lib/email/templates/invite";
 import type { TenantRole } from "@prisma/client";
 
 // 14-day default invite TTL. Long enough that vacation doesn't lose
@@ -63,6 +64,8 @@ export interface InviteMemberState {
   inviteId?: string;
   /** The accept URL — surfaced in the UI even when email isn't configured. */
   acceptUrl?: string;
+  /** Delivery outcome of the invite email ("DELIVERED" / "LOGGED_ONLY" / "FAILED"). */
+  emailStatus?: "DELIVERED" | "LOGGED_ONLY" | "FAILED";
 }
 
 export async function inviteMemberAction(
@@ -132,18 +135,41 @@ export async function inviteMemberAction(
       metadata: { email, role: input.role },
     });
 
-    // The accept URL the recipient follows. Email delivery is wired in
-    // a follow-up; today we surface this URL in the UI and the admin
-    // sends it manually if needed.
+    // Build the accept URL the recipient follows. APP_BASE_URL is set
+    // in deploy env; in dev it defaults to empty (the path-only URL
+    // still works for same-origin navigation).
     const baseUrl = process.env.APP_BASE_URL || "";
     const acceptUrl = `${baseUrl}/invites/accept?token=${token}`;
+
+    // Fire the email. The send helper isolates its own failures —
+    // a Resend outage or missing env doesn't break invite creation.
+    const emailResult = await sendInviteEmail({
+      to: email,
+      tenantName: tenant.name,
+      inviterName: user.displayName,
+      role: input.role,
+      acceptUrl,
+      expiresAt: inviteExpiry(),
+      tenantId: tenant.id,
+      inviteId: invite.id,
+    });
+
+    // Build a status message based on whether the email actually got
+    // somewhere or just landed in the log. The admin needs to know
+    // whether to copy + paste the accept URL manually.
+    const messageByStatus: Record<typeof emailResult.status, string> = {
+      DELIVERED: `Invite email sent to ${email}.`,
+      LOGGED_ONLY: `Invited ${email} as ${input.role}. Email isn't configured (set RESEND_API_KEY + EMAIL_FROM_ADDRESS to enable) — copy the accept URL and send it yourself.`,
+      FAILED: `Invite created for ${email}, but the email send failed (${emailResult.errorMessage ?? "unknown error"}). Copy the accept URL and send it manually.`,
+    };
 
     revalidatePath("/admin/team");
     return {
       ok: true,
       inviteId: invite.id,
       acceptUrl,
-      message: `Invited ${email} as ${input.role}. Send them the accept link.`,
+      emailStatus: emailResult.status,
+      message: messageByStatus[emailResult.status],
     };
   } catch (e) {
     return mapError(e);

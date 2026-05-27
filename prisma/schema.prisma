@@ -110,6 +110,7 @@ model Tenant {
   recurringEntries       RecurringEntry[]
   journalEntryNotes      JournalEntryNote[]
   invites                TenantInvite[]
+  emailDeliveries        EmailDelivery[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -191,6 +192,47 @@ enum InviteStatus {
   ACCEPTED
   REVOKED
   EXPIRED
+}
+
+/// Audit trail for outbound transactional email. Every send attempt
+/// (real or logged-only) writes a row so the operator can answer
+/// "did this customer actually get their invite?".
+///
+/// The provider is Resend today via src/lib/email/send.ts. When
+/// RESEND_API_KEY is unset (dev / staging-without-mailer), status
+/// is LOGGED_ONLY and the email body is preserved so the operator
+/// can still hand-deliver if needed.
+model EmailDelivery {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Tenant the email is on behalf of. Null for platform-level
+  /// emails (no current tenant context).
+  tenantId      String?             @db.Uuid
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  toEmail       String
+  /// Stable template identifier — "tenant_invite", "period_close_reminder",
+  /// "ai_spend_warning", etc. Lets us answer "how many invites went
+  /// out this week?" without parsing subjects.
+  template      String
+  subject       String
+  bodyText      String?
+  bodyHtml      String?
+  status        EmailDeliveryStatus
+  /// Provider message id (Resend's response.id when DELIVERED).
+  providerId    String?
+  errorMessage  String?
+  /// Template-specific payload (inviteId, jeId, etc.).
+  metadata      Json?
+  sentAt        DateTime            @default(now())
+
+  @@index([tenantId, sentAt])
+  @@index([toEmail, sentAt])
+  @@map("email_delivery")
+}
+
+enum EmailDeliveryStatus {
+  DELIVERED    // Provider accepted the message
+  LOGGED_ONLY  // No RESEND_API_KEY set; row persisted for visibility
+  FAILED       // Provider rejected (rate limit, bad recipient, etc.)
 }
 
 // Per-tenant API tokens for companion-repo authentication.
