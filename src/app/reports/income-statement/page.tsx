@@ -1,9 +1,19 @@
 // Income statement. Period start + end via URL search params.
+//
+// Phase 7: hierarchical rendering with sub-totals (parent accounts roll
+// up their children). ?flat=1 swaps to the old code-sorted view.
 
+import { Decimal } from "decimal.js";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
-import { getIncomeStatement } from "@/lib/accounting/reports";
+import { getIncomeStatement, type FinancialStatementRow } from "@/lib/accounting/reports";
+import {
+  buildHierarchy,
+  flattenForDisplay,
+  type FlatAccountRow,
+  type HierarchyNode,
+} from "@/lib/accounting/account-hierarchy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Input, Label } from "@/components/ui/input";
@@ -12,11 +22,12 @@ import { formatMoney, formatDate, moneyClass } from "@/lib/utils/format";
 export default async function IncomeStatementPage({
   searchParams,
 }: {
-  searchParams: { from?: string; to?: string };
+  searchParams: { from?: string; to?: string; flat?: string };
 }) {
   const scope = getScope();
   const from = searchParams.from ?? "2026-01-01";
   const to = searchParams.to ?? "2026-06-30";
+  const flat = searchParams.flat === "1";
   const pnl = await getIncomeStatement(prisma, scope, new Date(from), new Date(to));
 
   return (
@@ -38,6 +49,7 @@ export default async function IncomeStatementPage({
               <Label htmlFor="to">To</Label>
               <Input type="date" name="to" id="to" defaultValue={to} />
             </div>
+            {flat && <input type="hidden" name="flat" value="1" />}
             <button
               type="submit"
               className="h-9 rounded-md bg-ink-900 px-4 text-sm font-medium text-white hover:bg-ink-800"
@@ -54,68 +66,26 @@ export default async function IncomeStatementPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Revenue</CardTitle>
-            <span className="amount-cell text-sm font-semibold text-ink-900">
-              {formatMoney(pnl.totalRevenue)}
-            </span>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Code</TH>
-                  <TH>Account</TH>
-                  <TH className="text-right">Amount</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {pnl.revenue.map((r) => (
-                  <TR key={r.code}>
-                    <TD className="font-mono text-xs text-ink-700">{r.code}</TD>
-                    <TD className="text-ink-900">{r.name}</TD>
-                    <TD className={`amount-cell text-right ${moneyClass(r.amount)}`}>
-                      {formatMoney(r.amount)}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          </CardContent>
-        </Card>
+      <div className="text-xs text-ink-500 -mt-3">
+        {flat ? (
+          <Link href={`?from=${from}&to=${to}`} className="text-link hover:underline">
+            Switch to hierarchical view
+          </Link>
+        ) : (
+          <Link href={`?from=${from}&to=${to}&flat=1`} className="text-link hover:underline">
+            Switch to flat view
+          </Link>
+        )}
+      </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Expenses</CardTitle>
-            <span className="amount-cell text-sm font-semibold text-ink-900">
-              {formatMoney(pnl.totalExpenses)}
-            </span>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Code</TH>
-                  <TH>Account</TH>
-                  <TH className="text-right">Amount</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {pnl.expenses.map((e) => (
-                  <TR key={e.code}>
-                    <TD className="font-mono text-xs text-ink-700">{e.code}</TD>
-                    <TD className="text-ink-900">{e.name}</TD>
-                    <TD className={`amount-cell text-right ${moneyClass(e.amount)}`}>
-                      {formatMoney(e.amount)}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <IsSection title="Revenue" rows={pnl.revenue} total={pnl.totalRevenue} flat={flat} />
+        <IsSection
+          title="Expenses"
+          rows={pnl.expenses}
+          total={pnl.totalExpenses}
+          flat={flat}
+        />
       </div>
 
       <Card>
@@ -136,5 +106,89 @@ export default async function IncomeStatementPage({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function IsSection({
+  title,
+  rows,
+  total,
+  flat,
+}: {
+  title: string;
+  rows: FinancialStatementRow[];
+  total: Decimal;
+  flat: boolean;
+}) {
+  const flatRows: FlatAccountRow[] = rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    type: "REVENUE", // placeholder — type not used by the hierarchy helper
+    parentCode: r.parentCode,
+    balance: new Decimal(r.amount.toString()),
+    debit: new Decimal(0),
+    credit: new Decimal(0),
+    isContra: r.isContra,
+  }));
+  const tree = buildHierarchy(flatRows);
+  const treeDisplay = flattenForDisplay(tree);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <span className="amount-cell text-sm font-semibold text-ink-900">
+          {formatMoney(total)}
+        </span>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <THead>
+            <tr>
+              <TH>Code</TH>
+              <TH>Account</TH>
+              <TH className="text-right">Amount</TH>
+            </tr>
+          </THead>
+          <TBody>
+            {flat
+              ? rows.map((r) => (
+                  <TR key={r.code}>
+                    <TD className="font-mono text-xs text-ink-700">{r.code}</TD>
+                    <TD className="text-ink-900">{r.name}</TD>
+                    <TD className={`amount-cell text-right ${moneyClass(r.amount)}`}>
+                      {formatMoney(r.amount)}
+                    </TD>
+                  </TR>
+                ))
+              : treeDisplay.map((node) => (
+                  <HierarchyTR key={node.code} node={node} />
+                ))}
+          </TBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function HierarchyTR({ node }: { node: HierarchyNode }) {
+  const indentPx = node.depth * 16;
+  const isGroup = node.hasChildren;
+  const valueToShow = isGroup ? node.subtotalBalance : node.ownBalance;
+  return (
+    <TR className={isGroup ? "bg-ink-50/50 font-medium text-ink-900" : undefined}>
+      <TD className="font-mono text-xs text-ink-700">{node.code}</TD>
+      <TD>
+        <span style={{ paddingLeft: indentPx }}>{node.name}</span>
+        {isGroup && (
+          <span className="ml-2 text-[10px] uppercase tracking-wide text-ink-400">
+            subtotal
+          </span>
+        )}
+      </TD>
+      <TD className={`amount-cell text-right ${moneyClass(valueToShow)}`}>
+        {formatMoney(valueToShow)}
+      </TD>
+    </TR>
   );
 }

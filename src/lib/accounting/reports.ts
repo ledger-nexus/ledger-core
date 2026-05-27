@@ -138,12 +138,29 @@ export async function getTrialBalance(
   return { rows, totalDebit, totalCredit };
 }
 
+/**
+ * One row in a hierarchical section of a financial statement. `amount`
+ * is the account's own period activity, normalized to the section's
+ * natural sign (positive for the section's normal side; negative for a
+ * contra account, which correctly DEDUCTS when summed).
+ *
+ * `parentCode` + `isContra` are carried here so the page renderer can
+ * call buildHierarchy() without a second DB query.
+ */
+export interface FinancialStatementRow {
+  code: string;
+  name: string;
+  amount: Decimal;
+  parentCode: string | null;
+  isContra: boolean;
+}
+
 export interface IncomeStatement {
   scope: { entityCode: string; bookCode: string };
   periodStart: Date;
   periodEnd: Date;
-  revenue: { code: string; name: string; amount: Decimal }[];
-  expenses: { code: string; name: string; amount: Decimal }[];
+  revenue: FinancialStatementRow[];
+  expenses: FinancialStatementRow[];
   totalRevenue: Decimal;
   totalExpenses: Decimal;
   netIncome: Decimal;
@@ -158,6 +175,8 @@ export async function getIncomeStatement(
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
   const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
 
+  // Phase 7 hierarchy: include parent.code so the IS page renderer can
+  // build a tree via buildHierarchy() without a second query.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
@@ -175,6 +194,7 @@ export async function getIncomeStatement(
         },
         select: { debit: true, credit: true },
       },
+      parent: { select: { code: true } },
     },
     orderBy: { code: "asc" },
   });
@@ -208,13 +228,14 @@ export async function getIncomeStatement(
       credit = credit.plus(new Decimal(line.credit.toString()));
     }
 
+    const parentCode = acct.parent?.code ?? null;
     if (acct.type === "REVENUE") {
       const amount = credit.minus(debit);
-      revenue.push({ code: acct.code, name: acct.name, amount });
+      revenue.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra });
       totalRevenue = totalRevenue.plus(amount);
     } else {
       const amount = debit.minus(credit);
-      expenses.push({ code: acct.code, name: acct.name, amount });
+      expenses.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra });
       totalExpenses = totalExpenses.plus(amount);
     }
   }
@@ -234,9 +255,9 @@ export async function getIncomeStatement(
 export interface BalanceSheet {
   scope: { entityCode: string; bookCode: string };
   asOf: Date;
-  assets: { code: string; name: string; amount: Decimal }[];
-  liabilities: { code: string; name: string; amount: Decimal }[];
-  equity: { code: string; name: string; amount: Decimal }[];
+  assets: FinancialStatementRow[];
+  liabilities: FinancialStatementRow[];
+  equity: FinancialStatementRow[];
   totalAssets: Decimal;
   totalLiabilities: Decimal;
   totalEquity: Decimal;          // includes current-period net income via retained earnings calc
@@ -253,6 +274,8 @@ export async function getBalanceSheet(
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
   const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode);
 
+  // Phase 7 hierarchy: include parent.code so the BS page renderer can
+  // build a tree via buildHierarchy() without a second query.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
@@ -266,6 +289,7 @@ export async function getBalanceSheet(
         },
         select: { debit: true, credit: true },
       },
+      parent: { select: { code: true } },
     },
     orderBy: { code: "asc" },
   });
@@ -319,14 +343,22 @@ export async function getBalanceSheet(
     const amount =
       sectionSign === 1 ? debit.minus(credit) : credit.minus(debit);
 
+    const parentCode = acct.parent?.code ?? null;
+    const row: FinancialStatementRow = {
+      code: acct.code,
+      name: acct.name,
+      amount,
+      parentCode,
+      isContra: acct.isContra,
+    };
     if (acct.type === "ASSET") {
-      assets.push({ code: acct.code, name: acct.name, amount });
+      assets.push(row);
       totalAssets = totalAssets.plus(amount);
     } else if (acct.type === "LIABILITY") {
-      liabilities.push({ code: acct.code, name: acct.name, amount });
+      liabilities.push(row);
       totalLiabilities = totalLiabilities.plus(amount);
     } else {
-      equity.push({ code: acct.code, name: acct.name, amount });
+      equity.push(row);
       totalEquity = totalEquity.plus(amount);
     }
   }
@@ -346,6 +378,10 @@ export async function getBalanceSheet(
     code: "RE",
     name: "Retained Earnings (computed)",
     amount: retainedEarnings,
+    // Synthetic row — no DB account, so no parent. Renders as a root
+    // in the Equity hierarchy.
+    parentCode: null,
+    isContra: false,
   });
   totalEquity = totalEquity.plus(retainedEarnings);
 

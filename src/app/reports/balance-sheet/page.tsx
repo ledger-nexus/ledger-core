@@ -1,10 +1,22 @@
 // Balance sheet. As-of date via URL search param. Shows A = L + E
 // invariant verification at the bottom.
+//
+// Phase 7: renders hierarchically (parent accounts → indented children →
+// recursive sub-totals). `?flat=1` switches to the old code-sorted view.
+// On a flat chart of accounts the two views look identical — the helper
+// treats every row as a root.
 
+import { Decimal } from "decimal.js";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
-import { getBalanceSheet } from "@/lib/accounting/reports";
+import { getBalanceSheet, type FinancialStatementRow } from "@/lib/accounting/reports";
+import {
+  buildHierarchy,
+  flattenForDisplay,
+  type FlatAccountRow,
+  type HierarchyNode,
+} from "@/lib/accounting/account-hierarchy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Input, Label } from "@/components/ui/input";
@@ -14,10 +26,11 @@ import { formatMoney, formatDate, moneyClass } from "@/lib/utils/format";
 export default async function BalanceSheetPage({
   searchParams,
 }: {
-  searchParams: { asOf?: string };
+  searchParams: { asOf?: string; flat?: string };
 }) {
   const scope = getScope();
   const asOf = searchParams.asOf ?? "2026-06-30";
+  const flat = searchParams.flat === "1";
   const bs = await getBalanceSheet(prisma, scope, new Date(asOf));
 
   return (
@@ -35,6 +48,7 @@ export default async function BalanceSheetPage({
               <Label htmlFor="asOf">As of</Label>
               <Input type="date" name="asOf" id="asOf" defaultValue={asOf} />
             </div>
+            {flat && <input type="hidden" name="flat" value="1" />}
             <button
               type="submit"
               className="h-9 rounded-md bg-ink-900 px-4 text-sm font-medium text-white hover:bg-ink-800"
@@ -51,11 +65,28 @@ export default async function BalanceSheetPage({
         </div>
       </div>
 
+      <div className="text-xs text-ink-500 -mt-3">
+        {flat ? (
+          <Link href={`?asOf=${asOf}`} className="text-link hover:underline">
+            Switch to hierarchical view
+          </Link>
+        ) : (
+          <Link href={`?asOf=${asOf}&flat=1`} className="text-link hover:underline">
+            Switch to flat view
+          </Link>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <BsSection title="Assets" rows={bs.assets} total={bs.totalAssets} />
+        <BsSection title="Assets" rows={bs.assets} total={bs.totalAssets} flat={flat} />
         <div className="flex flex-col gap-4">
-          <BsSection title="Liabilities" rows={bs.liabilities} total={bs.totalLiabilities} />
-          <BsSection title="Equity" rows={bs.equity} total={bs.totalEquity} />
+          <BsSection
+            title="Liabilities"
+            rows={bs.liabilities}
+            total={bs.totalLiabilities}
+            flat={flat}
+          />
+          <BsSection title="Equity" rows={bs.equity} total={bs.totalEquity} flat={flat} />
         </div>
       </div>
 
@@ -86,16 +117,36 @@ function BsSection({
   title,
   rows,
   total,
+  flat,
 }: {
   title: string;
-  rows: { code: string; name: string; amount: any }[];
-  total: any;
+  rows: FinancialStatementRow[];
+  total: Decimal;
+  flat: boolean;
 }) {
+  // For hierarchy: convert each FinancialStatementRow into the helper's
+  // FlatAccountRow shape. Single amount → both debit and credit zero
+  // (the helper rolls up `balance`, which is what we render in BS).
+  const flatRows: FlatAccountRow[] = rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    type: "ASSET", // not used for rendering here; placeholder
+    parentCode: r.parentCode,
+    balance: new Decimal(r.amount.toString()),
+    debit: new Decimal(0),
+    credit: new Decimal(0),
+    isContra: r.isContra,
+  }));
+  const tree = buildHierarchy(flatRows);
+  const treeDisplay = flattenForDisplay(tree);
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
-        <span className="amount-cell text-sm font-semibold text-ink-900">{formatMoney(total)}</span>
+        <span className="amount-cell text-sm font-semibold text-ink-900">
+          {formatMoney(total)}
+        </span>
       </CardHeader>
       <CardContent>
         <Table>
@@ -107,18 +158,45 @@ function BsSection({
             </tr>
           </THead>
           <TBody>
-            {rows.map((r) => (
-              <TR key={r.code}>
-                <TD className="font-mono text-xs text-ink-700">{r.code}</TD>
-                <TD className="text-ink-900">{r.name}</TD>
-                <TD className={`amount-cell text-right ${moneyClass(r.amount)}`}>
-                  {formatMoney(r.amount)}
-                </TD>
-              </TR>
-            ))}
+            {flat
+              ? rows.map((r) => (
+                  <TR key={r.code}>
+                    <TD className="font-mono text-xs text-ink-700">{r.code}</TD>
+                    <TD className="text-ink-900">{r.name}</TD>
+                    <TD className={`amount-cell text-right ${moneyClass(r.amount)}`}>
+                      {formatMoney(r.amount)}
+                    </TD>
+                  </TR>
+                ))
+              : treeDisplay.map((node) => (
+                  <HierarchyTR key={node.code} node={node} />
+                ))}
           </TBody>
         </Table>
       </CardContent>
     </Card>
+  );
+}
+
+function HierarchyTR({ node }: { node: HierarchyNode }) {
+  const indentPx = node.depth * 16;
+  const isGroup = node.hasChildren;
+  // Groups show the rolled-up subtotal. Leaves show their own value.
+  const valueToShow = isGroup ? node.subtotalBalance : node.ownBalance;
+  return (
+    <TR className={isGroup ? "bg-ink-50/50 font-medium text-ink-900" : undefined}>
+      <TD className="font-mono text-xs text-ink-700">{node.code}</TD>
+      <TD>
+        <span style={{ paddingLeft: indentPx }}>{node.name}</span>
+        {isGroup && (
+          <span className="ml-2 text-[10px] uppercase tracking-wide text-ink-400">
+            subtotal
+          </span>
+        )}
+      </TD>
+      <TD className={`amount-cell text-right ${moneyClass(valueToShow)}`}>
+        {formatMoney(valueToShow)}
+      </TD>
+    </TR>
   );
 }
