@@ -22,6 +22,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
     items: [
       { href: "/journal-entries", label: "Journal entries" },
       { href: "/journal-entries/new", label: "+ New entry", hint: "manual" },
+      { href: "/recurring-entries", label: "Recurring", hint: "templates" },
       { href: "/ar", label: "Open AR" },
       { href: "/ap", label: "Open AP" },
     ],

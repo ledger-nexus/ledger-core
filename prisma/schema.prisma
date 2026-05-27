@@ -95,6 +95,7 @@ model Tenant {
   auditLogs              AuditLog[]
   reassignmentRules      ReassignmentRule[]
   notifications          Notification[]
+  recurringEntries       RecurringEntry[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -191,6 +192,7 @@ model LegalEntity {
   revenueContracts RevenueContract[]
   arOpenItems      ArOpenItem[]
   apOpenItems      ApOpenItem[]
+  recurringEntries RecurringEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -222,6 +224,7 @@ model Book {
   revenueContractBookAttributes RevenueContractBookAttributes[]
   arOpenItems                   ArOpenItem[]
   apOpenItems                   ApOpenItem[]
+  recurringEntries              RecurringEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -324,6 +327,7 @@ model Currency {
   fixedAssets        FixedAsset[]      @relation("FixedAssetAcqCcy")
   leases             Lease[]           @relation("LeaseCcy")
   revenueContracts   RevenueContract[] @relation("RevContractCcy")
+  recurringEntries   RecurringEntry[]
 
   @@map("currency")
 }
@@ -687,6 +691,97 @@ model JournalLine {
   @@index([partyId])
   @@index([tenantId])
   @@map("gl_entry_line")
+}
+
+// =========================================================================
+// Recurring journal entries
+// =========================================================================
+// Templates for predictable, schedule-driven entries (monthly rent, SaaS
+// subscriptions, accruals). Each template carries a fixed shape (lines)
+// plus a cadence. A nightly / on-demand `runRecurringEntries` pass walks
+// active templates, computes which periods haven't yet been posted, and
+// fires postJournalEntry for each — with a stable lineage triple so
+// re-running is idempotent.
+//
+// The template is NOT a journal entry. It produces journal entries.
+// Editing or deleting a template does NOT touch entries already posted;
+// they're real history. Deactivating a template stops it from producing
+// new entries.
+
+model RecurringEntry {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String @db.Uuid
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entityId  String @db.Uuid
+  entity    LegalEntity @relation(fields: [entityId], references: [id])
+  bookId    String @db.Uuid
+  book      Book   @relation(fields: [bookId], references: [id])
+
+  // Human-readable identifier per tenant. "MONTHLY_RENT", "QUARTERLY_AUDIT_ACCRUAL".
+  code String
+  memo String
+
+  // Header currency for the produced entries. Lines are signed-quantity;
+  // the JE picks up fxRate from the rate table at posting time.
+  currencyId String
+  currency   Currency @relation(fields: [currencyId], references: [code])
+
+  cadence Cadence
+
+  // First posting date. The first JE produced is dated startDate.
+  // For monthly cadence, subsequent JEs are at startDate + N months
+  // (anchored to startDate's day-of-month; falls back to last day of
+  // month if the target month is shorter).
+  startDate DateTime @db.Date
+  // Optional sunset: no posts after endDate (inclusive). Null = forever.
+  endDate   DateTime? @db.Date
+  // Bookmark: the most recent docDate this template successfully posted.
+  // Drives "what's next" — next posting is the cadence step AFTER this.
+  // Null = never posted; the first post will use startDate.
+  lastPostedDate DateTime? @db.Date
+
+  // When false, the runner skips this template (kept for history / re-enable).
+  isActive Boolean @default(true)
+
+  lines RecurringEntryLine[]
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([entityId, bookId])
+  @@map("recurring_entry")
+}
+
+model RecurringEntryLine {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  templateId String @db.Uuid
+  template   RecurringEntry @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  // 1-indexed within the template.
+  lineNo Int
+
+  // Account code resolved at post time against the entity's chart.
+  accountCode String
+
+  // Money. Mirrors the substrate convention (debit XOR credit > 0).
+  debit  Decimal @db.Decimal(18, 4) @default(0)
+  credit Decimal @db.Decimal(18, 4) @default(0)
+
+  description String?
+  partyCode   String?
+  itemCode    String?
+
+  @@unique([templateId, lineNo])
+  @@map("recurring_entry_line")
+}
+
+enum Cadence {
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
 }
 
 // =========================================================================

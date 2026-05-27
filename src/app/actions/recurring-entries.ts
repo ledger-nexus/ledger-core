@@ -1,0 +1,402 @@
+"use server";
+
+// Server Actions for managing + executing recurring journal entry
+// templates. All four are admin-gated:
+//
+//   - createRecurringEntryAction: creates a new template + lines.
+//     Validates entity/book/account codes upfront so users see a clear
+//     error before the runner ever fires.
+//
+//   - runRecurringEntriesAction: fires the engine against a chosen
+//     throughDate. Designed to be invokable from the UI ("Run through
+//     today") or from a cron at night. Returns per-template counts +
+//     any per-period failures.
+//
+//   - setRecurringActiveAction: toggle isActive. Inactive templates
+//     are skipped by the runner.
+//
+//   - deleteRecurringEntryAction: hard-deletes the template + cascades
+//     to lines. JEs ALREADY POSTED stay in place — they're real history
+//     and the template's lineage is recorded on each one.
+//
+// All four write a PRIVILEGED_ACTION audit row.
+
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/db";
+import { Decimal } from "decimal.js";
+import type { Cadence } from "@prisma/client";
+import {
+  requireAdmin,
+  NotAuthenticatedError,
+  NotAuthorizedError,
+} from "@/lib/auth/current-user";
+import { requireCurrentTenant } from "@/lib/auth/tenant";
+import {
+  auditPrivilegedAction,
+  auditAccessDenied,
+} from "@/lib/audit/log";
+import {
+  runRecurringEntries,
+  enumerateDueDates,
+} from "@/lib/accounting/recurring";
+
+// ─── Create ────────────────────────────────────────────────────────────────
+
+export interface CreateRecurringEntryInput {
+  /** Tenant-unique code, e.g. "MONTHLY_RENT". 2-40 chars, uppercase letters / digits / _ / -. */
+  code: string;
+  /** Header memo applied to every produced JE. */
+  memo: string;
+  entityCode: string;
+  bookCode: string;
+  /** ISO currency code. Defaults to "USD" if omitted. */
+  currencyCode?: string;
+  cadence: Cadence;
+  /** First posting date. */
+  startDate: string; // ISO date "YYYY-MM-DD"
+  /** Optional sunset (inclusive). */
+  endDate?: string;
+  lines: Array<{
+    accountCode: string;
+    debit?: string | number;
+    credit?: string | number;
+    description?: string;
+    partyCode?: string;
+    itemCode?: string;
+  }>;
+}
+
+export interface CreateRecurringEntryState {
+  ok: boolean;
+  message?: string;
+  id?: string;
+}
+
+const CODE_RE = /^[A-Z0-9](?:[A-Z0-9]|[_-](?![_-]))*[A-Z0-9]$/;
+
+export async function createRecurringEntryAction(
+  input: CreateRecurringEntryInput
+): Promise<CreateRecurringEntryState> {
+  try {
+    const admin = await requireAdmin();
+    const tenant = await requireCurrentTenant();
+
+    // ── Validate code ────────────────────────────────────────────────────
+    const code = input.code?.trim().toUpperCase() ?? "";
+    if (code.length < 2 || code.length > 40 || !CODE_RE.test(code)) {
+      return {
+        ok: false,
+        message:
+          "Code must be 2–40 chars: uppercase letters, digits, single _ or -. No double separators.",
+      };
+    }
+    const memo = input.memo?.trim() ?? "";
+    if (memo.length < 1 || memo.length > 200) {
+      return { ok: false, message: "Memo must be 1–200 chars." };
+    }
+    if (!input.lines || input.lines.length < 2) {
+      return { ok: false, message: "Template needs at least 2 lines." };
+    }
+
+    // ── Resolve entity + book + currency in tenant scope ─────────────────
+    const entity = await prisma.legalEntity.findFirst({
+      where: { tenantId: tenant.id, code: input.entityCode },
+      select: { id: true, tenantId: true },
+    });
+    if (!entity) {
+      return { ok: false, message: `Unknown entity: ${input.entityCode}` };
+    }
+    const book = await prisma.book.findUnique({
+      where: { code: input.bookCode },
+      select: { id: true },
+    });
+    if (!book) {
+      return { ok: false, message: `Unknown book: ${input.bookCode}` };
+    }
+    const currencyCode = input.currencyCode ?? "USD";
+
+    // ── Validate lines: balanced + non-negative + non-empty ─────────────
+    let debitTotal = new Decimal(0);
+    let creditTotal = new Decimal(0);
+    for (const [i, l] of input.lines.entries()) {
+      const debit = new Decimal(l.debit ?? 0);
+      const credit = new Decimal(l.credit ?? 0);
+      if (debit.isNegative() || credit.isNegative()) {
+        return { ok: false, message: `Line ${i + 1}: amounts must be non-negative.` };
+      }
+      if (debit.greaterThan(0) && credit.greaterThan(0)) {
+        return {
+          ok: false,
+          message: `Line ${i + 1}: cannot have both debit and credit non-zero.`,
+        };
+      }
+      if (debit.isZero() && credit.isZero()) {
+        return {
+          ok: false,
+          message: `Line ${i + 1}: must have a debit or credit > 0.`,
+        };
+      }
+      if (!l.accountCode) {
+        return { ok: false, message: `Line ${i + 1}: accountCode required.` };
+      }
+      debitTotal = debitTotal.plus(debit);
+      creditTotal = creditTotal.plus(credit);
+    }
+    if (!debitTotal.equals(creditTotal)) {
+      return {
+        ok: false,
+        message: `Template unbalanced: debits ${debitTotal.toFixed(2)} ≠ credits ${creditTotal.toFixed(2)}.`,
+      };
+    }
+
+    // ── Validate dates ───────────────────────────────────────────────────
+    const startDate = new Date(input.startDate);
+    if (isNaN(startDate.getTime())) {
+      return { ok: false, message: "startDate must be a valid date (YYYY-MM-DD)." };
+    }
+    const endDate = input.endDate ? new Date(input.endDate) : null;
+    if (endDate && isNaN(endDate.getTime())) {
+      return { ok: false, message: "endDate must be a valid date (YYYY-MM-DD)." };
+    }
+    if (endDate && endDate < startDate) {
+      return { ok: false, message: "endDate must be on or after startDate." };
+    }
+
+    // ── Create ───────────────────────────────────────────────────────────
+    const created = await prisma.recurringEntry.create({
+      data: {
+        tenantId: tenant.id,
+        entityId: entity.id,
+        bookId: book.id,
+        code,
+        memo,
+        currencyId: currencyCode,
+        cadence: input.cadence,
+        startDate,
+        endDate,
+        createdBy: admin.email,
+        lines: {
+          create: input.lines.map((l, idx) => ({
+            lineNo: idx + 1,
+            accountCode: l.accountCode,
+            debit: new Decimal(l.debit ?? 0).toFixed(4),
+            credit: new Decimal(l.credit ?? 0).toFixed(4),
+            description: l.description,
+            partyCode: l.partyCode,
+            itemCode: l.itemCode,
+          })),
+        },
+      },
+      select: { id: true },
+    });
+
+    await auditPrivilegedAction({
+      actor: admin,
+      action: "create-recurring-entry",
+      resource: "RecurringEntry",
+      resourceId: created.id,
+      tenantId: tenant.id,
+      metadata: {
+        code,
+        cadence: input.cadence,
+        entityCode: input.entityCode,
+        bookCode: input.bookCode,
+        lineCount: input.lines.length,
+      },
+    });
+
+    revalidatePath("/recurring-entries");
+    return { ok: true, id: created.id, message: `Template ${code} created.` };
+  } catch (e) {
+    return handleAuthError(e, "create-recurring-entry");
+  }
+}
+
+// ─── Run ───────────────────────────────────────────────────────────────────
+
+export interface RunRecurringInput {
+  throughDate: string;
+  /** Optional: run only one template. */
+  templateId?: string;
+}
+
+export interface RunRecurringState {
+  ok: boolean;
+  message?: string;
+  entriesPosted?: number;
+  templatesIdle?: number;
+  errors?: Array<{ templateCode: string; docDate: string; message: string }>;
+}
+
+export async function runRecurringEntriesAction(
+  input: RunRecurringInput
+): Promise<RunRecurringState> {
+  try {
+    const admin = await requireAdmin();
+    const tenant = await requireCurrentTenant();
+
+    const throughDate = new Date(input.throughDate);
+    if (isNaN(throughDate.getTime())) {
+      return { ok: false, message: "throughDate must be a valid date (YYYY-MM-DD)." };
+    }
+
+    const result = await runRecurringEntries(prisma, {
+      throughDate,
+      tenantId: tenant.id,
+      templateId: input.templateId,
+      triggeredBy: admin.email,
+    });
+
+    const errors = result.templates.flatMap((t) =>
+      t.errors.map((e) => ({
+        templateCode: t.code,
+        docDate: e.docDate,
+        message: e.message,
+      }))
+    );
+
+    await auditPrivilegedAction({
+      actor: admin,
+      action: "run-recurring-entries",
+      resource: "RecurringEntry",
+      resourceId: input.templateId ?? "ALL",
+      tenantId: tenant.id,
+      metadata: {
+        throughDate: input.throughDate,
+        entriesPosted: result.entriesPosted,
+        templatesIdle: result.templatesIdle,
+        errorCount: errors.length,
+      },
+    });
+
+    revalidatePath("/recurring-entries");
+    revalidatePath("/journal-entries");
+    return {
+      ok: true,
+      entriesPosted: result.entriesPosted,
+      templatesIdle: result.templatesIdle,
+      errors,
+      message: errors.length
+        ? `Posted ${result.entriesPosted} entries with ${errors.length} error${errors.length === 1 ? "" : "s"}.`
+        : `Posted ${result.entriesPosted} ${result.entriesPosted === 1 ? "entry" : "entries"}; ${result.templatesIdle} template${result.templatesIdle === 1 ? "" : "s"} idle.`,
+    };
+  } catch (e) {
+    return handleAuthError(e, "run-recurring-entries");
+  }
+}
+
+// ─── Activate / pause ──────────────────────────────────────────────────────
+
+export interface SetActiveInput {
+  id: string;
+  isActive: boolean;
+}
+
+export interface SetActiveState {
+  ok: boolean;
+  message?: string;
+}
+
+export async function setRecurringActiveAction(
+  input: SetActiveInput
+): Promise<SetActiveState> {
+  try {
+    const admin = await requireAdmin();
+    const tenant = await requireCurrentTenant();
+    // Tenant-scoped: a tenant admin can only toggle their own templates.
+    const updated = await prisma.recurringEntry.updateMany({
+      where: { id: input.id, tenantId: tenant.id },
+      data: { isActive: input.isActive },
+    });
+    if (updated.count === 0) {
+      return { ok: false, message: "Template not found in this tenant." };
+    }
+    await auditPrivilegedAction({
+      actor: admin,
+      action: input.isActive ? "activate-recurring-entry" : "pause-recurring-entry",
+      resource: "RecurringEntry",
+      resourceId: input.id,
+      tenantId: tenant.id,
+    });
+    revalidatePath("/recurring-entries");
+    return {
+      ok: true,
+      message: input.isActive ? "Template activated." : "Template paused.",
+    };
+  } catch (e) {
+    return handleAuthError(e, "set-recurring-active");
+  }
+}
+
+// ─── Delete ────────────────────────────────────────────────────────────────
+
+export interface DeleteRecurringInput {
+  id: string;
+}
+
+export interface DeleteRecurringState {
+  ok: boolean;
+  message?: string;
+}
+
+export async function deleteRecurringEntryAction(
+  input: DeleteRecurringInput
+): Promise<DeleteRecurringState> {
+  try {
+    const admin = await requireAdmin();
+    const tenant = await requireCurrentTenant();
+    // Verify ownership before delete.
+    const target = await prisma.recurringEntry.findFirst({
+      where: { id: input.id, tenantId: tenant.id },
+      select: { id: true, code: true },
+    });
+    if (!target) {
+      return { ok: false, message: "Template not found in this tenant." };
+    }
+    // Cascade deletes lines (FK ON DELETE CASCADE). JEs already posted
+    // stay in place — they carry their own lineage triple recording
+    // which template produced them.
+    await prisma.recurringEntry.delete({ where: { id: target.id } });
+    await auditPrivilegedAction({
+      actor: admin,
+      action: "delete-recurring-entry",
+      resource: "RecurringEntry",
+      resourceId: target.id,
+      tenantId: tenant.id,
+      metadata: { code: target.code },
+    });
+    revalidatePath("/recurring-entries");
+    return { ok: true, message: `Template ${target.code} deleted.` };
+  } catch (e) {
+    return handleAuthError(e, "delete-recurring-entry");
+  }
+}
+
+// ─── Shared error handler ──────────────────────────────────────────────────
+
+function handleAuthError(
+  e: unknown,
+  attemptedAction: string
+): { ok: false; message: string } {
+  if (e instanceof NotAuthenticatedError) {
+    void auditAccessDenied({
+      attemptedAction,
+      reason: "Not authenticated",
+      resource: "RecurringEntry",
+    });
+    return { ok: false, message: "You must be signed in." };
+  }
+  if (e instanceof NotAuthorizedError) {
+    void auditAccessDenied({
+      attemptedAction,
+      reason: "Not admin",
+      resource: "RecurringEntry",
+    });
+    return { ok: false, message: "Recurring entries require admin permission." };
+  }
+  return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+}
+
+// Re-export the pure helper so the list page can show "next due" without
+// duplicating cadence math.
+export { enumerateDueDates };
