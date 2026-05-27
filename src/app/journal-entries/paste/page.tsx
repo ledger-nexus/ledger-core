@@ -1,0 +1,57 @@
+// Paste-from-Excel JE entry — Server Component shell, interactive form
+// lives in paste-form.tsx.
+//
+// What this solves: a CPA has a list of JE lines in Excel (typically 5-50
+// rows: complex year-end accruals, customer-detail billings rolled up
+// into one JE, a prepaid-amortization schedule). Today they'd re-key
+// each line in the new-entry form. Now they paste once.
+
+import { prisma } from "@/lib/db";
+import { getScope } from "@/lib/scope";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { EmptyState } from "@/components/ui/empty-state";
+import PasteForm from "./paste-form";
+
+export default async function PastePage() {
+  const tenant = await getCurrentTenant();
+  if (!tenant) {
+    return (
+      <EmptyState
+        title="No active tenant"
+        description="Sign in and select a tenant before pasting entries."
+      />
+    );
+  }
+  const scope = getScope();
+  const [entities, books] = await Promise.all([
+    prisma.legalEntity.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: { code: "asc" },
+      select: { code: true, name: true },
+    }),
+    prisma.book.findMany({
+      where: { isActive: true },
+      orderBy: { code: "asc" },
+      select: { code: true, name: true },
+    }),
+  ]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h2 className="text-xl font-semibold text-ink-900">Paste from Excel</h2>
+        <p className="text-sm text-ink-500 mt-1 max-w-prose">
+          Copy lines from Excel (or any spreadsheet) and paste them below.
+          Tab-separated columns; one row per JE line. The parser balances on
+          your behalf and shows a preview before posting via the substrate.
+        </p>
+      </div>
+      <PasteForm
+        entities={entities}
+        books={books}
+        defaultEntityCode={scope.entityCode}
+        defaultBookCode={scope.bookCode}
+      />
+    </div>
+  );
+}
