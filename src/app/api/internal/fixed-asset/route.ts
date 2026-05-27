@@ -60,6 +60,8 @@ import {
   createFixedAsset,
   type FixedAssetBookSpec,
 } from "@/lib/accounting/sub-ledgers/fixed-assets";
+import { resolveBearerToken } from "@/lib/auth/token";
+import { auditTokenUse } from "@/lib/audit/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,16 +106,39 @@ interface JsonBody {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const token = process.env.INTERNAL_API_TOKEN;
-  if (!token) {
-    return err(
-      "UNAUTHORIZED",
-      "INTERNAL_API_TOKEN env var is not set — endpoint disabled.",
-      503
-    );
+  // SECURITY (pen-test fix, second pass): switch from legacy single-
+  // token to resolveBearerToken so this endpoint participates in the
+  // same per-tenant token model as /api/internal/journal-entries.
+  // Without it, every caller authenticated as the same "default tenant"
+  // identity AND the entity lookup was tenant-blind — fa-amort posting
+  // for tenant A could create a FixedAsset under tenant B's entity if
+  // the codes matched.
+  const reqHeaders = {
+    ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    userAgent: req.headers.get("user-agent"),
+  };
+  const authHeader = req.headers.get("authorization") ?? "";
+  const bearer = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : "";
+  if (!bearer) {
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/fixed-asset",
+      reason: "Missing bearer token",
+      requestHeaders: reqHeaders,
+    });
+    return err("UNAUTHORIZED", "Missing bearer token", 401);
   }
-  if (req.headers.get("authorization") !== `Bearer ${token}`) {
-    return err("UNAUTHORIZED", "Invalid or missing bearer token", 401);
+  const identity = await resolveBearerToken(bearer);
+  if (!identity) {
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/fixed-asset",
+      reason: "Bearer token did not match any TenantApiToken or INTERNAL_API_TOKEN",
+      requestHeaders: reqHeaders,
+    });
+    return err("UNAUTHORIZED", "Invalid or revoked bearer token", 401);
   }
 
   let body: JsonBody;
@@ -142,13 +167,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Resolve entity for the dedup check. Phase 4b: code unique per
-  // [tenantId, code], use findFirst.
+  // Resolve entity SCOPED TO THE AUTHENTICATED TENANT. Cross-tenant
+  // entity codes are invisible — caller sees UNKNOWN_ENTITY, not
+  // "wait, you found someone else's entity."
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: body.entityCode },
+    where: { tenantId: identity.tenantId, code: body.entityCode },
     select: { id: true, code: true },
   });
   if (!entity) {
+    // Audit cross-tenant probe attempts: if the entity exists in
+    // SOME OTHER tenant, log it as a privacy event (same pattern as
+    // /api/internal/journal-entries). Caller still sees UNKNOWN_ENTITY.
+    const elsewhere = await prisma.legalEntity.findFirst({
+      where: { code: body.entityCode },
+      select: { tenantId: true },
+    });
+    if (elsewhere && elsewhere.tenantId !== identity.tenantId) {
+      await auditTokenUse({
+        success: false,
+        endpoint: "POST /api/internal/fixed-asset",
+        reason: "Tenant scope mismatch — token does not own this entity",
+        tenantId: identity.tenantId,
+        metadata: {
+          tokenLabel: identity.label,
+          tokenTenantId: identity.tenantId,
+          entityCode: body.entityCode,
+          elsewhereTenantId: elsewhere.tenantId,
+        },
+        requestHeaders: reqHeaders,
+      });
+    }
     return err(
       "UNKNOWN_ENTITY",
       `No entity with code "${body.entityCode}"`,

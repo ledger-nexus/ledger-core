@@ -21,6 +21,7 @@ import {
   NotAuthenticatedError,
   NotAuthorizedError,
 } from "@/lib/auth/current-user";
+import { requireCurrentTenant } from "@/lib/auth/tenant";
 
 export interface AdminReassignState {
   ok: boolean;
@@ -36,6 +37,7 @@ export async function adminReassignAction(input: {
 }): Promise<AdminReassignState> {
   try {
     const admin = await requireAdmin();
+    const tenant = await requireCurrentTenant();
 
     if (!input.recordId) return { ok: false, message: "recordId required" };
     if (!input.newOwnerId) return { ok: false, message: "newOwnerId required" };
@@ -51,6 +53,9 @@ export async function adminReassignAction(input: {
       recordId: input.recordId,
       newOwner: { type: input.newOwnerType, id: input.newOwnerId },
       actorUserId: admin.id,
+      // SECURITY: scope to the admin's current tenant. An admin
+      // signed in to tenant A can't reach into tenant B's orphans.
+      actorTenantId: tenant.id,
       reason: input.reason?.trim() || `admin:orphan repair by ${admin.displayName}`,
       lockFromRules: true,
     });

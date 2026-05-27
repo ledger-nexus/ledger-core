@@ -11,6 +11,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { reassignRecord, ReassignError } from "@/lib/ownership/reassign";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requireCurrentTenant } from "@/lib/auth/tenant";
 
 export interface ReassignArItemState {
   ok: boolean;
@@ -25,6 +26,7 @@ export async function reassignArItemAction(input: {
 }): Promise<ReassignArItemState> {
   try {
     const user = await requireCurrentUser();
+    const tenant = await requireCurrentTenant();
 
     if (!input.openItemId) return { ok: false, message: "openItemId required" };
     if (!input.newOwnerId) return { ok: false, message: "newOwnerId required" };
@@ -37,6 +39,10 @@ export async function reassignArItemAction(input: {
       recordId: input.openItemId,
       newOwner: { type: input.newOwnerType, id: input.newOwnerId },
       actorUserId: user.id,
+      // SECURITY: tenant-scope the lookup. A cross-tenant openItemId
+      // returns RECORD_NOT_FOUND instead of reassigning another
+      // tenant's item.
+      actorTenantId: tenant.id,
       reason: input.reason?.trim() || `manual:by ${user.displayName}`,
       lockFromRules: true, // manual reassignments lock the record from rules
     });

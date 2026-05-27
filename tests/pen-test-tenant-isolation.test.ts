@@ -49,6 +49,8 @@ import { _internal as authInternal } from "@/lib/auth/current-user";
 import { createJournalEntryAction } from "@/app/actions/create-journal-entry";
 import { applyApPaymentAction } from "@/app/actions/apply-ap-payment";
 import { applyArPaymentAction } from "@/app/actions/apply-ar-payment";
+import { reassignArItemAction } from "@/app/actions/reassign-ar-item";
+import { reassignApItemAction } from "@/app/actions/reassign-ap-item";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";
 import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
@@ -345,5 +347,48 @@ describe("applyArPaymentAction — tenant scope", () => {
       await prisma.arOpenItem.findUniqueOrThrow({ where: { id: arItemA } })
     ).currentBalance.toString();
     expect(afterBalance).toBe(beforeBalance);
+  });
+});
+
+describe("reassign actions — tenant scope (gap #8)", () => {
+  it("reassignArItemAction refuses cross-tenant openItemId", async () => {
+    // Signed in to tenant B; try to reassign tenant A's AR item to
+    // the admin. Without the actorTenantId scope, the helper would
+    // have done findUnique({id}) and successfully reassigned tenant
+    // A's item — full ownership hijack.
+    signInAs(tenantB);
+    const beforeOwner = (
+      await prisma.arOpenItem.findUniqueOrThrow({ where: { id: arItemA } })
+    ).ownerId;
+    const r = await reassignArItemAction({
+      openItemId: arItemA,
+      newOwnerType: "USER",
+      newOwnerId: admin.id,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/RECORD_NOT_FOUND/i);
+    // Owner unchanged.
+    const afterOwner = (
+      await prisma.arOpenItem.findUniqueOrThrow({ where: { id: arItemA } })
+    ).ownerId;
+    expect(afterOwner).toBe(beforeOwner);
+  });
+
+  it("reassignApItemAction refuses cross-tenant openItemId", async () => {
+    signInAs(tenantB);
+    const beforeOwner = (
+      await prisma.apOpenItem.findUniqueOrThrow({ where: { id: apItemA } })
+    ).ownerId;
+    const r = await reassignApItemAction({
+      openItemId: apItemA,
+      newOwnerType: "USER",
+      newOwnerId: admin.id,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/RECORD_NOT_FOUND/i);
+    const afterOwner = (
+      await prisma.apOpenItem.findUniqueOrThrow({ where: { id: apItemA } })
+    ).ownerId;
+    expect(afterOwner).toBe(beforeOwner);
   });
 });

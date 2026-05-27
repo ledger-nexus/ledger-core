@@ -50,6 +50,15 @@ export interface ReassignInput {
    * flooding the new owner's inbox would be hostile. Default false.
    */
   silent?: boolean;
+  /**
+   * SECURITY: the actor's tenantId. When provided, the record lookup is
+   * scoped to this tenant — a cross-tenant id returns "not found"
+   * instead of letting the actor reassign someone else's record. Server
+   * Action callers MUST pass this from requireCurrentTenant().
+   * Engine-fired reassignments (rules-engine paths) can omit it since
+   * they're already operating on a scoped record set.
+   */
+  actorTenantId?: string;
 }
 
 export interface ReassignResult {
@@ -208,8 +217,11 @@ async function reassignJournalEntry(
   input: ReassignInput,
   lock: boolean
 ): Promise<ReassignResult> {
-  const je = await prisma.journalEntry.findUnique({
-    where: { id: input.recordId },
+  const je = await prisma.journalEntry.findFirst({
+    where: {
+      id: input.recordId,
+      ...(input.actorTenantId ? { tenantId: input.actorTenantId } : {}),
+    },
     select: {
       id: true,
       status: true,
@@ -274,8 +286,11 @@ async function reassignArOpenItem(
   input: ReassignInput,
   lock: boolean
 ): Promise<ReassignResult> {
-  const item = await prisma.arOpenItem.findUnique({
-    where: { id: input.recordId },
+  const item = await prisma.arOpenItem.findFirst({
+    where: {
+      id: input.recordId,
+      ...(input.actorTenantId ? { tenantId: input.actorTenantId } : {}),
+    },
     select: {
       id: true,
       status: true,
@@ -346,8 +361,11 @@ async function reassignApOpenItem(
   input: ReassignInput,
   lock: boolean
 ): Promise<ReassignResult> {
-  const item = await prisma.apOpenItem.findUnique({
-    where: { id: input.recordId },
+  const item = await prisma.apOpenItem.findFirst({
+    where: {
+      id: input.recordId,
+      ...(input.actorTenantId ? { tenantId: input.actorTenantId } : {}),
+    },
     select: {
       id: true,
       status: true,

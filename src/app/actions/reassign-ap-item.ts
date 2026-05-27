@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { reassignRecord, ReassignError } from "@/lib/ownership/reassign";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requireCurrentTenant } from "@/lib/auth/tenant";
 
 export interface ReassignApItemState {
   ok: boolean;
@@ -21,6 +22,7 @@ export async function reassignApItemAction(input: {
 }): Promise<ReassignApItemState> {
   try {
     const user = await requireCurrentUser();
+    const tenant = await requireCurrentTenant();
 
     if (!input.openItemId) return { ok: false, message: "openItemId required" };
     if (!input.newOwnerId) return { ok: false, message: "newOwnerId required" };
@@ -33,6 +35,8 @@ export async function reassignApItemAction(input: {
       recordId: input.openItemId,
       newOwner: { type: input.newOwnerType, id: input.newOwnerId },
       actorUserId: user.id,
+      // SECURITY: tenant-scope. See reassign-ar-item.ts for rationale.
+      actorTenantId: tenant.id,
       reason: input.reason?.trim() || `manual:by ${user.displayName}`,
       lockFromRules: true,
     });
