@@ -55,6 +55,11 @@ export interface TrialBalanceRow {
   credit: Decimal;  // sum of all credit lines on/before asOf
   // Net balance, expressed on the account's normal side.
   balance: Decimal;
+  // Phase 7 hierarchy: parent account code (the parent's `code`, not id)
+  // — null for roots / accounts with no parent. Carried on every row so
+  // the renderer can build a tree via buildHierarchy().
+  parentCode: string | null;
+  isContra: boolean;
 }
 
 export async function getTrialBalance(
@@ -69,6 +74,8 @@ export async function getTrialBalance(
   );
 
   // Pull lines for the (entity, book) on/before asOf, grouped by account.
+  // Include the parent's code (Phase 7 hierarchy) so reports can render
+  // sub-totals without a second query.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
@@ -81,6 +88,7 @@ export async function getTrialBalance(
         },
         select: { debit: true, credit: true },
       },
+      parent: { select: { code: true } },
     },
     orderBy: { code: "asc" },
   });
@@ -122,6 +130,8 @@ export async function getTrialBalance(
       debit,
       credit,
       balance,
+      parentCode: acct.parent?.code ?? null,
+      isContra: acct.isContra,
     };
   });
 
