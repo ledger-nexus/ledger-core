@@ -109,6 +109,7 @@ model Tenant {
   notifications          Notification[]
   recurringEntries       RecurringEntry[]
   journalEntryNotes      JournalEntryNote[]
+  invites                TenantInvite[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -139,6 +140,57 @@ enum TenantRole {
   ADMIN  // full read+write+admin (period close, user lifecycle, AI budget config)
   MEMBER // read+write, no admin actions (the default for new members)
   VIEWER // read-only; cannot post JEs, approve AI suggestions, or run mutations
+}
+
+/// Outstanding invitation to a tenant. Created by an OWNER/ADMIN when
+/// they invite an email address. The invite holds a randomly-generated
+/// token used in the accept link (e-mailed if email is configured;
+/// surfaced in the UI otherwise so dev / no-mailer setups still work).
+///
+/// Lifecycle:
+///   - Created with status=PENDING + a token
+///   - Sender's email service (or the admin manually) sends the
+///     invite URL: /invites/accept?token=<token>
+///   - Recipient signs in / signs up; the accept handler verifies the
+///     token + email match, creates the TenantMembership with the
+///     stored role, marks the invite ACCEPTED.
+///   - Admin can REVOKE (no longer accepts the link) before acceptance.
+///   - Invites auto-expire after expiresAt (default: 14 days).
+model TenantInvite {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String       @db.Uuid
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Email the invite was sent to. Lowercased on insert. The accept
+  /// flow refuses if the signed-in user's primary email != this value
+  /// (case-insensitively), so the invite can't be hijacked.
+  email       String
+  /// Role assigned on acceptance. OWNER is intentionally not invitable
+  /// — there is one OWNER per tenant and it's set at tenant creation.
+  role        TenantRole
+  /// Random URL-safe token. Stored as-is (not hashed) because acceptance
+  /// is a single-use action and the token only lets the holder JOIN
+  /// the tenant, not impersonate an existing member. If invites start
+  /// granting broader scope, switch to hashed-at-rest.
+  token       String       @unique
+  status      InviteStatus @default(PENDING)
+  /// Who created the invite. Tracks the originator for audit.
+  invitedById String       @db.Uuid
+  invitedBy   User         @relation("InvitedBy", fields: [invitedById], references: [id])
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+
+  @@index([tenantId, status])
+  @@index([email, status])
+  @@map("tenant_invite")
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
 }
 
 // Per-tenant API tokens for companion-repo authentication.
@@ -1468,6 +1520,7 @@ model User {
   notificationsActed Notification[] @relation("NotificationActor")
   auditEvents        AuditLog[]     @relation("AuditLogActor")
   journalEntryNotes  JournalEntryNote[]
+  invitesSent        TenantInvite[] @relation("InvitedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

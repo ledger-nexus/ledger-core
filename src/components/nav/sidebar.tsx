@@ -54,6 +54,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
 const ADMIN_SECTION = {
   label: "Admin",
   items: [
+    { href: "/admin/team", label: "Team", hint: "members + invites" },
     { href: "/admin/users", label: "Users", hint: "lifecycle" },
     { href: "/admin/orphans", label: "Orphan records", hint: "ownership" },
     { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
