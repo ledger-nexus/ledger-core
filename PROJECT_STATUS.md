@@ -4,7 +4,7 @@ The single source of truth for "where the portfolio is and what's next."
 Updated end-of-session so the next pickup (human or Claude Code) doesn't
 need to re-derive context.
 
-**Last updated:** 2026-05-27
+**Last updated:** 2026-05-27 (late)
 
 ---
 
@@ -194,23 +194,51 @@ Mostly done after this session. Remaining:
 
 ### Category 2 — Make it usable by a stranger (productize)
 
-This is what gates a real second user. Nothing in this list is shipped.
+This is what gates a real second user. Most of it shipped on 2026-05-27.
 
-- [ ] **Tenant onboarding flow.** Sign-up → create tenant → invite first
-      user → pick functional currency → import or create first entity.
-      Today, the only path in is `pnpm db:seed`. ledger-core has the v2.x
-      onboarding wizard for first-entity setup; the sign-up + create-
-      tenant front edge is missing.
-- [ ] **Per-user RBAC inside a tenant.** `TenantMembership.role` is a
-      free-form string. Need `OWNER` / `ADMIN` / `MEMBER` / `VIEWER` with
-      a policy layer in `requireCurrentScope`. Period close → ADMIN+;
-      viewing → MEMBER+.
-- [ ] **Billing / subscription.** Stripe meter on tenants, probably
-      bundled by entity count + AI token volume.
-- [ ] **Email notifications.** Period close approaching, AI suggestion
-      ready for review, sync failed.
-- [ ] **Docs site + marketing surface.** Right now `docs/` lives only in
-      the repo.
+- [x] **Tenant onboarding flow.** Sign-up → create tenant → first-entity
+      setup were already wired (the `/onboarding` two-step from Phase 7).
+      Inviting teammates was the missing piece, now added.
+- [x] **Per-user RBAC inside a tenant.** OWNER / ADMIN / MEMBER / VIEWER
+      enum + `policy.ts` module with 16 named permissions. Migrated
+      `requireAdmin()` to use the policy. Mirrored to all 4 companion
+      repos. 90 tests on the role hierarchy.
+- [x] **Team management UI.** `/admin/team` with invite-by-email,
+      role-change dropdown, and remove-member. Schema: `TenantInvite`
+      with single-use tokens + 14-day TTL. Audit-logged.
+- [x] **Email notifications.** `src/lib/email/send.ts` with Resend
+      backend; LOGGED_ONLY path when no API key. Invite emails wired.
+      Other templates (period close approaching, AI suggestion ready,
+      sync failed) are 1-day adds on the same primitive.
+- [x] **Billing / subscription skeleton.** `/admin/billing` with plan
+      picker + Stripe Checkout + billing portal. Webhook handler with
+      HMAC-SHA256 signature verification (12 tests including replay-
+      attack rejection). `docs/billing-setup.md` operator runbook.
+- [ ] **Docs site + marketing surface.** Still in the repo only. Punted
+      for now — the operator runbooks (`docs/deployment.md`,
+      `docs/billing-setup.md`) cover technical deployment; a customer-
+      facing marketing surface is a separate project.
+
+### Category 2.5 — Productize, harder pieces (future work)
+
+The skeleton work above unblocks a real second user but doesn't ship
+the polish:
+
+- [ ] **Plan-tier feature gating.** Today plans are flat-rate with no
+      enforced limits. Wire entity count / AI token cap to the plan tier
+      and refuse in the relevant Server Actions.
+- [ ] **Stripe usage-based metering.** Report AI token volume to a
+      metered Price in Stripe via a daily cron. Lets us bill heavy AI
+      users more than light ones without a custom invoicing flow.
+- [ ] **Marketing site.** Separate Next.js project (or static site).
+      Pricing page, demo flow, /sign-up CTA.
+- [ ] **Email templates beyond invites.** Period close 3 days out,
+      AI suggestion ready for review, sync failed, weekly digest.
+      Each is a small typed wrapper around `sendEmail`.
+- [ ] **Ownership transfer.** Currently OWNER can't be demoted /
+      removed. Need a flow where current OWNER promotes another member,
+      they accept, ownership atomically swaps. Schema-only change to
+      `Tenant.ownerUserId` plus the migration UI.
 
 ### Category 3 — Fill out the accounting features
 
@@ -310,6 +338,32 @@ shipped except where noted.
   read-only. Post-flight cap enforcement (sum tokens from each repo's
   AI suggestion table, multiply by per-model pricing, refuse next call
   if over). Accepted limitation: one call can push over by its own cost.
+- **2026-05-27 (late)** — Per-tenant RBAC landed across the portfolio.
+  TenantRole enum gains VIEWER; new `policy.ts` module with 16 named
+  permission helpers (`canPostJournalEntries`, `canClosePeriods`,
+  `canDeleteTenant`, etc.). `requireAdmin()` migrated from email
+  allowlist to tenant-role check — meaning an admin in tenant A is no
+  longer automatically admin in tenant B. The legacy `isAdmin(user)`
+  sync helper still exists for UI button-visibility gating but Server
+  Actions go through `requireAdmin()` → `policy.canViewAdminPages(role)`.
+- **2026-05-27 (late)** — Team management at `/admin/team`. New
+  `TenantInvite` model with single-use 32-byte tokens + 14-day TTL;
+  /invites/accept verifies token + email match before creating the
+  membership. Email-mismatch refusal is the security boundary —
+  prevents invite-link hijacking.
+- **2026-05-27 (late)** — Transactional email via Resend. Decided
+  against the Stripe-SDK / Resend-SDK approach in favor of direct
+  HTTP — smaller bundle, fewer Next.js runtime conflicts, and the four
+  Stripe endpoints + Resend's single POST are stable enough to call
+  directly. LOGGED_ONLY fallback persists the email body to the
+  EmailDelivery table when no API key is set, so dev / pre-domain-
+  verification deploys still flow visibly.
+- **2026-05-27 (late)** — Stripe billing skeleton landed. Plans defined
+  in `src/lib/billing/plans.ts` with Price ids env-mapped per
+  deployment. Webhook signature verification with HMAC-SHA256 +
+  constant-time compare + 5-minute replay-tolerance window. Deferred:
+  plan-tier feature gating, usage-based metering, plan-change preview.
+  See `docs/billing-setup.md` for the operator runbook.
 
 (Historical decisions from before 2026-05-21 preserved below in the
 "Pre-2026-05-21 decisions" section. They cover the substrate /
