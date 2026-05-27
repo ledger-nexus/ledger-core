@@ -58,7 +58,7 @@ export default async function IncomeStatementPage({
             </button>
           </form>
           <Link
-            href={`/api/reports/income-statement/csv?from=${from}&to=${to}`}
+            href={`/api/reports/income-statement/csv?from=${from}&to=${to}${flat ? "&flat=1" : ""}`}
             className="h-9 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-700 hover:bg-ink-50"
           >
             Download CSV

@@ -35,11 +35,27 @@ export default async function TrialBalancePage({
 
   // Convert TB rows into the hierarchy helper's input shape. Filter out
   // pure-zero accounts so the tree doesn't render dead-weight nodes.
+  // Phase 7 fix: keep ANCESTOR rows of any active row even if they have
+  // no direct activity themselves — pure group accounts are load-bearing
+  // for the hierarchical subtotal.
+  const parentByCode = new Map<string, string | null>();
+  for (const r of tb.rows) parentByCode.set(r.accountCode, r.parentCode);
+  const ancestorsNeeded = new Set<string>();
+  for (const r of tb.rows) {
+    const d = new Decimal(r.debit.toString());
+    const c = new Decimal(r.credit.toString());
+    if (d.isZero() && c.isZero()) continue;
+    let cursor = r.parentCode;
+    while (cursor && !ancestorsNeeded.has(cursor)) {
+      ancestorsNeeded.add(cursor);
+      cursor = parentByCode.get(cursor) ?? null;
+    }
+  }
   const flatRows: FlatAccountRow[] = tb.rows
     .filter((r) => {
       const d = new Decimal(r.debit.toString());
       const c = new Decimal(r.credit.toString());
-      return !d.isZero() || !c.isZero();
+      return !d.isZero() || !c.isZero() || ancestorsNeeded.has(r.accountCode);
     })
     .map((r) => ({
       code: r.accountCode,
@@ -79,7 +95,7 @@ export default async function TrialBalancePage({
             </button>
           </form>
           <Link
-            href={`/api/reports/trial-balance/csv?asOf=${asOf}`}
+            href={`/api/reports/trial-balance/csv?asOf=${asOf}${flat ? "&flat=1" : ""}`}
             className="h-9 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-700 hover:bg-ink-50"
           >
             Download CSV
