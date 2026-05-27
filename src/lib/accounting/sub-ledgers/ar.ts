@@ -185,6 +185,16 @@ export async function applyArPayment(
     const newBalance = current.minus(applied);
     const nextStatus = newBalance.isZero() ? "APPLIED" : "PARTIAL";
 
+    // SECURITY (TOCTOU race fix): the SELECT above + the UPDATE below
+    // is the classic time-of-check / time-of-use window. Under Postgres
+    // READ COMMITTED (Prisma's default), two concurrent transactions
+    // could both observe currentBalance = N, both pass the
+    // "applied <= current" check, and both UPDATE — over-applying.
+    // Optimistic-concurrency guard: the UPDATE only succeeds when the
+    // currentBalance still matches what we read. updateMany returns
+    // count=0 if another transaction already raced past us; we throw
+    // and the surrounding $transaction rolls back the arApplication
+    // INSERT atomically. The caller retries.
     const application = await tx.arApplication.create({
       data: {
         tenantId: item.tenantId,
@@ -196,13 +206,24 @@ export async function applyArPayment(
       select: { id: true },
     });
 
-    await tx.arOpenItem.update({
-      where: { id: input.openItemId },
+    const updated = await tx.arOpenItem.updateMany({
+      where: {
+        id: input.openItemId,
+        // Guard: only update if the balance hasn't changed since we
+        // read it. Decimal-precise comparison via toFixed(4) — same
+        // precision the DB column uses.
+        currentBalance: current.toFixed(4),
+      },
       data: {
         currentBalance: newBalance.toFixed(4),
         status: nextStatus,
       },
     });
+    if (updated.count === 0) {
+      throw new Error(
+        `Concurrent update on AR item ${input.openItemId} — payment was applied to a stale balance. Retry the request.`
+      );
+    }
 
     return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
   });

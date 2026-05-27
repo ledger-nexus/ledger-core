@@ -60,10 +60,29 @@ beforeAll(async () => {
   await prisma.tenantMembership.create({
     data: { tenantId: tenant.id, userId: user.id, role: "OWNER" },
   });
+  // The CSV route now goes through getCurrentScope(), which requires
+  // the tenant to have at least one entity (the scope fallback target).
+  // Add a placeholder entity so the smoke test reaches the report.
+  await prisma.currency.upsert({
+    where: { code: "USD" },
+    create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
+    update: {},
+  });
+  await prisma.legalEntity.create({
+    data: {
+      tenantId: tenant.id,
+      code: `RPT-${SUFFIX}`,
+      name: "Report CSV Entity",
+      functionalCurrencyId: "USD",
+    },
+  });
 });
 
 afterAll(async () => {
   await prisma.auditLog.deleteMany({
+    where: { tenantId: tenant.id },
+  });
+  await prisma.legalEntity.deleteMany({
     where: { tenantId: tenant.id },
   });
   await prisma.tenantMembership.deleteMany({

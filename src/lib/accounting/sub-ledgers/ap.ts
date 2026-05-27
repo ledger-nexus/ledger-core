@@ -169,6 +169,8 @@ export async function applyApPayment(
     const newBalance = current.minus(applied);
     const nextStatus = newBalance.isZero() ? "APPLIED" : "PARTIAL";
 
+    // SECURITY (TOCTOU race fix): optimistic-concurrency guard on the
+    // currentBalance — see applyArPayment for full rationale.
     const application = await tx.apApplication.create({
       data: {
         tenantId: item.tenantId,
@@ -180,13 +182,21 @@ export async function applyApPayment(
       select: { id: true },
     });
 
-    await tx.apOpenItem.update({
-      where: { id: input.openItemId },
+    const updated = await tx.apOpenItem.updateMany({
+      where: {
+        id: input.openItemId,
+        currentBalance: current.toFixed(4),
+      },
       data: {
         currentBalance: newBalance.toFixed(4),
         status: nextStatus,
       },
     });
+    if (updated.count === 0) {
+      throw new Error(
+        `Concurrent update on AP item ${input.openItemId} — payment was applied to a stale balance. Retry the request.`
+      );
+    }
 
     return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
   });

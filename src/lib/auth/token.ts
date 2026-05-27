@@ -100,7 +100,14 @@ export async function resolveBearerToken(
   return null;
 }
 
-function constantTimeEquals(a: string, b: string): boolean {
+/**
+ * Constant-time string equality. Returns false immediately on length
+ * mismatch (a length-leak side-channel exists there, but for high-entropy
+ * tokens the attack surface is negligible compared to the upside of
+ * early-exit on the common-case miss). Exported so other token-compare
+ * sites (admin/reset, future endpoints) can reuse rather than reimplement.
+ */
+export function constantTimeEquals(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   try {
     return timingSafeEqual(Buffer.from(a), Buffer.from(b));

@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { resetAndReseedNorthwind } from "@/lib/seed/northwind";
+import { constantTimeEquals } from "@/lib/auth/token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,9 +30,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // SECURITY: constant-time token comparison. A `===` compare returns
+  // as soon as the first different byte is found, leaking how many
+  // leading characters of the token were correct (the classic timing
+  // attack on naive string equality). For high-entropy random tokens
+  // the attack is impractical, but this is hygiene worth fixing while
+  // we're in the codebase.
   const authHeader = req.headers.get("authorization") ?? "";
   const expected = `Bearer ${token}`;
-  if (authHeader !== expected) {
+  if (!constantTimeEquals(authHeader, expected)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
