@@ -492,6 +492,205 @@ export async function disposeFixedAsset(
   return results;
 }
 
+// ─── Impairment write-down (ASC 360-10 Step 2) ─────────────────────────────
+//
+// When the AI screener flags an asset as potentially impaired AND the
+// CPA runs a formal Step 1 recoverability test off-system AND finds
+// the carrying value exceeds undiscounted future cash flows, the
+// company recognizes an impairment loss measured in Step 2:
+//
+//   Impairment loss = Carrying value − Fair value
+//
+// The JE per book:
+//   DR Impairment Loss      <amount>
+//   CR Accumulated Depreciation (or Accumulated Impairment) <amount>
+//
+// We CR the existing accumDepreciationAccountCode for simplicity —
+// the contra-asset account is already wired; lumping accumulated
+// impairment in with accumulated depreciation is GAAP-acceptable
+// (the alternative is a separate "1715 Accumulated Impairment" account,
+// which firms with material impairment activity prefer). Lumping is the
+// default; the caller can override with impairmentLossAccountCode.
+//
+// Per-book amounts differ:
+//   - GAAP typically impairs to fair value.
+//   - TAX BOOK usually does NOT impair (tax basis is depreciation-based,
+//     not fair-value-based). The CPA can pass 0 for the tax book to skip.
+//   - IFRS uses recoverable amount (higher of fair value less costs to
+//     sell, or value in use) — measurement may differ from US GAAP.
+//
+// Catch-up: like disposal, we run depreciation through the impairment
+// date first so the impairment is measured against the up-to-date NBV
+// rather than the stale value.
+//
+// Asset stays IN_SERVICE — only its NBV decreases. Subsequent
+// depreciation runs use the new NBV over the remaining useful life
+// (which the caller may also want to revise via the AI useful-life
+// classifier; that's a separate workflow).
+export interface ImpairFixedAssetInput {
+  entityCode: string;
+  assetCode: string;
+  /** Date the impairment is recognized. */
+  impairmentDate: Date;
+  /**
+   * Per-book impairment amounts. Each maps a Book.code to the loss
+   * amount (positive number). 0 or absent = no impairment on that book.
+   * Refused if amount > current NBV on that book (can't write below 0).
+   */
+  amountByBook: Record<string, Decimal | string | number>;
+  /** Override the default impairment-loss expense account ("8200"). */
+  impairmentLossAccountCode?: string;
+  /** Optional pointer back to the AI screening that triggered the measurement. */
+  sourceSuggestionId?: string;
+  source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
+  /** Same multi-tenancy scope semantic as disposeFixedAsset. */
+  tenantId?: string;
+}
+
+export interface ImpairmentResult {
+  bookCode: string;
+  entryNumber: string;
+  /** NBV BEFORE the impairment (after catch-up depreciation). */
+  nbvBeforeImpairment: Decimal;
+  /** Loss amount actually recognized for this book. */
+  lossAmount: Decimal;
+  /** NBV AFTER the impairment write-down. */
+  nbvAfterImpairment: Decimal;
+}
+
+export async function impairFixedAsset(
+  prisma: PrismaClient,
+  input: ImpairFixedAssetInput
+): Promise<ImpairmentResult[]> {
+  const asset = await prisma.fixedAsset.findFirstOrThrow({
+    where: {
+      code: input.assetCode,
+      entity: input.tenantId
+        ? { code: input.entityCode, tenantId: input.tenantId }
+        : { code: input.entityCode },
+    },
+    include: {
+      bookAttributes: {
+        include: { book: { select: { code: true, reportingCurrencyId: true } } },
+      },
+    },
+  });
+  if (asset.status === "DISPOSED") {
+    throw new Error(
+      `Asset ${input.assetCode} is DISPOSED; impair a disposed asset by reversing its disposal first.`
+    );
+  }
+
+  const impairmentLossAccount = input.impairmentLossAccountCode ?? "8200";
+  const cost = toDecimal(asset.acquisitionCost);
+
+  // Catch up depreciation per book BEFORE measuring impairment.
+  for (const attrs of asset.bookAttributes) {
+    await runDepreciation(prisma, {
+      tenantId: input.tenantId,
+      entityCode: input.entityCode,
+      bookCode: attrs.book.code,
+      throughDate: input.impairmentDate,
+      source: input.source ?? "SYSTEM",
+    });
+  }
+
+  // Re-read for fresh accumulatedDepreciation per book.
+  const refreshed = await prisma.fixedAsset.findFirstOrThrow({
+    where: { id: asset.id },
+    include: {
+      bookAttributes: {
+        include: { book: { select: { code: true, reportingCurrencyId: true } } },
+      },
+    },
+  });
+
+  const results: ImpairmentResult[] = [];
+
+  for (const attrs of refreshed.bookAttributes) {
+    const rawAmount = input.amountByBook[attrs.book.code];
+    if (rawAmount == null) continue; // book not impaired this round
+    const lossAmount = toDecimal(rawAmount);
+    if (lossAmount.lessThanOrEqualTo(0)) continue; // skip 0 / negative
+
+    const accumDep = toDecimal(attrs.accumulatedDepreciation);
+    const nbv = cost.minus(accumDep);
+
+    // Refuse writes below 0. Can't impair more than the asset is worth
+    // on the books for this book.
+    if (lossAmount.greaterThan(nbv)) {
+      throw new Error(
+        `Impairment ${lossAmount.toFixed(2)} on book ${attrs.book.code} exceeds NBV ${nbv.toFixed(2)} — can't write below zero. Reduce the impairment or run depreciation first.`
+      );
+    }
+
+    // Post the impairment JE: DR Impairment Loss / CR Accum Dep.
+    const result = await postJournalEntry(prisma, {
+      tenantId: input.tenantId,
+      entityCode: input.entityCode,
+      bookCode: attrs.book.code,
+      currencyCode: attrs.book.reportingCurrencyId,
+      documentDate: input.impairmentDate,
+      memo: `Impairment write-down — ${refreshed.code} (loss ${lossAmount.toFixed(2)})`,
+      source: input.source ?? "SYSTEM",
+      sourceRecordType: "FixedAssetImpairment",
+      sourceRecordId: refreshed.id,
+      extensions: {
+        assetCode: refreshed.code,
+        lossAmount: lossAmount.toFixed(2),
+        nbvBeforeImpairment: nbv.toFixed(2),
+        nbvAfterImpairment: nbv.minus(lossAmount).toFixed(2),
+        ...(input.sourceSuggestionId
+          ? { sourceSuggestionId: input.sourceSuggestionId }
+          : {}),
+      },
+      lines: [
+        {
+          accountCode: impairmentLossAccount,
+          debit: lossAmount.toFixed(4),
+          description: `Impairment loss — ${refreshed.code}`,
+        },
+        {
+          accountCode: attrs.accumDepreciationAccountCode,
+          credit: lossAmount.toFixed(4),
+          description: `Accumulated impairment — ${refreshed.code}`,
+        },
+      ],
+    });
+
+    // Bump accumulatedDepreciation so future runDepreciation respects
+    // the new NBV. The asset's salvage + useful life stay as-is;
+    // depreciation simply continues from the lower NBV.
+    await prisma.fixedAssetBookAttributes.update({
+      where: {
+        assetId_bookId: {
+          assetId: refreshed.id,
+          bookId: attrs.bookId,
+        },
+      },
+      data: {
+        accumulatedDepreciation: accumDep.plus(lossAmount).toFixed(4),
+      },
+    });
+
+    results.push({
+      bookCode: attrs.book.code,
+      entryNumber: result.entryNumber,
+      nbvBeforeImpairment: nbv,
+      lossAmount,
+      nbvAfterImpairment: nbv.minus(lossAmount),
+    });
+  }
+
+  if (results.length === 0) {
+    throw new Error(
+      "No book had a positive impairment amount — nothing to post. Pass amountByBook with at least one positive value."
+    );
+  }
+
+  return results;
+}
+
 // Net book value per (entity, book) = sum of acquisitionCost - accumDep across in-service assets.
 export async function netBookValue(
   prisma: PrismaClient,
