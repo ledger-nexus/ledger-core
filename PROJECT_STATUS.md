@@ -295,9 +295,14 @@ shipped except where noted.
 - [ ] Gusto connector → payroll JE via posting-rules
 - [ ] Bill.com → AP open items
 
-**fa-amort (v0.7 / v0.8 roadmap):**
+**fa-amort (v0.8 roadmap):**
 - [x] MACRS lookup tables (3/5/7/15-year half-year). Shipped 2026-05-27.
-- [ ] Disposal flow with JE (write off NBV, recognize gain/loss)
+- [x] Disposal flow with JE (write off NBV, recognize gain/loss).
+      Shipped 2026-05-27 (latest). New POST
+      /api/internal/fixed-asset/dispose endpoint in ledger-core +
+      disposeAssetAction + DisposeForm on /fixed-assets/[id]. The
+      lifecycle is now complete: acquire → depreciate (SL / DDB /
+      MACRS) → dispose with catch-up + gain/loss recognition.
 - [ ] Impairment write-down flow (the AI screener exists; no JE path)
 - [ ] Bonus depreciation / §179
 - [ ] SL crossover convention for DDB
@@ -427,6 +432,17 @@ shipped except where noted.
   recovery spans MORE than usefulLifeMonths because of the half-year
   stub year (5-year MACRS = 6 calendar years of recovery). 25 tests
   asserting Year 1..N totals match the IRS table exactly.
+- **2026-05-27 (latest)** — Fixed-asset disposal flow. ledger-core
+  already had disposeFixedAsset under sub-ledgers; this commit added
+  the HTTP boundary (POST /api/internal/fixed-asset/dispose) and the
+  fa-amort wiring (bridge helper, Server Action, UI form). Also
+  threaded tenantId through disposeFixedAsset + runDepreciation so
+  same-coded entities across tenants can't be cross-leaked. The
+  disposal JE per book: Dr Cash (proceeds) + Dr Accum Dep (zero out
+  contra) + Cr Asset (gross cost) + Dr-or-Cr Gain/Loss (balancing
+  line). Gain/loss differs per book because accumulated depreciation
+  differs — a clean BTD demonstration where a temporary timing
+  difference flips to permanent at disposal.
 
 (Historical decisions from before 2026-05-21 preserved below in the
 "Pre-2026-05-21 decisions" section. They cover the substrate /
