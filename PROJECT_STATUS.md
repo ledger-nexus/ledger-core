@@ -19,7 +19,7 @@ the accounting stack:
 | `ledger-core`   | Universal substrate. GL, sub-ledgers, ERP mappers, UI, tax | v1.21  | 3000 |
 | `recon`         | AI-assisted bank reconciliation                            | v1.0   | 3001 |
 | `revenue-rec`   | ASC 606 / IFRS 15 revenue recognition                      | v0.3   | 3002 |
-| `integrations`  | Third-party data feeds (Plaid)                             | v0.1   | 3003 |
+| `integrations`  | Third-party data feeds (Plaid)                             | v0.2   | 3003 |
 | `fa-amort`      | Fixed assets + depreciation + AI capex/UL/impairment       | v0.6   | 3004 |
 
 All four companion repos talk to `ledger-core` through HTTP boundary
@@ -101,11 +101,18 @@ prefix. Every extraction persists to `AiExtractionSuggestion` for audit.
 Month-end recognition posting goes through the same HTTP bridge as recon
 adjustments.
 
-### `integrations` (v0.1 — Plaid bank-feed)
+### `integrations` (v0.2 — Plaid bank-feed + webhooks)
 
 The connector pattern + one real connector. Plaid `/transactions/sync`
 polling, idempotent dedup via `externalRef`, cursor advances only on
 SUCCESS. Sync runner orchestrates fetch → stage → map → promote.
+
+Plaid webhooks (v0.2, 2026-05-28): POST /api/plaid/webhook receives
+SYNC_UPDATES_AVAILABLE + related events, matches by item_id, and
+triggers an immediate runConnectionSync (triggerType=WEBHOOK).
+PlaidWebhookEvent audit table records every payload regardless of
+outcome. URL-token shared-secret auth for v1; ES256 JWT verification
+is a v2 follow-up.
 
 Pushes to recon via HTTP bridge (`POST /api/internal/bank-lines`),
 not direct DB write. Symmetric with how recon pushes to ledger-core.
@@ -310,8 +317,18 @@ shipped except where noted.
       OVER_TIME_USAGE patterns from contract text (today: manual via
       setUsagePricingAction)
 
-**integrations (v0.2 roadmap):**
-- [ ] Plaid webhook receivers (`TRANSACTIONS_UPDATES_AVAILABLE`)
+**integrations (v0.2 — webhooks landed; v0.3 roadmap):**
+- [x] Plaid webhook receivers. Shipped 2026-05-28. POST
+      /api/plaid/webhook with URL-token shared-secret auth.
+      parseWebhookEvent on the Plaid connector routes
+      SYNC_UPDATES_AVAILABLE / DEFAULT_UPDATE / INITIAL_UPDATE /
+      HISTORICAL_UPDATE / TRANSACTIONS_REMOVED through to
+      runConnectionSync with triggerType=WEBHOOK; ITEM / ERROR
+      marks Connection.status=ERROR. Every payload audited via
+      PlaidWebhookEvent regardless of outcome.
+- [ ] Plaid JWT signature verification (the v2 auth posture; v1
+      uses URL-token shared secret. Plaid signs each webhook with
+      ES256; full key-fetch + verify is a follow-up.)
 - [ ] Scheduled syncs via pg_boss
 - [ ] Stripe connector → AR open items
 - [ ] Gusto connector → payroll JE via posting-rules
@@ -471,6 +488,26 @@ shipped except where noted.
   line). Gain/loss differs per book because accumulated depreciation
   differs — a clean BTD demonstration where a temporary timing
   difference flips to permanent at disposal.
+- **2026-05-28** — Plaid webhook receivers in integrations. Real-time
+  bank-feed updates replace polling. Decisions:
+    - URL-token shared-secret auth for v1 (vs Plaid's ES256 JWT
+      verification). The webhook URL is configured in the Plaid
+      dashboard with a `?token=` query param; the route refuses
+      mismatches via constant-time compare. Equivalent posture to
+      INTERNAL_API_TOKEN we use elsewhere. Full JWT verification
+      (fetch key from /webhook_verification_key/get, verify
+      ES256 signature over body, check request_body_sha256 claim)
+      lands in a v2 follow-up.
+    - Always 2xx on auth-pass (vs returning 500 on unrouted /
+      unknown event types). Plaid retries non-2xx for 24h; we
+      persist + ack to prevent retry storms when Plaid adds new
+      event types.
+    - Idempotency via the /transactions/sync cursor — duplicate
+      "new transactions available" webhooks just produce zero new
+      records on the second sync. No explicit dedup needed.
+    - parseWebhookEvent on the connector returns
+      { records: [], needsImmediateFetch: true } for transactions
+      events. Plaid webhooks are notifications, not record payloads.
 - **2026-05-27 (latest+++)** — Multi-currency FX revaluation cycle in
   ledger-core. Period-end JE that adjusts foreign-currency balance-
   sheet account carrying values to the CLOSE rate at as-of date.
