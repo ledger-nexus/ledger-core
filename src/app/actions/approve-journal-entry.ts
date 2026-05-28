@@ -33,6 +33,8 @@ import {
 } from "@/lib/accounting/approval";
 import { PeriodClosedError } from "@/lib/accounting/types";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import { sendJeApprovedEmail } from "@/lib/email/templates/je-approved";
+import { sendJeRejectedEmail } from "@/lib/email/templates/je-rejected";
 
 export interface ApprovalActionState {
   ok: boolean;
@@ -75,6 +77,12 @@ export async function approveJournalEntryAction(
         transition: `${result.previousStatus} -> ${result.newStatus}`,
       },
     });
+
+    // Notify the submitter. Failure-isolated — a Resend outage or
+    // missing env doesn't break the approval flow. The email helper
+    // already swallows its own errors; we just await it before
+    // revalidating so the EmailDelivery row lands first.
+    await notifySubmitter(result.entryId, tenant.id, "approved", user.displayName);
 
     revalidatePath("/journal-entries");
     revalidatePath("/journal-entries/pending");
@@ -128,16 +136,90 @@ export async function rejectJournalEntryAction(
       },
     });
 
+    await notifySubmitter(
+      result.entryId,
+      tenant.id,
+      "rejected",
+      user.displayName,
+      input.reason
+    );
+
     revalidatePath("/journal-entries");
     revalidatePath("/journal-entries/pending");
     revalidatePath(`/journal-entries/${result.entryId}`);
 
     return {
       ok: true,
-      message: `Rejected ${result.entryNumber}. The submitter sees the reason on the entry detail page.`,
+      message: `Rejected ${result.entryNumber}. The submitter has been emailed.`,
     };
   } catch (e) {
     return mapError(e);
+  }
+}
+
+// ─── Submitter notification ────────────────────────────────────────────────
+//
+// Fetches the entry + submitter + tenant info needed for the email
+// template, then fires the right template. Wrapped in try/catch so a
+// missing submitter, missing tenant, or email-send failure never breaks
+// the approve/reject action (the lifecycle has already committed).
+async function notifySubmitter(
+  entryId: string,
+  tenantId: string,
+  outcome: "approved" | "rejected",
+  actorName: string,
+  rejectionReason?: string
+): Promise<void> {
+  try {
+    const entry = await prisma.journalEntry.findFirst({
+      where: { id: entryId, tenantId },
+      select: {
+        entryNumber: true,
+        memo: true,
+        submittedById: true,
+        tenant: { select: { name: true } },
+      },
+    });
+    if (!entry) return; // shouldn't happen — we just operated on it
+    if (!entry.submittedById) return; // no submitter to notify (direct admin post)
+
+    const submitter = await prisma.user.findUnique({
+      where: { id: entry.submittedById },
+      select: { email: true, displayName: true, isActive: true },
+    });
+    if (!submitter || !submitter.isActive) return;
+
+    const baseUrl = process.env.APP_BASE_URL || "";
+    const entryUrl = `${baseUrl}/journal-entries/${entryId}`;
+
+    if (outcome === "approved") {
+      await sendJeApprovedEmail({
+        to: submitter.email,
+        recipientName: submitter.displayName,
+        approverName: actorName,
+        entryNumber: entry.entryNumber,
+        tenantName: entry.tenant.name,
+        memo: entry.memo,
+        entryUrl,
+        tenantId,
+        entryId,
+      });
+    } else {
+      await sendJeRejectedEmail({
+        to: submitter.email,
+        recipientName: submitter.displayName,
+        rejectorName: actorName,
+        entryNumber: entry.entryNumber,
+        tenantName: entry.tenant.name,
+        memo: entry.memo,
+        reason: rejectionReason ?? "(no reason recorded)",
+        entryUrl,
+        tenantId,
+        entryId,
+      });
+    }
+  } catch (e) {
+    console.error("[je-approval] submitter notification failed:", e);
   }
 }
 
