@@ -108,10 +108,11 @@ SUCCESS. Sync runner orchestrates fetch → stage → map → promote.
 Pushes to recon via HTTP bridge (`POST /api/internal/bank-lines`),
 not direct DB write. Symmetric with how recon pushes to ledger-core.
 
-### `fa-amort` (v0.6 — fixed assets + 3 AI surfaces)
+### `fa-amort` (v0.7 — fixed assets + 3 AI surfaces + MACRS)
 
 Deterministic depreciation math (straight-line + double-declining with
-salvage floor). MACRS lookup tables are v0.3 work. Server Action loads
+salvage floor + MACRS 3/5/7/15-year half-year, shipped 2026-05-27).
+Server Action loads
 asset → schedules → posts one JE per (asset × book × month) through the
 transactional ledger-core endpoint (no drift window between JE post and
 book-attrs update).
@@ -241,19 +242,21 @@ the polish + harder pieces:
       users more than light ones without a custom invoicing flow.
 - [ ] **Marketing site.** Separate Next.js project (or static site).
       Pricing page, demo flow, /sign-up CTA.
-- [ ] **Email templates beyond invites.** Period close 3 days out,
-      AI suggestion ready for review, sync failed, JE approved /
-      rejected (notify the submitter), weekly digest. Each is a small
-      typed wrapper around `sendEmail`.
+- [~] **Email templates beyond invites.** Shipped 2026-05-27 (later):
+      je_approved + je_rejected templates fire automatically from the
+      maker-checker Server Actions. Period close 3 days out, AI suggestion
+      ready, sync failed, weekly digest are still future work.
 - [ ] **Ownership transfer.** Currently OWNER can't be demoted /
       removed. Need a flow where current OWNER promotes another member,
       they accept, ownership atomically swaps. Schema-only change to
       `Tenant.ownerUserId` plus the migration UI.
-- [ ] **Companion-repo plan enforcement.** /admin/billing shows which
-      companion repos are included per plan; the companion repos
-      themselves don't check yet. Cross-repo enforcement needs each
-      companion to either mirror plans.ts or call a ledger-core internal
-      endpoint on every request.
+- [x] **Companion-repo plan enforcement.** Shipped 2026-05-27 (later).
+      Each companion repo (recon / revenue-rec / fa-amort / integrations)
+      now has `src/lib/auth/repo-access.ts` mirroring the plan catalog's
+      `availableRepos`. Dashboards show upgrade banner when not included;
+      high-cost Server Actions (Anthropic calls, sync runs, depreciation)
+      hard-refuse when `BILLING_ENFORCE_LIMITS=true`. revenue-rec + fa-amort
+      gated to Growth+; integrations gated to Scale.
 - [ ] **Withdraw your own pending JE.** Today the submitter can't
       cancel their own submission — has to ask an admin to reject it.
 - [ ] **Threshold-based JE approval.** Today requireJeApproval is
@@ -292,12 +295,13 @@ shipped except where noted.
 - [ ] Gusto connector → payroll JE via posting-rules
 - [ ] Bill.com → AP open items
 
-**fa-amort (v0.7 roadmap):**
-- [ ] MACRS lookup tables (3/5/7/15-year half-year)
+**fa-amort (v0.7 / v0.8 roadmap):**
+- [x] MACRS lookup tables (3/5/7/15-year half-year). Shipped 2026-05-27.
 - [ ] Disposal flow with JE (write off NBV, recognize gain/loss)
 - [ ] Impairment write-down flow (the AI screener exists; no JE path)
 - [ ] Bonus depreciation / §179
 - [ ] SL crossover convention for DDB
+- [ ] MACRS mid-quarter + mid-month conventions (real property)
 
 ---
 
@@ -401,6 +405,28 @@ shipped except where noted.
   required reason preserved on the row. ON_INSERT rules fire at
   approve time, not at submit (entry isn't really live until then).
   Tenant.requireJeApproval toggle defaults false for backwards compat.
+- **2026-05-27 (latest)** — JE approval emails. Submitter gets pinged
+  via Resend (je_approved / je_rejected templates) the moment an admin
+  acts on their submission. Failure-isolated — a Resend outage doesn't
+  break the approval flow. Without an API key, the LOGGED_ONLY
+  EmailDelivery row still lands so the operator can hand-deliver.
+- **2026-05-27 (latest)** — Companion-repo plan enforcement. Each
+  companion repo (recon / revenue-rec / fa-amort / integrations) now
+  mirrors the canonical plan-to-repo map in its own `repo-access.ts`.
+  Dashboards show an amber upgrade banner when not included; high-cost
+  Server Actions hard-refuse when `BILLING_ENFORCE_LIMITS=true`.
+  Decision: hardcode the plan-to-repo map in each companion rather
+  than HTTP-call ledger-core on every request — the catalog is stable
+  + the duplication is trivially audit-able. When the catalog changes,
+  update plans.ts + the four repo-access.ts files together.
+- **2026-05-27 (latest)** — MACRS in fa-amort. IRS Pub 946 Table A-1
+  half-year-convention percentages for 3 / 5 / 7 / 15-year property.
+  Monthly recognition: annual percentage / 12 with year-end month
+  absorbing rounding residual. Salvage value IGNORED (matches tax
+  practice — the table drives cumulative to 100% × cost). MACRS
+  recovery spans MORE than usefulLifeMonths because of the half-year
+  stub year (5-year MACRS = 6 calendar years of recovery). 25 tests
+  asserting Year 1..N totals match the IRS table exactly.
 
 (Historical decisions from before 2026-05-21 preserved below in the
 "Pre-2026-05-21 decisions" section. They cover the substrate /
