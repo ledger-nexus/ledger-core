@@ -18,7 +18,7 @@ the accounting stack:
 |-----------------|------------------------------------------------------------|--------|------|
 | `ledger-core`   | Universal substrate. GL, sub-ledgers, ERP mappers, UI, tax | v1.21  | 3000 |
 | `recon`         | AI-assisted bank reconciliation                            | v1.0   | 3001 |
-| `revenue-rec`   | ASC 606 / IFRS 15 revenue recognition                      | v0.2   | 3002 |
+| `revenue-rec`   | ASC 606 / IFRS 15 revenue recognition                      | v0.3   | 3002 |
 | `integrations`  | Third-party data feeds (Plaid)                             | v0.1   | 3003 |
 | `fa-amort`      | Fixed assets + depreciation + AI capex/UL/impairment       | v0.6   | 3004 |
 
@@ -85,11 +85,13 @@ sourced approvals post with `source: "AI_APPROVED"`.
 
 This was the first companion repo to prove the cross-repo bridge pattern.
 
-### `revenue-rec` (v0.2 — ASC 606 engine)
+### `revenue-rec` (v0.3 — ASC 606 engine + usage-based recognition)
 
 Deterministic core: SSP allocator + recognition schedule generator
-(POINT_IN_TIME + OVER_TIME_STRAIGHT). Penny-perfect rounding with last-
-period absorption.
+(POINT_IN_TIME + OVER_TIME_STRAIGHT + OVER_TIME_USAGE). Penny-perfect
+rounding with last-period absorption. OVER_TIME_USAGE rows accrete
+as consumption is recorded via the recordUsageAction UI on the
+contract detail page.
 
 AI contract extractor uses Claude Opus 4.7 (per CLAUDE.md: contract
 language is reasoning-heavy, do not downgrade for cost). `messages.parse`
@@ -280,13 +282,24 @@ shipped except where noted.
 - [ ] Multi-line adjustments (currently only cash + counter)
 
 **revenue-rec (v0.3 roadmap):**
-- [ ] OVER_TIME_USAGE pattern (currently errors)
-- [ ] OVER_TIME_MILESTONE pattern (currently errors)
+- [x] OVER_TIME_USAGE pattern. Shipped 2026-05-27 (latest+). Schema
+      gains PerformanceObligation.pricePerUnit + unitName +
+      RecognitionSchedule.usageQuantity. Schedule generator returns []
+      for this pattern; setUsagePricingAction + recordUsageAction
+      create schedule rows on-the-fly as consumption is reported.
+      UI: inline pricing + usage forms on /contracts/[id] below each
+      OVER_TIME_USAGE PO row.
+- [ ] OVER_TIME_MILESTONE pattern (still throws — named-completion-point
+      recognition is more involved than usage; needs milestone-level
+      inputs not just date math)
 - [ ] Variable consideration (expected value / most-likely-amount)
 - [ ] Contract modifications (cumulative catch-up vs prospective vs
       separate-contract)
 - [ ] Multi-book recognition basis differences (schema supports it; engine
       only emits US_GAAP)
+- [ ] AI extractor learns to pull pricePerUnit + unitName for
+      OVER_TIME_USAGE patterns from contract text (today: manual via
+      setUsagePricingAction)
 
 **integrations (v0.2 roadmap):**
 - [ ] Plaid webhook receivers (`TRANSACTIONS_UPDATES_AVAILABLE`)
@@ -443,6 +456,17 @@ shipped except where noted.
   line). Gain/loss differs per book because accumulated depreciation
   differs — a clean BTD demonstration where a temporary timing
   difference flips to permanent at disposal.
+- **2026-05-27 (latest+)** — OVER_TIME_USAGE recognition in revenue-rec.
+  Schedule generator returns [] for this pattern; rows accrete via
+  recordUsageAction as consumption is reported. Schema:
+  PerformanceObligation.pricePerUnit + unitName,
+  RecognitionSchedule.usageQuantity. Decision: don't pre-emit periods
+  (subscriptions with usage-based billing have no terminal date for
+  consumption, and we don't want to lock in a schedule that might
+  never materialize). Each recorded period creates a single PLANNED
+  RecognitionSchedule row that goes through the existing
+  postRecognitionAction → bridge path — no new posting infrastructure
+  needed.
 
 (Historical decisions from before 2026-05-21 preserved below in the
 "Pre-2026-05-21 decisions" section. They cover the substrate /
