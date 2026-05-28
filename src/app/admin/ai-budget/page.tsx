@@ -31,6 +31,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatMoney } from "@/lib/utils/format";
+import { prisma } from "@/lib/db";
 import {
   getCurrentMonthSpendByTenant,
   getRecentAlerts,
@@ -48,9 +49,24 @@ export default async function AiBudgetPage() {
     return <PermissionDenied reason={new NotAuthorizedError().message} />;
   }
 
-  const [spendRows, alerts] = await Promise.all([
+  const [spendRows, alerts, recentReports] = await Promise.all([
     getCurrentMonthSpendByTenant(),
     getRecentAlerts(50),
+    // Usage metering panel: last 30 days of daily reports across all
+    // tenants. Bounded by tenant count × 30 days; in practice ~50-150
+    // rows for a typical deployment.
+    prisma.aiUsageReport.findMany({
+      where: {
+        reportedAt: {
+          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        },
+      },
+      orderBy: { reportedAt: "desc" },
+      take: 100,
+      include: {
+        tenant: { select: { slug: true, name: true } },
+      },
+    }),
   ]);
 
   const monthKey = currentMonthKey();
@@ -171,6 +187,80 @@ export default async function AiBudgetPage() {
               <TBody>
                 {alerts.map((a, i) => (
                   <AlertRow key={`${a.tenantId}-${a.monthKey}-${a.source}-${a.threshold}-${i}`} alert={a} />
+                ))}
+              </TBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Stripe usage-meter reports (last 30 days)</CardTitle>
+          <span className="text-xs text-ink-500">
+            Daily cron POSTs cents-of-Anthropic-cost to Stripe&rsquo;s
+            billing-meter API at 01:00 UTC. <code className="font-mono">REPORTED</code> = Stripe accepted;{" "}
+            <code className="font-mono">LOGGED_ONLY</code> = no STRIPE_AI_METER_EVENT_NAME env (configure to enable);{" "}
+            <code className="font-mono">NO_SUBSCRIPTION</code> = free-tier tenant (nothing to bill);{" "}
+            <code className="font-mono">NO_USAGE</code> = zero AI calls that day;{" "}
+            <code className="font-mono">FAILED</code> = Stripe rejected — see errorMessage.
+          </span>
+        </CardHeader>
+        <CardContent className={recentReports.length === 0 ? "" : "p-0"}>
+          {recentReports.length === 0 ? (
+            <EmptyState
+              title="No reports on record"
+              description="The daily cron hasn't fired yet (or hasn't been wired). See docs/billing-setup.md for the Stripe Meter + Price setup."
+            />
+          ) : (
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Reported</TH>
+                  <TH>Day</TH>
+                  <TH>Tenant</TH>
+                  <TH>Status</TH>
+                  <TH className="text-right">Cents</TH>
+                  <TH>Stripe event id</TH>
+                  <TH>Error</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {recentReports.map((r) => (
+                  <TR key={r.id}>
+                    <TD className="text-xs font-mono text-ink-700">
+                      {r.reportedAt.toISOString().slice(0, 19).replace("T", " ")}
+                    </TD>
+                    <TD className="text-xs font-mono text-ink-700">{r.usageDay}</TD>
+                    <TD>
+                      <div className="text-sm text-ink-900">{r.tenant.name}</div>
+                      <div className="text-[11px] text-ink-500 font-mono">{r.tenant.slug}</div>
+                    </TD>
+                    <TD>
+                      <Badge
+                        tone={
+                          r.status === "REPORTED"
+                            ? "positive"
+                            : r.status === "FAILED"
+                              ? "negative"
+                              : r.status === "LOGGED_ONLY"
+                                ? "warning"
+                                : "neutral"
+                        }
+                      >
+                        {r.status}
+                      </Badge>
+                    </TD>
+                    <TD className="amount-cell text-right text-xs">
+                      {r.reportedCents.toLocaleString()}¢
+                    </TD>
+                    <TD className="text-[11px] text-ink-500 font-mono">
+                      {r.stripeEventId ?? "—"}
+                    </TD>
+                    <TD className="text-[11px] text-negative max-w-xs truncate" title={r.errorMessage ?? ""}>
+                      {r.errorMessage ?? ""}
+                    </TD>
+                  </TR>
                 ))}
               </TBody>
             </Table>

@@ -159,3 +159,67 @@ export interface StripeSubscription {
 export async function getSubscription(id: string): Promise<StripeSubscription> {
   return stripeGet<StripeSubscription>(`/subscriptions/${id}`);
 }
+
+// ─── Billing Meter Events ──────────────────────────────────────────────────
+//
+// For usage-based metering. The flow:
+//
+//   1. Operator creates a Meter in Stripe (dashboard or API) with
+//      event_name = STRIPE_AI_METER_EVENT_NAME env (e.g. "ai_token_cents")
+//      and aggregation_formula = "sum".
+//
+//   2. Operator creates a Price tied to that meter (e.g. "$0.01 per
+//      unit" for pass-through, or higher for markup) and adds it as
+//      a subscription item to each tenant's subscription.
+//
+//   3. This module's daily cron POSTs one meter event per tenant per
+//      day with the dollar-cents of Anthropic spend for that tenant
+//      on that day. Stripe sums events during the billing period and
+//      includes the total on the invoice.
+//
+// See https://docs.stripe.com/billing/subscriptions/usage-based for
+// the full Stripe-side setup.
+
+export interface StripeMeterEventInput {
+  /** Meter event_name configured in the Stripe Meter (e.g. "ai_token_cents"). */
+  eventName: string;
+  /** Stripe Customer id (cus_...) the usage belongs to. */
+  customerId: string;
+  /** Unit value to add to the meter — usually integer for "cents", "tokens", etc. */
+  value: number;
+  /**
+   * Unix timestamp (seconds). When omitted, Stripe uses request-receipt
+   * time. We pass an explicit time so we can re-report yesterday's
+   * usage even when the cron runs at 1am the next day.
+   */
+  timestamp?: number;
+  /** Optional client-side identifier for idempotency on Stripe's side. */
+  identifier?: string;
+}
+
+export interface StripeMeterEventResult {
+  identifier: string;
+  event_name: string;
+  payload: {
+    stripe_customer_id: string;
+    value: string;
+  };
+  created: number;
+}
+
+export async function createMeterEvent(
+  input: StripeMeterEventInput
+): Promise<StripeMeterEventResult> {
+  // Stripe expects "payload[stripe_customer_id]" + "payload[value]".
+  // The form encoder handles bracket notation for nested objects.
+  return stripePost<StripeMeterEventResult>("/billing/meter_events", {
+    event_name: input.eventName,
+    payload: {
+      stripe_customer_id: input.customerId,
+      // value must be a number-as-string for the Stripe wire format.
+      value: String(input.value),
+    },
+    ...(input.timestamp != null ? { timestamp: input.timestamp } : {}),
+    ...(input.identifier ? { identifier: input.identifier } : {}),
+  });
+}

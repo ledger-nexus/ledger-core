@@ -144,6 +144,7 @@ model Tenant {
   journalEntryNotes      JournalEntryNote[]
   invites                TenantInvite[]
   emailDeliveries        EmailDelivery[]
+  aiUsageReports         AiUsageReport[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -266,6 +267,46 @@ enum EmailDeliveryStatus {
   DELIVERED    // Provider accepted the message
   LOGGED_ONLY  // No RESEND_API_KEY set; row persisted for visibility
   FAILED       // Provider rejected (rate limit, bad recipient, etc.)
+}
+
+/// Daily report of AI token spend to Stripe's billing-meter API.
+/// One row per (tenant, usageDay) — the unique constraint dedupes
+/// retries so a cron that runs twice in one day doesn't double-bill.
+///
+/// Reports are in CENTS of our Anthropic cost. The Stripe Meter +
+/// Price configuration (in the Stripe dashboard) decides the markup —
+/// the typical setup is "$1 per 100 units" (pass-through), but the
+/// operator can set "$1 per 50 units" (2x markup) or any other ratio.
+///
+/// See docs/billing-setup.md for the operator runbook on configuring
+/// the Stripe Meter + Price.
+model AiUsageReport {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String                @db.Uuid
+  tenant          Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// "YYYY-MM-DD" (UTC). The calendar day the usage was for.
+  usageDay        String
+  /// Cents of Anthropic cost summed across all 3 AI suggestion tables
+  /// for this tenant on this usageDay. Zero is reported when there's
+  /// no usage (status=NO_USAGE) so the cron's progress is visible.
+  reportedCents   Int
+  /// Stripe meter event id (response.identifier when DELIVERED).
+  stripeEventId   String?
+  status          AiUsageReportStatus
+  errorMessage    String?
+  reportedAt      DateTime              @default(now())
+
+  @@unique([tenantId, usageDay])
+  @@index([tenantId, reportedAt])
+  @@map("ai_usage_report")
+}
+
+enum AiUsageReportStatus {
+  REPORTED         // Stripe accepted the meter event
+  NO_USAGE         // Tenant had zero AI cost that day (row persisted so cron progress is visible)
+  NO_SUBSCRIPTION  // Tenant has no stripeSubscriptionId (free tier — nothing to bill)
+  LOGGED_ONLY      // STRIPE_SECRET_KEY unset; row persisted for visibility but no Stripe call made
+  FAILED           // Stripe rejected (meter not configured, customer not found, etc.)
 }
 
 // Per-tenant API tokens for companion-repo authentication.

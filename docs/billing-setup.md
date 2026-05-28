@@ -71,12 +71,55 @@ APP_BASE_URL=https://app.example.com   # for success/cancel + portal return URLs
    active subscription.
 6. Click **Manage subscription** to confirm the portal opens.
 
+## 7. Usage-based metering (AI tokens)
+
+Optional but recommended once you have Growth/Scale customers: bill
+heavy AI users for their actual Anthropic spend on top of the flat
+plan price. Configuration:
+
+1. **Create a Meter** in Stripe dashboard (**Billing → Meters → +**):
+   - `event_name`: `ai_token_cents` (or any string — copy it to env)
+   - `aggregation_formula`: `Sum`
+   - `value`: keep `Value` (numeric value posted with each event)
+
+2. **Create a Price** linked to the meter (**Products → + Price** on an
+   existing product, or new product "AI usage"):
+   - Recurring, usage-based
+   - Choose the meter from step 1
+   - Pricing model: e.g. `$0.01 per unit` for pass-through (we report
+     cents-of-cost, $0.01/unit = $1 of customer cost per $1 we spent).
+     For markup, use `$0.015 per unit` (50% markup) etc.
+
+3. **Attach the metered Price** to each subscription that should include
+   usage billing. Either:
+   - Add as a second subscription item on the existing plan
+     (`subscriptions.create({ items: [{price: planPrice}, {price: meterPrice}] })`),
+     OR
+   - Edit existing subscriptions in the dashboard to add the meter Price.
+
+4. **Set env vars** in your deployment:
+   ```
+   STRIPE_AI_METER_EVENT_NAME=ai_token_cents   # must match step 1
+   CRON_SECRET=<random hex>                    # if not already set
+   ```
+
+5. **Verify the cron**: `vercel.json` includes a daily 01:00 UTC entry.
+   On the first run, check `/admin/ai-budget` — the "Stripe usage-meter
+   reports" section shows one row per tenant with status REPORTED /
+   NO_USAGE / NO_SUBSCRIPTION / LOGGED_ONLY / FAILED.
+
+6. **Manual catch-up** for a missed day:
+   ```bash
+   curl -H "Authorization: Bearer $CRON_SECRET" \
+        "https://<your-domain>/api/cron/report-ai-usage?usageDay=2026-05-15"
+   ```
+
+Idempotency: `AiUsageReport` is unique per `(tenantId, usageDay)` and
+the Stripe meter event itself uses `identifier=<tenantId>-<usageDay>`
+— retries don't double-bill on either side.
+
 ## What's deliberately not in this skeleton
 
-- **Usage-based metering.** Plans are flat-rate. AI token volume and
-  entity counts are not metered into Stripe. Two ways to add this later:
-  - Stripe Metered Billing with a daily cron that reports usage
-  - Stripe Tax + manual invoicing for high-touch customers
 - **Tax handling.** Add Stripe Tax in the dashboard if you sell to
   multiple jurisdictions; it doesn't require code changes.
 - **Trials.** Add `trial_period_days` to the price in Stripe and they
