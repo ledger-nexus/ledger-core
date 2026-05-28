@@ -168,6 +168,10 @@ export interface RunDepreciationInput {
   bookCode: string;
   throughDate: Date;
   source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
+  /** Multi-tenancy: tenant-scope the asset + entity lookup. See
+   * postJournalEntry's analogous parameter. Phase 4b made entity codes
+   * unique per-tenant; this argument disambiguates the lookup. */
+  tenantId?: string;
 }
 
 export interface RunDepreciationResult {
@@ -187,7 +191,9 @@ export async function runDepreciation(
 
   const assets = await prisma.fixedAsset.findMany({
     where: {
-      entity: { code: input.entityCode },
+      entity: input.tenantId
+        ? { code: input.entityCode, tenantId: input.tenantId }
+        : { code: input.entityCode },
       status: "IN_SERVICE",
     },
     include: {
@@ -262,6 +268,7 @@ export async function runDepreciation(
     if (amount.lessThanOrEqualTo(0)) continue;
 
     const result = await postJournalEntry(prisma, {
+      tenantId: input.tenantId,
       entityCode: input.entityCode,
       bookCode: input.bookCode,
       currencyCode: book.reportingCurrencyId,
@@ -334,6 +341,14 @@ export interface DisposeFixedAssetInput {
   proceedsCashAccountCode?: string; // default "1000"
   gainLossAccountCode?: string; // default "8100"
   source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
+
+  // Multi-tenancy: when provided, the asset + entity lookup is scoped
+  // to this tenantId and the resulting JE posts assert the same scope.
+  // External callers (the /api/internal/fixed-asset/dispose endpoint)
+  // resolve tenantId from the Bearer token + pass it here. Legacy seed
+  // / single-tenant scripts can omit it; the lookup falls back to
+  // findFirst by entity.code (acceptable while only one tenant exists).
+  tenantId?: string;
 }
 
 export interface DisposalResult {
@@ -351,7 +366,9 @@ export async function disposeFixedAsset(
   const asset = await prisma.fixedAsset.findFirstOrThrow({
     where: {
       code: input.assetCode,
-      entity: { code: input.entityCode },
+      entity: input.tenantId
+        ? { code: input.entityCode, tenantId: input.tenantId }
+        : { code: input.entityCode },
     },
     include: {
       bookAttributes: {
@@ -372,6 +389,7 @@ export async function disposeFixedAsset(
   // the disposal JE captures the up-to-date accumulated depreciation.
   for (const attrs of asset.bookAttributes) {
     await runDepreciation(prisma, {
+      tenantId: input.tenantId,
       entityCode: input.entityCode,
       bookCode: attrs.book.code,
       throughDate: input.disposalDate,
@@ -434,6 +452,7 @@ export async function disposeFixedAsset(
     }
 
     const result = await postJournalEntry(prisma, {
+      tenantId: input.tenantId,
       entityCode: input.entityCode,
       bookCode: attrs.book.code,
       currencyCode: attrs.book.reportingCurrencyId,
