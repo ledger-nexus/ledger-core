@@ -271,13 +271,22 @@ The accounting depth is what makes this defensible. None of this is
 shipped except where noted.
 
 **ledger-core:**
-- [ ] FX gain/loss on monthly currency revaluation
-- [ ] Multi-currency revaluation cycle
-- [ ] JE approval workflow (maker-checker — currently anyone with access
-      can post)
+- [x] FX gain/loss + multi-currency revaluation cycle. Shipped
+      2026-05-27 (latest+++). previewFxRevaluation +
+      postFxRevaluation. /reports/fx-revaluation page with
+      preview → post. CLOSE rate type, account-level aggregation,
+      one JE per cycle, deterministic lineage record-id makes
+      re-runs naturally idempotent (carrying value after first
+      run already matches revalued).
+- [x] JE approval workflow (shipped earlier in maker-checker commit).
 
 **recon:**
-- [ ] Statement-level `RECONCILED` status with lock after 100% resolved
+- [x] Statement-level `RECONCILED` status with lock after 100%
+      resolved. Shipped 2026-05-27 (latest++). New BankStatement.status
+      enum + reconciledAt/By columns. assertStatementOpen helper
+      wired into every mutating action (propose / decide / ignore /
+      adjustment). Reconcile button on /statements/[id] when
+      fullyResolved; admin-only Reopen button with reason input.
 - [ ] Bulk approve / bulk ignore by description regex
 - [ ] Multi-line adjustments (currently only cash + counter)
 
@@ -462,6 +471,32 @@ shipped except where noted.
   line). Gain/loss differs per book because accumulated depreciation
   differs — a clean BTD demonstration where a temporary timing
   difference flips to permanent at disposal.
+- **2026-05-27 (latest+++)** — Multi-currency FX revaluation cycle in
+  ledger-core. Period-end JE that adjusts foreign-currency balance-
+  sheet account carrying values to the CLOSE rate at as-of date.
+  Decisions:
+    - ACCOUNT-LEVEL aggregation (vs LINE-LEVEL): each account's net
+      foreign-currency balance revalues as a group. AR/AP at real
+      firms often does line-level so gains on appreciated invoices
+      don't mask losses on depreciated ones in the same account.
+      Acceptable v1 simplification; future work tracked.
+    - ONE JE per cycle (vs N per account): simpler audit trail.
+      Internal natural offset is balanced by construction (Σdebits =
+      Σcredits when delta is signed via normalBalance).
+    - CLOSE rate type only. AVG (for P&L translation during
+      consolidation) composes the same primitive separately.
+    - Deterministic lineage record-id (`<entity>:<book>:<asOfDate>`).
+      Re-runs on the same date produce zero deltas naturally — the
+      carrying value already matches revalued after the first run.
+      No need for explicit dedup.
+    - Skips REVENUE / EXPENSE accounts. P&L accounts translate at
+      AVG during consolidation, not at CLOSE here.
+- **2026-05-27 (latest++)** — RECONCILED statement lock in recon. New
+  BankStatement.status enum with OPEN | RECONCILED. The lock helper
+  (assertStatementOpen) is called by every mutating action; reconcile
+  is MEMBER+, reopen is ADMIN+. Refusing 100%-of-the-time when locked
+  closes the most common CPA-side anxiety ("did anyone touch this
+  after I signed off?").
 - **2026-05-27 (latest++)** — Impairment write-down flow in fa-amort.
   Parallels disposal: catch up depreciation, then post per-book JE
   (Dr Impairment Loss / Cr Accum Dep). Decisions:
