@@ -164,6 +164,27 @@ async function applySubscriptionState(sub: StripeSubscriptionObject): Promise<vo
     planKey = findPlanByPriceId(priceId)?.key ?? null;
   }
 
+  // Resolve the plan's default AI spend cap. If the tenant has no
+  // explicit override (monthlyAiSpendCapUsd IS NULL), seed it from
+  // the plan's default so the companion repos enforce a plan-appropriate
+  // cap. Explicit operator overrides are sticky — we never clobber
+  // a non-null column.
+  const plan = planKey ? findPlanByPriceId(priceId ?? "") ?? null : null;
+  // Fall back to the catalog lookup-by-key when lookup_key is present
+  // but findPlanByPriceId missed it.
+  const planFromKey = planKey
+    ? (await import("@/lib/billing/plans")).findPlan(planKey)
+    : null;
+  const planDefaultCap =
+    plan?.defaultAiSpendCapUsd ?? planFromKey?.defaultAiSpendCapUsd ?? null;
+
+  const existing = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { monthlyAiSpendCapUsd: true },
+  });
+  const shouldSeedCap =
+    existing?.monthlyAiSpendCapUsd == null && planDefaultCap != null;
+
   await prisma.tenant.update({
     where: { id: tenantId },
     data: {
@@ -171,6 +192,7 @@ async function applySubscriptionState(sub: StripeSubscriptionObject): Promise<vo
       subscriptionStatus: sub.status,
       currentPeriodEnd: new Date(sub.current_period_end * 1000),
       billingPlan: planKey,
+      ...(shouldSeedCap ? { monthlyAiSpendCapUsd: planDefaultCap } : {}),
     },
   });
 }

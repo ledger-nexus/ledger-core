@@ -34,6 +34,10 @@ import {
 } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { sendInviteEmail } from "@/lib/email/templates/invite";
+import {
+  assertCanInviteUser,
+  PlanLimitExceededError,
+} from "@/lib/billing/limits";
 import type { TenantRole } from "@prisma/client";
 
 // 14-day default invite TTL. Long enough that vacation doesn't lose
@@ -86,6 +90,11 @@ export async function inviteMemberAction(
         message: "Role must be ADMIN, MEMBER, or VIEWER (the OWNER role is reserved for the tenant creator).",
       };
     }
+
+    // Plan-tier check BEFORE other validations: shows the user a
+    // direct "upgrade" message rather than a vague "duplicate invite"
+    // error if they're spamming at the limit.
+    await assertCanInviteUser(tenant.id);
 
     // If the invitee is already a member of THIS tenant, refuse.
     const existingMembership = await prisma.tenantMembership.findFirst({
@@ -385,6 +394,8 @@ function mapError(e: unknown): { ok: false; message: string } {
   if (e instanceof NoTenantSelectedError)
     return { ok: false, message: e.message };
   if (e instanceof PermissionDeniedError)
+    return { ok: false, message: e.message };
+  if (e instanceof PlanLimitExceededError)
     return { ok: false, message: e.message };
   return {
     ok: false,

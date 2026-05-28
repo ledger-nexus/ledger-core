@@ -19,6 +19,7 @@ import {
 } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { canManageMemberships } from "@/lib/auth/policy";
+import { getTenantLimits } from "@/lib/billing/limits";
 import { prisma } from "@/lib/db";
 import {
   Card,
@@ -47,7 +48,7 @@ export default async function TeamPage() {
     );
   }
 
-  const [members, invites] = await Promise.all([
+  const [members, invites, limits] = await Promise.all([
     prisma.tenantMembership.findMany({
       where: { tenantId: tenant.id },
       include: {
@@ -70,6 +71,7 @@ export default async function TeamPage() {
       },
       orderBy: { createdAt: "desc" },
     }),
+    getTenantLimits(tenant.id),
   ]);
 
   const isOwner = tenant.role === "OWNER";
@@ -87,15 +89,47 @@ export default async function TeamPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Invite a teammate</CardTitle>
-          <span className="text-xs text-ink-500">
-            They&rsquo;ll receive a single-use accept link valid for 14 days.
-            The link is shown here after creation — until email delivery is
-            wired up, copy and send it yourself.
-          </span>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle>Invite a teammate</CardTitle>
+              <span className="text-xs text-ink-500">
+                They&rsquo;ll receive a single-use accept link valid for 14 days.
+                When email is configured the link is delivered automatically;
+                otherwise copy it from the success message after inviting.
+              </span>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
+                Users
+              </div>
+              <div className="text-sm tabular-nums text-ink-900">
+                {limits.users.current}
+                <span className="text-ink-500">
+                  {" "}/ {limits.users.cap == null ? "∞" : limits.users.cap}
+                </span>
+              </div>
+              <div className="text-[11px] text-ink-500">
+                <span className="font-mono">{limits.plan.key}</span> plan
+              </div>
+              {limits.users.atLimit && (
+                <Badge tone="negative" className="mt-1">
+                  AT LIMIT
+                </Badge>
+              )}
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <InviteForm />
+          {limits.users.atLimit ? (
+            <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              You&rsquo;ve reached the user limit on the{" "}
+              <span className="font-mono">{limits.plan.key}</span> plan. Upgrade
+              at <code className="font-mono">/admin/billing</code> to invite more
+              teammates, or remove a member first.
+            </div>
+          ) : (
+            <InviteForm />
+          )}
         </CardContent>
       </Card>
 
