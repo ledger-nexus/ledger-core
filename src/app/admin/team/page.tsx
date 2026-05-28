@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InviteForm } from "./invite-form";
 import { MemberActions, InviteActions } from "./row-actions";
+import { ApprovalToggle } from "./approval-toggle";
 
 export default async function TeamPage() {
   const user = await getCurrentUser();
@@ -48,7 +49,7 @@ export default async function TeamPage() {
     );
   }
 
-  const [members, invites, limits] = await Promise.all([
+  const [members, invites, limits, tenantConfig] = await Promise.all([
     prisma.tenantMembership.findMany({
       where: { tenantId: tenant.id },
       include: {
@@ -72,6 +73,10 @@ export default async function TeamPage() {
       orderBy: { createdAt: "desc" },
     }),
     getTenantLimits(tenant.id),
+    prisma.tenant.findUnique({
+      where: { id: tenant.id },
+      select: { requireJeApproval: true },
+    }),
   ]);
 
   const isOwner = tenant.role === "OWNER";
@@ -130,6 +135,20 @@ export default async function TeamPage() {
           ) : (
             <InviteForm />
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Workspace policy</CardTitle>
+          <span className="text-xs text-ink-500">
+            Approval workflow + other tenant-level controls.
+          </span>
+        </CardHeader>
+        <CardContent>
+          <ApprovalToggle
+            initialEnabled={tenantConfig?.requireJeApproval ?? false}
+          />
         </CardContent>
       </Card>
 

@@ -99,6 +99,20 @@ export interface JournalEntryInput {
   sourcePayload?: unknown;
   mappingVersion?: string;
   extensions?: Record<string, unknown>;
+
+  // Maker-checker: when "PENDING_APPROVAL", the entry is persisted with
+  // status=PENDING_APPROVAL instead of POSTED. The lines exist + balance
+  // is validated, but reports filter on status=POSTED so the entry is
+  // invisible to the ledger until an ADMIN+ runs the approve action.
+  // Defaults to "POSTED" — the historical behavior. Period-close checks
+  // are SKIPPED on pending entries (re-run at approval time) so a
+  // submitted entry doesn't fail just because the period closed between
+  // submit and approve.
+  initialStatus?: "POSTED" | "PENDING_APPROVAL";
+  // When initialStatus="PENDING_APPROVAL", this is required — the User
+  // who clicked "Submit for approval". Stamped onto JournalEntry.submittedById
+  // and submittedAt. Server Action callers pass currentUser.id.
+  submittedByUserId?: string;
 }
 
 // Custom error types so the API layer can produce useful messages.

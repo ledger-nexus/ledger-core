@@ -86,6 +86,14 @@ model Tenant {
   /// on the billing page. Mirrors stripe Subscription.current_period_end.
   currentPeriodEnd      DateTime?
 
+  /// When true, journal entries posted by MEMBERS go to PENDING_APPROVAL
+  /// instead of POSTED. An ADMIN+ must approve before the entry hits
+  /// the ledger. Directly-posted entries by an ADMIN bypass the queue.
+  ///
+  /// Defaults to false for backwards compat with existing tenants.
+  /// Toggle via /admin/team or the future /admin/settings page.
+  requireJeApproval Boolean @default(false)
+
   /// Maximum Anthropic spend per calendar month, in USD.
   /// Enforced by the companion repos' AI Server Actions (recon's
   /// proposeMatches, revenue-rec's extractContract, fa-amort's
@@ -741,6 +749,24 @@ model JournalEntry {
   createdAt DateTime @default(now())
   createdBy String?
 
+  // ─── Maker-checker approval columns ────────────────────────────────
+  //
+  // Populated only for entries that flow through the approval queue.
+  // Direct ADMIN postings leave these null. submittedById is the User
+  // who clicked "Submit for approval" (typically the maker); the
+  // approval / rejection columns are set when an ADMIN+ resolves it.
+  //
+  // rejectionReason is required when status flips to VOID via the
+  // reject action; null when VOID came from a different code path
+  // (e.g. an offsetting cancellation).
+  submittedById   String?   @db.Uuid
+  submittedAt     DateTime?
+  approvedById    String?   @db.Uuid
+  approvedAt      DateTime?
+  rejectedById    String?   @db.Uuid
+  rejectedAt      DateTime?
+  rejectionReason String?
+
   // Backref to ownership events.
   recordEvents RecordEvent[] @relation("JournalEntryEvents")
 
@@ -753,6 +779,7 @@ model JournalEntry {
   @@index([entityId, bookId, periodId])
   @@index([sourceSystem, sourceRecordType, sourceRecordId])
   @@index([tenantId, postingDate])
+  @@index([tenantId, status, createdAt])
   @@map("gl_entry_header")
 }
 
@@ -765,10 +792,11 @@ enum JournalSource {
 }
 
 enum EntryStatus {
-  DRAFT
-  POSTED
-  VOID
-  REVERSED
+  DRAFT             // never submitted; never appears in reports
+  PENDING_APPROVAL  // submitted for maker-checker review; never appears in reports
+  POSTED            // approved (or directly posted by an admin); appears in reports
+  VOID              // never reverses an existing posting; used for rejected pending entries too
+  REVERSED          // an offsetting POSTED entry was cut against this one
 }
 
 model JournalLine {

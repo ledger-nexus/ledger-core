@@ -59,6 +59,16 @@ export const canViewAdminPages = (role: TenantRole | undefined | null): boolean 
 export const canPostJournalEntries = (role: TenantRole | undefined | null): boolean =>
   meets(role, "MEMBER");
 
+// Maker-checker: ADMIN+ approves; MEMBER+ can submit for approval.
+// The "self-approval" guard (a user can't approve their own submission)
+// is enforced separately in approveJournalEntry — this gate is the
+// role floor, not the actor identity check.
+export const canApproveJournalEntries = (role: TenantRole | undefined | null): boolean =>
+  meets(role, "ADMIN");
+
+export const canSubmitJournalEntries = (role: TenantRole | undefined | null): boolean =>
+  meets(role, "MEMBER");
+
 export const canEditAccounts = (role: TenantRole | undefined | null): boolean =>
   meets(role, "MEMBER");
 

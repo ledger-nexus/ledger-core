@@ -11,9 +11,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { canApproveJournalEntries } from "@/lib/auth/policy";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import ReverseButton from "./reverse-button";
 import NotesCard from "./notes-card";
+import { ApprovalActions } from "./approval-actions";
 
 export default async function JournalEntryDetailPage({
   params,
@@ -86,7 +88,19 @@ export default async function JournalEntryDetailPage({
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-1.5">
-            <Badge tone="info">{entry.status}</Badge>
+            <Badge
+              tone={
+                entry.status === "POSTED"
+                  ? "positive"
+                  : entry.status === "PENDING_APPROVAL"
+                    ? "warning"
+                    : entry.status === "VOID" || entry.status === "REVERSED"
+                      ? "negative"
+                      : "info"
+              }
+            >
+              {entry.status}
+            </Badge>
             <Badge tone="neutral">{entry.source}</Badge>
             {entry.sourceSystem && (
               <Badge tone="neutral">
@@ -119,6 +133,43 @@ export default async function JournalEntryDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Maker-checker UI surfaces. PENDING_APPROVAL entries show the
+          approve/reject card to ADMIN+; rejected entries show the
+          rejection reason for the submitter to see what to fix. */}
+      {entry.status === "PENDING_APPROVAL" &&
+        tenant &&
+        canApproveJournalEntries(tenant.role) && (
+          <ApprovalActions entryId={entry.id} entryNumber={entry.entryNumber} />
+        )}
+      {entry.status === "PENDING_APPROVAL" &&
+        (!tenant || !canApproveJournalEntries(tenant.role)) && (
+          <Card>
+            <CardContent className="px-5 py-3 bg-amber-50">
+              <div className="text-sm text-amber-800">
+                This entry is awaiting approval from an admin. It will not
+                appear in reports until approved.
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      {entry.status === "VOID" && entry.rejectionReason && (
+        <Card>
+          <CardContent className="px-5 py-3 bg-red-50">
+            <div className="text-sm font-medium text-red-900">
+              Rejected
+            </div>
+            <p className="mt-1 text-xs text-red-700 whitespace-pre-wrap">
+              {entry.rejectionReason}
+            </p>
+            {entry.rejectedAt && (
+              <p className="mt-1 text-[11px] text-red-600">
+                Rejected on {entry.rejectedAt.toISOString().slice(0, 10)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Field label="Entity" value={entry.entity.code} />

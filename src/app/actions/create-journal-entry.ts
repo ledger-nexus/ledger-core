@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { canApproveJournalEntries } from "@/lib/auth/policy";
 import { requireCurrentScope, NoScopeError } from "@/lib/scope";
 
 export interface NewEntryDraftLine {
@@ -17,7 +19,7 @@ export interface NewEntryDraftLine {
 
 export type CreateJournalEntryState =
   | { ok?: undefined; error?: undefined }
-  | { ok: true; entryId: string }
+  | { ok: true; entryId: string; pendingApproval?: boolean }
   | { ok: false; error: string };
 
 // Server Action backing the /journal-entries/new form. Receives the
@@ -36,10 +38,25 @@ export async function createJournalEntryAction(
   formData: FormData
 ): Promise<CreateJournalEntryState> {
   let entryId: string;
+  let isPending = false;
 
   try {
     const user = await requireCurrentUser();
     const scope = await requireCurrentScope();
+    // Maker-checker branching: if the tenant has requireJeApproval=true
+    // AND the current user is not ADMIN+, the entry goes to
+    // PENDING_APPROVAL instead of POSTED. ADMIN/OWNER bypass the queue
+    // (they're the approvers; their own direct postings are trusted).
+    const tenant = await getCurrentTenant();
+    const tenantConfig = tenant
+      ? await prisma.tenant.findUnique({
+          where: { id: tenant.id },
+          select: { requireJeApproval: true },
+        })
+      : null;
+    const userIsApprover = tenant ? canApproveJournalEntries(tenant.role) : false;
+    const requireApproval =
+      (tenantConfig?.requireJeApproval ?? false) && !userIsApprover;
 
     const documentDateStr = String(formData.get("documentDate") ?? "");
     const memo = String(formData.get("memo") ?? "").trim();
@@ -77,6 +94,8 @@ export async function createJournalEntryAction(
       source,
       createdBy: user.email,
       ownerUserId: user.id,
+      initialStatus: requireApproval ? "PENDING_APPROVAL" : "POSTED",
+      submittedByUserId: requireApproval ? user.id : undefined,
       lines: lines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.side === "DEBIT" ? l.amount : undefined,
@@ -86,6 +105,7 @@ export async function createJournalEntryAction(
       })),
     });
     entryId = result.id;
+    isPending = requireApproval;
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
       return { ok: false, error: "You must be signed in to post a journal entry." };
@@ -102,6 +122,9 @@ export async function createJournalEntryAction(
   // Outside the try block so the redirect's "internal" throw isn't caught
   // by our catch (Next.js handles it specially in the framework).
   revalidatePath("/journal-entries");
+  if (isPending) {
+    revalidatePath("/journal-entries/pending");
+  }
   revalidatePath("/", "layout");
   redirect(`/journal-entries/${entryId}`);
 }

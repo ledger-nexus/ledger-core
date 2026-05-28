@@ -290,8 +290,13 @@ export async function postJournalEntry(
   });
 
   // ---- 6. Check the (entity, book, period) close lock --------------------
-
-  if (period) {
+  //
+  // Skipped for PENDING_APPROVAL entries — the entry doesn't hit the
+  // ledger until approval, and approval re-runs the check. If the
+  // period closes between submit and approve, the approve action fails
+  // (and the approver can void / move the entry). This matches the
+  // real-world maker-checker flow where stale drafts are common.
+  if (period && input.initialStatus !== "PENDING_APPROVAL") {
     const closed = await prisma.periodClose.findUnique({
       where: {
         entityId_bookId_periodId: {
@@ -335,7 +340,15 @@ export async function postJournalEntry(
         currencyId: currencyCode,
         fxRate: fxRate.toFixed(10),
         source: input.source ?? "MANUAL",
-        status: "POSTED",
+        // Maker-checker: when caller asks for PENDING_APPROVAL, the
+        // entry persists with lines but stays out of every report
+        // (reports filter status=POSTED). approveJournalEntry in
+        // src/lib/accounting/approval.ts flips it to POSTED after
+        // ADMIN review.
+        status: input.initialStatus ?? "POSTED",
+        submittedById: input.submittedByUserId,
+        submittedAt:
+          input.initialStatus === "PENDING_APPROVAL" ? new Date() : null,
         createdBy: input.createdBy,
         updatedBy: input.createdBy,
         ownerId: input.ownerUserId,
@@ -388,8 +401,15 @@ export async function postJournalEntry(
   // invoking fireInsertRules itself when it has a full PrismaClient.
   // This is also why the system/seed depreciation post (ownerUserId
   // null) is the typical caller for the tx path — no routing needed.
+  // Pending entries don't fire ON_INSERT rules — they haven't really
+  // landed yet. Rules fire when the entry is approved (approveJournalEntry
+  // in src/lib/accounting/approval.ts wires the second-pass firing).
   let rulesResult: FireRulesResult | undefined;
-  if (input.ownerUserId && hasTransaction(prisma)) {
+  if (
+    input.ownerUserId &&
+    hasTransaction(prisma) &&
+    input.initialStatus !== "PENDING_APPROVAL"
+  ) {
     try {
       // Load the entry shape rules might match on (memo, source, etc.).
       const fullEntry = await prisma.journalEntry.findUniqueOrThrow({
