@@ -48,6 +48,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
       { href: "/reports/ar-aging", label: "AR aging" },
       { href: "/reports/ap-aging", label: "AP aging" },
       { href: "/reports/consolidation", label: "Consolidation", hint: "multi-entity" },
+      { href: "/reports/fx-revaluation", label: "FX revaluation", hint: "period-end" },
     ],
   },
 ];
