@@ -316,7 +316,13 @@ shipped except where noted.
       disposeAssetAction + DisposeForm on /fixed-assets/[id]. The
       lifecycle is now complete: acquire → depreciate (SL / DDB /
       MACRS) → dispose with catch-up + gain/loss recognition.
-- [ ] Impairment write-down flow (the AI screener exists; no JE path)
+- [x] Impairment write-down flow. Shipped 2026-05-27 (latest++).
+      The AI impairment screener now has a JE path: ASC 360-10 Step 2
+      measurement via POST /api/internal/fixed-asset/impair +
+      impairAssetAction + ImpairForm. Per-book amounts (typically TAX
+      skipped). When invoked with a sourceSuggestionId, stamps the
+      AI screening with the resulting JE entry numbers — closes the
+      AI loop end-to-end (screen → flag → measure → JE).
 - [ ] Bonus depreciation / §179
 - [ ] SL crossover convention for DDB
 - [ ] MACRS mid-quarter + mid-month conventions (real property)
@@ -456,6 +462,23 @@ shipped except where noted.
   line). Gain/loss differs per book because accumulated depreciation
   differs — a clean BTD demonstration where a temporary timing
   difference flips to permanent at disposal.
+- **2026-05-27 (latest++)** — Impairment write-down flow in fa-amort.
+  Parallels disposal: catch up depreciation, then post per-book JE
+  (Dr Impairment Loss / Cr Accum Dep). Decisions:
+    - Per-book amounts (vs single amount applied to every book):
+      lets the CPA skip the TAX book, which doesn't impair in
+      practice (tax basis is depreciation-based, not fair-value).
+    - Use existing accumDepreciationAccountCode (vs a separate
+      "Accumulated Impairment" account): GAAP-acceptable simplification;
+      firms with material impairment can wire a dedicated account
+      via the account-edit UI later.
+    - Asset stays IN_SERVICE (vs DISPOSED). Subsequent depreciation
+      runs from the lower NBV over remaining useful life. This is
+      what GAAP requires — the asset isn't gone, it's just worth less.
+    - sourceSuggestionId optional parameter stamps the originating
+      AI screening with the JE entry numbers, closing the loop:
+      AI screen → CPA flag → CPA measures via this flow → JE posted
+      AND the original screening updated to reference the JE.
 - **2026-05-27 (latest+)** — OVER_TIME_USAGE recognition in revenue-rec.
   Schedule generator returns [] for this pattern; rows accrete via
   recordUsageAction as consumption is reported. Schema:
