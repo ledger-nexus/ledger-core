@@ -219,26 +219,46 @@ This is what gates a real second user. Most of it shipped on 2026-05-27.
       `docs/billing-setup.md`) cover technical deployment; a customer-
       facing marketing surface is a separate project.
 
-### Category 2.5 — Productize, harder pieces (future work)
+### Category 2.5 — Productize, harder pieces (mixed status)
 
-The skeleton work above unblocks a real second user but doesn't ship
-the polish:
+The skeleton work above unblocks a real second user. This bucket is
+the polish + harder pieces:
 
-- [ ] **Plan-tier feature gating.** Today plans are flat-rate with no
-      enforced limits. Wire entity count / AI token cap to the plan tier
-      and refuse in the relevant Server Actions.
+- [x] **Plan-tier feature gating.** Shipped 2026-05-27 (late).
+      Per-plan maxUsers / maxEntities / defaultAiSpendCapUsd /
+      availableRepos enforced in inviteMemberAction. Webhook seeds
+      Tenant.monthlyAiSpendCapUsd from the plan default. /admin/billing
+      shows usage + limits + AT LIMIT badges. /admin/team header shows
+      X/Y users. past_due subscriptions auto-downgrade to free-tier
+      limits. BILLING_ENFORCE_LIMITS env flag stages the rollout.
+- [x] **Maker-checker JE approval workflow.** Shipped 2026-05-27 (late).
+      PENDING_APPROVAL status + audit columns. Lifecycle module with
+      separation-of-duties guard + period-close re-check. /journal-
+      entries/pending FIFO queue + inline approve/reject card on entry
+      detail. Tenant.requireJeApproval toggle on /admin/team.
 - [ ] **Stripe usage-based metering.** Report AI token volume to a
       metered Price in Stripe via a daily cron. Lets us bill heavy AI
       users more than light ones without a custom invoicing flow.
 - [ ] **Marketing site.** Separate Next.js project (or static site).
       Pricing page, demo flow, /sign-up CTA.
 - [ ] **Email templates beyond invites.** Period close 3 days out,
-      AI suggestion ready for review, sync failed, weekly digest.
-      Each is a small typed wrapper around `sendEmail`.
+      AI suggestion ready for review, sync failed, JE approved /
+      rejected (notify the submitter), weekly digest. Each is a small
+      typed wrapper around `sendEmail`.
 - [ ] **Ownership transfer.** Currently OWNER can't be demoted /
       removed. Need a flow where current OWNER promotes another member,
       they accept, ownership atomically swaps. Schema-only change to
       `Tenant.ownerUserId` plus the migration UI.
+- [ ] **Companion-repo plan enforcement.** /admin/billing shows which
+      companion repos are included per plan; the companion repos
+      themselves don't check yet. Cross-repo enforcement needs each
+      companion to either mirror plans.ts or call a ledger-core internal
+      endpoint on every request.
+- [ ] **Withdraw your own pending JE.** Today the submitter can't
+      cancel their own submission — has to ask an admin to reject it.
+- [ ] **Threshold-based JE approval.** Today requireJeApproval is
+      tenant-wide on/off. A natural future enhancement is "only entries
+      above $X require approval".
 
 ### Category 3 — Fill out the accounting features
 
@@ -364,6 +384,23 @@ shipped except where noted.
   constant-time compare + 5-minute replay-tolerance window. Deferred:
   plan-tier feature gating, usage-based metering, plan-change preview.
   See `docs/billing-setup.md` for the operator runbook.
+- **2026-05-27 (later)** — Plan-tier limit enforcement. Free tier
+  (3 users / 5 entities / $10 AI / recon-only) + starter / growth /
+  scale ladders. inviteMemberAction refuses at user cap (counts
+  pending invites toward the total). Webhook seeds
+  Tenant.monthlyAiSpendCapUsd from plan default on subscription;
+  explicit operator overrides are sticky. BILLING_ENFORCE_LIMITS env
+  gates hard refusal — default OFF in dev (warn-only) so seeded
+  tenants keep working; flip to ON for production. past_due
+  subscriptions auto-downgrade to free tier.
+- **2026-05-27 (later)** — Maker-checker JE approval. New
+  PENDING_APPROVAL status routes MEMBER posts through an admin queue.
+  Lifecycle module enforces separation of duties (submitter ≠ approver)
+  + re-runs period-close at approval (since the period might close
+  between submit and approve). Rejected entries flip to VOID with a
+  required reason preserved on the row. ON_INSERT rules fire at
+  approve time, not at submit (entry isn't really live until then).
+  Tenant.requireJeApproval toggle defaults false for backwards compat.
 
 (Historical decisions from before 2026-05-21 preserved below in the
 "Pre-2026-05-21 decisions" section. They cover the substrate /
