@@ -18,6 +18,7 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "./current-user";
+import { canViewAdminPages } from "./policy";
 import type { TenantRole } from "@prisma/client";
 
 export interface CurrentTenant {
@@ -160,10 +161,11 @@ export async function listMyTenants(): Promise<CurrentTenant[]> {
  * VIEWER, MEMBER → false. ADMIN, OWNER → true.
  */
 export function isTenantAdmin(tenant: CurrentTenant | null): boolean {
-  // Lazy import to avoid a circular import at the type level (policy
-  // imports nothing from this module, but keeping the boundary clean).
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { canViewAdminPages } = require("./policy") as typeof import("./policy");
+  // Delegates to the policy module's canViewAdminPages helper. policy.ts
+  // only imports TenantRole from @prisma/client (no back-edge to this
+  // module), so a top-level import is fine — the prior lazy `require()`
+  // pattern was a defensive habit from CJS land and broke under ESM
+  // resolution in vitest.
   return canViewAdminPages(tenant?.role ?? null);
 }
 
