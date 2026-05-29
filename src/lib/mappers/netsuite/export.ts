@@ -29,6 +29,12 @@ export interface ExportToNsInput {
   entityCode: string;
   bookCode?: string;
   exportedAt?: Date;
+  /**
+   * Tenant the entity belongs to. Strongly recommended for any UI
+   * caller. Without it the relation filter `entity: { code }` matches
+   * cross-tenant — see exportToQbo for the full security note.
+   */
+  tenantId?: string;
 }
 
 export async function exportToNs(
@@ -37,11 +43,23 @@ export async function exportToNs(
 ): Promise<NsExport> {
   const bookCode = input.bookCode ?? "US_GAAP";
 
+  // Resolve entityId up-front (tenant-scoped when provided) so the five
+  // downstream findMany calls can pin to the exact entity ID rather
+  // than a possibly-ambiguous relation filter on code.
+  const entity = await prisma.legalEntity.findFirst({
+    where: input.tenantId
+      ? { tenantId: input.tenantId, code: input.entityCode }
+      : { code: input.entityCode },
+    select: { id: true },
+  });
+  if (!entity) throw new Error(`Unknown entity: ${input.entityCode}`);
+  const entityId = entity.id;
+
   const accounts = await prisma.account.findMany({
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Account",
-      entity: { code: input.entityCode },
+      entityId,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -50,7 +68,7 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Customer",
-      entity: { code: input.entityCode },
+      entityId,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -59,7 +77,7 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Vendor",
-      entity: { code: input.entityCode },
+      entityId,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -68,7 +86,7 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Item",
-      entity: { code: input.entityCode },
+      entityId,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -77,7 +95,7 @@ export async function exportToNs(
   const entries = await prisma.journalEntry.findMany({
     where: {
       sourceSystem: "NETSUITE",
-      entity: { code: input.entityCode },
+      entityId,
       book: { code: bookCode },
     },
     select: { sourceRecordType: true, sourcePayload: true },

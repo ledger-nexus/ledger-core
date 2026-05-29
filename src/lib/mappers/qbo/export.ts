@@ -31,6 +31,14 @@ export interface ExportToQboInput {
   entityCode: string;
   bookCode?: string;          // default "US_GAAP"
   exportedAt?: Date;
+  /**
+   * Tenant the entity belongs to. Strongly recommended for any UI
+   * caller. Without it, the relation filter `entity: { code }` falls
+   * back to a cross-tenant match — Phase 4b allows duplicate entity
+   * codes across tenants, so a same-coded entity in a sibling tenant
+   * could leak QBO master data into the export.
+   */
+  tenantId?: string;
 }
 
 export async function exportToQbo(
@@ -39,12 +47,25 @@ export async function exportToQbo(
 ): Promise<QboExport> {
   const bookCode = input.bookCode ?? "US_GAAP";
 
+  // Resolve the entity (tenant-scoped if tenantId was provided) so all
+  // four downstream findMany calls can scope by entityId directly,
+  // closing the cross-tenant leak that the relation filter
+  // `entity: { code }` opens on its own.
+  const entity = await prisma.legalEntity.findFirst({
+    where: input.tenantId
+      ? { tenantId: input.tenantId, code: input.entityCode }
+      : { code: input.entityCode },
+    select: { id: true },
+  });
+  if (!entity) throw new Error(`Unknown entity: ${input.entityCode}`);
+  const entityId = entity.id;
+
   // Master data lives at entity scope — sourceSystem=QBO rows scoped to the entity.
   const accounts = await prisma.account.findMany({
     where: {
       sourceSystem: "QBO",
       sourceRecordType: "Account",
-      entity: { code: input.entityCode },
+      entityId,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -54,7 +75,7 @@ export async function exportToQbo(
     where: {
       sourceSystem: "QBO",
       sourceRecordType: "Customer",
-      entity: { code: input.entityCode },
+      entityId,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -64,7 +85,7 @@ export async function exportToQbo(
     where: {
       sourceSystem: "QBO",
       sourceRecordType: "Vendor",
-      entity: { code: input.entityCode },
+      entityId,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -74,7 +95,7 @@ export async function exportToQbo(
   const entries = await prisma.journalEntry.findMany({
     where: {
       sourceSystem: "QBO",
-      entity: { code: input.entityCode },
+      entityId,
       book: { code: bookCode },
     },
     select: { sourceRecordType: true, sourcePayload: true },
