@@ -24,16 +24,23 @@ const DEFAULT_BOOK = "US_GAAP";
 // exists in another tenant would silently load THAT tenant's entity.
 // All UI report callers MUST pass tenantId (from getCurrentScope).
 // The optional fallback exists for legacy seed / single-tenant scripts.
+//
+// We also return the resolved tenantId so downstream account queries
+// can scope the shared-chart pool (entityId=null accounts) by tenant —
+// otherwise getTrialBalance's findMany pulls in NULL-entity accounts
+// from OTHER tenants, and the by-code dedup silently drops lines when
+// duplicate code + entityId=null rows collide across tenants. See
+// tests/seeded-company.test.ts (cross-tenant 1500 dedup).
 async function resolveEntityBook(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,
   tenantId?: string
-): Promise<{ entityId: string; bookId: string }> {
+): Promise<{ entityId: string; bookId: string; tenantId: string }> {
   const [entity, book] = await Promise.all([
     prisma.legalEntity.findFirst({
       where: tenantId ? { tenantId, code: entityCode } : { code: entityCode },
-      select: { id: true },
+      select: { id: true, tenantId: true },
     }),
     prisma.book.findUnique({
       where: { code: bookCode },
@@ -42,7 +49,7 @@ async function resolveEntityBook(
   ]);
   if (!entity) throw new Error(`Unknown entity: ${entityCode}`);
   if (!book) throw new Error(`Unknown book: ${bookCode}`);
-  return { entityId: entity.id, bookId: book.id };
+  return { entityId: entity.id, bookId: book.id, tenantId: entity.tenantId };
 }
 
 export interface ReportScope {
@@ -77,7 +84,7 @@ export async function getTrialBalance(
   scope: ReportScope,
   asOf: Date
 ): Promise<{ rows: TrialBalanceRow[]; totalDebit: Decimal; totalCredit: Decimal }> {
-  const { entityId, bookId } = await resolveEntityBook(
+  const { entityId, bookId, tenantId } = await resolveEntityBook(
     prisma,
     scope.entityCode,
     scope.bookCode ?? DEFAULT_BOOK,
@@ -87,9 +94,17 @@ export async function getTrialBalance(
   // Pull lines for the (entity, book) on/before asOf, grouped by account.
   // Include the parent's code (Phase 7 hierarchy) so reports can render
   // sub-totals without a second query.
+  //
+  // tenantId scoping is required: shared-chart accounts (entityId=null)
+  // exist per tenant, but Postgres treats NULL≠NULL in unique indexes,
+  // so two tenants can each hold an entityId=null + code=X account.
+  // Without the filter, both leak in and the by-code dedup below drops
+  // whichever lost the race, including its lines. -24k drift in
+  // seeded-company.test.ts was three "1500" rows across three tenants.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
+      tenantId,
       OR: [{ entityId: null }, { entityId }],
     },
     include: {
@@ -184,14 +199,17 @@ export async function getIncomeStatement(
   periodEnd: Date
 ): Promise<IncomeStatement> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, tenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the IS page renderer can
   // build a tree via buildHierarchy() without a second query.
+  // tenantId scoping: see getTrialBalance for why — cross-tenant
+  // shared-chart accounts otherwise leak in and dedup loses lines.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
       type: { in: ["REVENUE", "EXPENSE"] },
+      tenantId,
       OR: [{ entityId: null }, { entityId }],
     },
     include: {
@@ -283,14 +301,17 @@ export async function getBalanceSheet(
   asOf: Date
 ): Promise<BalanceSheet> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, tenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the BS page renderer can
   // build a tree via buildHierarchy() without a second query.
+  // tenantId scoping: see getTrialBalance for why — cross-tenant
+  // shared-chart accounts otherwise leak in and dedup loses lines.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
       type: { in: ["ASSET", "LIABILITY", "EQUITY"] },
+      tenantId,
       OR: [{ entityId: null }, { entityId }],
     },
     include: {
