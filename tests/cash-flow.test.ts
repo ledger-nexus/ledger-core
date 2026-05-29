@@ -78,9 +78,18 @@ async function seedMasterData() {
   }
   // Prisma 5.22 rejects null in compound unique-key upsert. Use
   // findFirst + create to upsert shared-chart accounts (entityId=null).
+  //
+  // Tenant scope on findFirst is critical: Postgres treats NULL≠NULL
+  // in unique indexes, so two tenants can each own an entityId=null
+  // + same-code account. Pre-fix, findFirst would return a sibling
+  // tenant's account (planted by another test), the upsert would
+  // skip, and our default tenant would silently lack that code.
+  // getCashFlowStatement then (correctly, per its own tenant scope)
+  // wouldn't surface its lines and the test would see $0 instead of
+  // the expected investing cash flow.
   for (const a of CHART_OF_ACCOUNTS) {
     const existing = await prisma.account.findFirst({
-      where: { entityId: null, code: a.code },
+      where: { tenantId, entityId: null, code: a.code },
       select: { id: true },
     });
     if (existing) continue;

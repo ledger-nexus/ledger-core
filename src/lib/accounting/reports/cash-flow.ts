@@ -176,25 +176,42 @@ function cashImpactDirection(
 
 export async function getCashFlowStatement(
   prisma: PrismaClient,
-  scope: { entityCode: string; bookCode?: string },
+  scope: { entityCode: string; bookCode?: string; tenantId?: string },
   periodStart: Date,
   periodEnd: Date
 ): Promise<CashFlowStatement> {
   const bookCode = scope.bookCode ?? "US_GAAP";
+
+  // Resolve tenantId from the entity so the account-metadata query below
+  // can scope by it. Without tenant scoping, the OR clause pulls in
+  // shared-chart accounts (entityId=null) from every tenant; multiple
+  // rows with the same code overwrite each other in accountMeta and the
+  // FIXED_ASSET subtype on the default tenant's "1500" gets clobbered
+  // by a sibling tenant's stubbier record. Symptom: investing cash flow
+  // reports $0 when capex was clearly posted. See tests/cash-flow.test.ts.
+  const resolvedEntity = await prisma.legalEntity.findFirst({
+    where: scope.tenantId
+      ? { tenantId: scope.tenantId, code: scope.entityCode }
+      : { code: scope.entityCode },
+    select: { tenantId: true },
+  });
+  if (!resolvedEntity) throw new Error(`Unknown entity: ${scope.entityCode}`);
+  const tenantId = resolvedEntity.tenantId;
 
   // BS at period start (instant before) and at period end.
   const dayBeforeStart = new Date(periodStart);
   dayBeforeStart.setUTCDate(dayBeforeStart.getUTCDate() - 1);
 
   const [beginBs, endBs, pnl] = await Promise.all([
-    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode }, dayBeforeStart),
-    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode }, periodEnd),
-    getIncomeStatement(prisma, { entityCode: scope.entityCode, bookCode }, periodStart, periodEnd),
+    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode, tenantId }, dayBeforeStart),
+    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode, tenantId }, periodEnd),
+    getIncomeStatement(prisma, { entityCode: scope.entityCode, bookCode, tenantId }, periodStart, periodEnd),
   ]);
 
   // Pull account metadata so we can classify each BS row.
   const accounts = await prisma.account.findMany({
     where: {
+      tenantId,
       OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
     },
     select: { code: true, name: true, type: true, subtype: true, isBank: true, isContra: true },
