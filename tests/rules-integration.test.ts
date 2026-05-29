@@ -61,6 +61,16 @@ function makeTxOps(state: MockState) {
     journalEntry: {
       findUnique: async (args: { where: { id: string } }) =>
         state.journalEntries.get(args.where.id) ?? null,
+      // reassignJournalEntry uses findFirst (tenant-scoped lookup with
+      // optional actorTenantId filter). The mock ignores the tenantId
+      // filter — these tests don't exercise cross-tenant rejection.
+      findFirst: async (args: { where: { id: string } }) =>
+        state.journalEntries.get(args.where.id) ?? null,
+      findUniqueOrThrow: async (args: { where: { id: string } }) => {
+        const r = state.journalEntries.get(args.where.id);
+        if (!r) throw new Error(`JournalEntry ${args.where.id} not found`);
+        return r;
+      },
       update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
         const existing = state.journalEntries.get(args.where.id);
         if (existing) Object.assign(existing, args.data);
@@ -70,11 +80,29 @@ function makeTxOps(state: MockState) {
     arOpenItem: {
       findUnique: async (args: { where: { id: string } }) =>
         state.arOpenItems.get(args.where.id) ?? null,
+      findFirst: async (args: { where: { id: string } }) =>
+        state.arOpenItems.get(args.where.id) ?? null,
+      findUniqueOrThrow: async (args: { where: { id: string } }) => {
+        const r = state.arOpenItems.get(args.where.id);
+        if (!r) throw new Error(`ArOpenItem ${args.where.id} not found`);
+        return r;
+      },
       update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
         const existing = state.arOpenItems.get(args.where.id);
         if (existing) Object.assign(existing, args.data);
         return existing;
       },
+    },
+    // emitReassignmentNotification calls notify() which inserts a
+    // Notification row + cross-tenant-scoped reads. The reassign path
+    // wraps it in try/catch (notifications are best-effort), so a
+    // throwing stub here would still let reassigned=true return. But
+    // a friendly stub avoids the warning noise in the test output.
+    notification: {
+      create: async (args: { data: Record<string, unknown> }) => ({
+        id: "notif-stub",
+        ...args.data,
+      }),
     },
     recordEvent: {
       create: async (args: { data: Record<string, unknown> }) => {
