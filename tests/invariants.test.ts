@@ -119,10 +119,11 @@ async function seedMasterData() {
 async function seedAccountsOnly() {
   // Prisma 5.22 rejects null in compound unique-key upsert. Use
   // findFirst + create to upsert shared-chart accounts (entityId=null).
+  // Tenant-scope the findFirst (PG NULL≠NULL — see sub-ledgers.test.ts).
   const tenantId = await getDefaultTenantId(prisma);
   for (const a of CHART_OF_ACCOUNTS) {
     const existing = await prisma.account.findFirst({
-      where: { entityId: null, code: a.code },
+      where: { tenantId, entityId: null, code: a.code },
       select: { id: true },
     });
     if (existing) continue;

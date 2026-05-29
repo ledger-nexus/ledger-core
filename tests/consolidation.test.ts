@@ -75,9 +75,13 @@ async function seedHierarchy() {
 
   // Prisma 5.22 rejects null in compound unique-key upsert. Use
   // findFirst + create to upsert shared-chart accounts (entityId=null).
+  // Tenant-scoped: NULL≠NULL in Postgres unique indexes means multiple
+  // tenants can each own a (entityId=null, code=X) row; an unscoped
+  // findFirst could match a sibling tenant and skip the create,
+  // leaving this tenant's chart silently incomplete.
   for (const a of CHART_OF_ACCOUNTS) {
     const existing = await prisma.account.findFirst({
-      where: { entityId: null, code: a.code },
+      where: { tenantId, entityId: null, code: a.code },
       select: { id: true },
     });
     if (existing) continue;

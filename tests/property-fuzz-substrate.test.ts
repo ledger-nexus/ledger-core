@@ -112,9 +112,12 @@ async function seedMasterData() {
       update: {},
     });
   }
+  // Tenant-scoped findFirst (PG NULL≠NULL — see sub-ledgers.test.ts
+  // comment): unscoped would silently match a sibling tenant and skip
+  // create, leaving the chart incomplete.
   for (const a of CHART_OF_ACCOUNTS) {
     const existing = await prisma.account.findFirst({
-      where: { entityId: null, code: a.code },
+      where: { tenantId, entityId: null, code: a.code },
       select: { id: true },
     });
     if (existing) continue;
