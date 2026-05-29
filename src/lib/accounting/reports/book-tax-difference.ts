@@ -81,37 +81,53 @@ export async function getBookTaxDifference(
     toBookCode: string;   // e.g. "US_TAX"
     periodStart: Date;
     periodEnd: Date;
+    /** Tenant the entity belongs to. Strongly recommended — see ReportScope. */
+    tenantId?: string;
   }
 ): Promise<BookTaxDifferenceReport> {
+  // Resolve tenantId from the entity so the subtype lookup below scopes
+  // correctly. Without it, account.findMany returns every code across
+  // every tenant; the Map.set overwrite picks an arbitrary sibling
+  // tenant's subtype → wrong classification + silent cross-tenant read.
+  const resolvedEntity = await prisma.legalEntity.findFirst({
+    where: input.tenantId
+      ? { tenantId: input.tenantId, code: input.entityCode }
+      : { code: input.entityCode },
+    select: { tenantId: true },
+  });
+  if (!resolvedEntity) throw new Error(`Unknown entity: ${input.entityCode}`);
+  const tenantId = resolvedEntity.tenantId;
+
   const [bookPnl, taxPnl, bookBs, taxBs] = await Promise.all([
     getIncomeStatement(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.fromBookCode },
+      { entityCode: input.entityCode, bookCode: input.fromBookCode, tenantId },
       input.periodStart,
       input.periodEnd
     ),
     getIncomeStatement(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.toBookCode },
+      { entityCode: input.entityCode, bookCode: input.toBookCode, tenantId },
       input.periodStart,
       input.periodEnd
     ),
     getBalanceSheet(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.fromBookCode },
+      { entityCode: input.entityCode, bookCode: input.fromBookCode, tenantId },
       input.periodEnd
     ),
     getBalanceSheet(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.toBookCode },
+      { entityCode: input.entityCode, bookCode: input.toBookCode, tenantId },
       input.periodEnd
     ),
   ]);
 
   // Build a map of account → (bookAmount, taxAmount) for P&L accounts.
-  // Pull subtypes for classification.
+  // Pull subtypes for classification, scoped to this tenant.
   const accountSubtypeMap = new Map<string, string | null>();
   const accounts = await prisma.account.findMany({
+    where: { tenantId },
     select: { code: true, subtype: true },
   });
   for (const a of accounts) accountSubtypeMap.set(a.code, a.subtype);

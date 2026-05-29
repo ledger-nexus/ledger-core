@@ -122,10 +122,19 @@ export async function getConsolidatedTrialBalance(
 
   // Get TB per entity. Some entities (the parent) may have no activity —
   // their TB is empty and contributes nothing.
+  //
+  // Pass tenantId so each entity-code lookup is scoped to the root's
+  // tenant. Without it, resolveEntityBook would findFirst by code only
+  // and could resolve to an entity with the same code in another
+  // tenant — silent cross-tenant leakage into the consolidation.
   const perEntityTbs = await Promise.all(
     included.map(async (e) => ({
       entity: e,
-      tb: await getTrialBalance(prisma, { entityCode: e.code, bookCode }, input.asOf),
+      tb: await getTrialBalance(
+        prisma,
+        { entityCode: e.code, bookCode, tenantId: root.tenantId },
+        input.asOf
+      ),
     }))
   );
 
@@ -159,8 +168,16 @@ export async function getConsolidatedTrialBalance(
   }
 
   // Pull account metadata (subtype + isContra) for classification.
+  // tenantId scope: shared-chart accounts (entityId=null) exist per
+  // tenant and multiple tenants can hold the same code due to
+  // NULL≠NULL in unique indexes. Without the filter, the Map
+  // overwrite picks an arbitrary sibling tenant's subtype — same
+  // class of bug as cash-flow.ts.
   const accountMeta = await prisma.account.findMany({
-    where: { code: { in: Array.from(aggregates.keys()) } },
+    where: {
+      tenantId: root.tenantId,
+      code: { in: Array.from(aggregates.keys()) },
+    },
     select: { code: true, subtype: true, isContra: true },
   });
   const metaByCode = new Map(accountMeta.map((a) => [a.code, a]));

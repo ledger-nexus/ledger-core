@@ -113,17 +113,30 @@ export async function getM3Detail(
     toBookCode: string;
     periodStart: Date;
     periodEnd: Date;
+    /** Tenant the entity belongs to. Strongly recommended — see ReportScope. */
+    tenantId?: string;
   }
 ): Promise<M3DetailReport> {
-  const btd = await getBookTaxDifference(prisma, input);
+  // Resolve tenantId from the entity so the subtype lookup below scopes
+  // correctly. Same cross-tenant Map.set overwrite hazard as BTD.
+  const resolvedEntity = await prisma.legalEntity.findFirst({
+    where: input.tenantId
+      ? { tenantId: input.tenantId, code: input.entityCode }
+      : { code: input.entityCode },
+    select: { tenantId: true },
+  });
+  if (!resolvedEntity) throw new Error(`Unknown entity: ${input.entityCode}`);
+  const tenantId = resolvedEntity.tenantId;
 
-  // Pull subtypes for each account in the diff.
+  const btd = await getBookTaxDifference(prisma, { ...input, tenantId });
+
+  // Pull subtypes for each account in the diff, scoped to this tenant.
   const allCodes = new Set<string>([
     ...btd.pnlRows.map((r) => r.accountCode),
     ...btd.balanceSheetRows.map((r) => r.accountCode),
   ]);
   const accounts = await prisma.account.findMany({
-    where: { code: { in: Array.from(allCodes) } },
+    where: { tenantId, code: { in: Array.from(allCodes) } },
     select: { code: true, subtype: true },
   });
   const subtypeByCode = new Map(accounts.map((a) => [a.code, a.subtype]));
