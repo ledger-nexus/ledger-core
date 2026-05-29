@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { listMyTenants } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,8 +26,6 @@ const ASOF = new Date("2026-06-30"); // demo cutoff matching the seed
 const YEAR_START = new Date("2026-01-01");
 
 export default async function DashboardPage() {
-  const scope = getScope();
-
   // Onboarding gate: three states the signed-in user can be in.
   //
   //   1. Zero TenantMemberships → /onboarding (create workspace)
@@ -56,11 +54,6 @@ export default async function DashboardPage() {
     // if the tenant exists but no entity has been provisioned yet.
     // listMyTenants already filtered to active memberships, so we only
     // need the count call (cheap).
-    const currentTenantId = tenants[0].id; // single-tenant user fallback
-    // For a multi-tenant user we'd resolve current via getCurrentTenant,
-    // but at this point they have memberships → layout's getCurrentTenant
-    // already resolved; using listMyTenants[0] for single is fine and
-    // we only block when EVERY accessible tenant has zero entities.
     const entityCount = await prisma.legalEntity.count({
       where: { tenantId: { in: tenants.map((t) => t.id) } },
     });
@@ -80,9 +73,28 @@ export default async function DashboardPage() {
     }
   }
 
+  // Tenant-verified scope. getCurrentScope() resolves the lc-scope
+  // cookie against the actual tenant memberships and falls back to the
+  // tenant's first entity if the cookie names one we don't own —
+  // closes the cookie-edit cross-tenant read leak getScope() left
+  // open. Returns null only when the user has no tenant + entity yet,
+  // which the onboarding gate above already handled.
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-ink-900">Dashboard</h2>
+        <EmptyState
+          title="No scope available"
+          description="Sign in and select a tenant to view the dashboard."
+        />
+      </div>
+    );
+  }
+
   // Bail early with an empty state if the seed hasn't been run.
   const entryCount = await prisma.journalEntry.count({
-    where: { entity: { code: scope.entityCode }, book: { code: scope.bookCode } },
+    where: { entityId: scope.entityId, book: { code: scope.bookCode } },
   });
   if (entryCount === 0) {
     return (
@@ -118,7 +130,7 @@ export default async function DashboardPage() {
     netBookValue(prisma, scope.entityCode, scope.bookCode),
     prisma.journalEntry.findMany({
       where: {
-        entity: { code: scope.entityCode },
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
       },
       orderBy: [{ documentDate: "desc" }, { createdAt: "desc" }],
@@ -141,7 +153,7 @@ export default async function DashboardPage() {
       where: {
         resolvedAt: null,
         entry: {
-          entity: { code: scope.entityCode },
+          entityId: scope.entityId,
           book: { code: scope.bookCode },
         },
       },
@@ -152,7 +164,7 @@ export default async function DashboardPage() {
     prisma.recurringEntry.findMany({
       where: {
         isActive: true,
-        entity: { code: scope.entityCode },
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
       },
       select: {
@@ -166,7 +178,7 @@ export default async function DashboardPage() {
     // dashboard show "May 2026 closed 4 days ago by …".
     prisma.periodClose.findFirst({
       where: {
-        entity: { code: scope.entityCode },
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
       },
       orderBy: { closedAt: "desc" },
@@ -182,7 +194,8 @@ export default async function DashboardPage() {
     // April before you close May."
     prisma.period.count({
       where: {
-        calendar: { entity: { code: scope.entityCode } },
+        calendar: { entityId: scope.entityId },
+        tenantId: scope.tenantId,
         // No close row for THIS book.
         NOT: {
           closes: {
@@ -245,7 +258,7 @@ export default async function DashboardPage() {
     });
     const taxEntries = hasTaxBook
       ? await prisma.journalEntry.count({
-          where: { entity: { code: scope.entityCode }, book: { code: otherBook } },
+          where: { entityId: scope.entityId, book: { code: otherBook } },
         })
       : 0;
     if (taxEntries > 0) {
@@ -255,6 +268,7 @@ export default async function DashboardPage() {
         toBookCode: otherBook,
         periodStart: YEAR_START,
         periodEnd: ASOF,
+        tenantId: scope.tenantId,
       });
       btdSummary = { delta: btd.totalDelta, otherBook };
     }
