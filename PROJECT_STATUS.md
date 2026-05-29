@@ -4,7 +4,7 @@ The single source of truth for "where the portfolio is and what's next."
 Updated end-of-session so the next pickup (human or Claude Code) doesn't
 need to re-derive context.
 
-**Last updated:** 2026-05-27 (late)
+**Last updated:** 2026-05-29 (post-multi-tenant audit-pass + self-audit)
 
 ---
 
@@ -159,7 +159,34 @@ from feature work.
   token timing attacks
 - Pass 4: tenant scope + auth on critical actions across all 5 repos
 
-**Pen-test pass 4 follow-ups (this session):**
+**Multi-tenant report-scoping audit-pass (2026-05-29):**
+- Class of bug: shared-chart accounts (`Account.entityId = NULL`)
+  rely on Postgres `(entityId, code)` unique indexes — but PG treats
+  `NULL ≠ NULL` so multiple tenants can each own a (null, code=X)
+  account. Any query that joined by `{ entityId: null }` without
+  also constraining `tenantId` would non-deterministically match a
+  sibling tenant's account; report-side dedup maps would then drop
+  lines, and seed-side `findFirst + create` would skip creating
+  the chart this tenant actually needs.
+- One reproduction: `tests/seeded-company.test.ts` walked Northwind's
+  US_GAAP TB across 6 month-ends and saw a -$24,000 imbalance from
+  three "1500" rows colliding in dedup. Same root cause hit cash-flow,
+  BTD, M3, and consolidation reports — none of which exercised the
+  cross-tenant case in tests, so they passed silently in CI.
+- Fixed: `resolveEntityBook` returns tenantId; every report
+  (`getTrialBalance`, `getBalanceSheet`, `getIncomeStatement`,
+  `getCashFlowStatement`, `getBookTaxDifference`, `getM3Detail`,
+  `getConsolidatedTrialBalance`) scopes its account query by tenant.
+  Mappers (`exportToQbo`, `exportToNs`) resolve `entityId` up-front
+  rather than relying on the cross-tenant `entity: { code }` relation
+  filter. Northwind seed + 6 test setups now tenant-scope their
+  shared-chart upsert.
+- Net: 89 ledger-core tests went from failing/skipped to all 616 green;
+  recon went from 163+6-skipped to 169 clean; the shared Neon DB
+  picked up an additive-only schema sync to backfill missing columns
+  surfaced during the run.
+
+**Pen-test pass 4 follow-ups (2026-05-27):**
 - Middleware fails closed in production when `CLERK_SECRET_KEY` is unset
   (503 on non-public routes; pass-through in dev, sign-in/health still
   served)
