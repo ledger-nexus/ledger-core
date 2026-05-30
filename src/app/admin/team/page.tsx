@@ -33,6 +33,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { InviteForm } from "./invite-form";
 import { MemberActions, InviteActions } from "./row-actions";
 import { ApprovalToggle } from "./approval-toggle";
+import { OwnerTransferCard } from "./owner-transfer-card";
 
 export default async function TeamPage() {
   const user = await getCurrentUser();
@@ -75,11 +76,27 @@ export default async function TeamPage() {
     getTenantLimits(tenant.id),
     prisma.tenant.findUnique({
       where: { id: tenant.id },
-      select: { requireJeApproval: true, jeApprovalMinAmount: true },
+      select: {
+        requireJeApproval: true,
+        jeApprovalMinAmount: true,
+        ownerUserId: true,
+        pendingOwnerTransferToUserId: true,
+        pendingOwnerTransferInitiatedAt: true,
+      },
     }),
   ]);
 
   const isOwner = tenant.role === "OWNER";
+  const pendingTransferTargetId =
+    tenantConfig?.pendingOwnerTransferToUserId ?? null;
+  const pendingTransferTargetMember = pendingTransferTargetId
+    ? members.find((m) => m.user.id === pendingTransferTargetId) ?? null
+    : null;
+  const isPendingTransferTarget =
+    pendingTransferTargetId !== null &&
+    pendingTransferTargetId === user.id;
+  const pendingTransferInitiatedAt =
+    tenantConfig?.pendingOwnerTransferInitiatedAt ?? null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -156,6 +173,64 @@ export default async function TeamPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Ownership transfer card. Three render conditions:
+            1. Current OWNER, no pending transfer → "Offer transfer" UI
+            2. Current OWNER, pending transfer → "Cancel transfer" UI
+            3. Pending target → "Accept / Decline" UI
+          Other members see nothing here (they can't act on a transfer
+          they're not party to). */}
+      {isOwner && !pendingTransferTargetId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ownership</CardTitle>
+            <span className="text-xs text-ink-500">
+              Hand off this workspace to another member. Two-step opt-in:
+              you offer, they accept.
+            </span>
+          </CardHeader>
+          <CardContent>
+            <OwnerTransferCard
+              mode="OWNER_NO_PENDING"
+              candidates={members
+                .filter((m) => m.user.isActive && m.user.id !== user.id)
+                .map((m) => ({
+                  id: m.user.id,
+                  email: m.user.email,
+                  displayName: m.user.displayName,
+                }))}
+            />
+          </CardContent>
+        </Card>
+      )}
+      {isOwner && pendingTransferTargetId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ownership</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <OwnerTransferCard
+              mode="OWNER_PENDING"
+              targetEmail={pendingTransferTargetMember?.user.email}
+              targetDisplayName={pendingTransferTargetMember?.user.displayName}
+              initiatedAt={pendingTransferInitiatedAt}
+            />
+          </CardContent>
+        </Card>
+      )}
+      {isPendingTransferTarget && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ownership</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <OwnerTransferCard
+              mode="TARGET_PENDING"
+              initiatedAt={pendingTransferInitiatedAt}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
