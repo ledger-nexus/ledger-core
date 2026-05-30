@@ -680,12 +680,16 @@ mapper / UI choices that shaped v0.2 through v1.0.)
   `v0.3-ish` production-deployment scaffolding commits but no
   end-to-end deploy guide. Tenant onboarding is the gating item before
   any of this matters to a stranger.
-- **Known test flakiness**: 2026-05-29 saw ~28/616 tests fail in a
-  single `vitest run` then 0/623 on the immediate re-run. Each failing
-  test passes 100% in isolation. The flakiness is shared-DB state
-  pollution between files — pre-existing fixtures from one file leak
-  into another's queries. Mitigation: re-run the suite on a failure to
-  distinguish flake from real regression. Longer-term fix: scope
-  every test's setup + teardown by a SUFFIX-stamped tenant slug so
-  files never see each other's data. Not blocking but worth a focused
-  session.
+- **Test flakiness — fixed 2026-05-29 (commit `c76c965`)**: the
+  intermittent ~10-40 cross-file failures during a single
+  `vitest run` (with 0 failures on re-run) traced to two test files
+  — `cash-flow.test.ts` and `sub-ledgers.test.ts` — running global
+  `prisma.journalEntry.deleteMany()` etc. in their `clearAll()`
+  helpers. With sibling tests' AR/AP open items in the shared Neon
+  DB, the unscoped JE delete blocked on
+  `ar_open_item_openedByEntryId_fkey (RESTRICT)`. Both files now
+  scope their clears by the test's entity ID. Three back-to-back
+  full-suite runs land 647/647 green on the first try after this
+  fix. Other test files (consolidation, invariants,
+  property-fuzz-substrate, qbo-mapping, etc.) were already scoped
+  and were innocent bystanders to the cleanup race.
