@@ -44,9 +44,59 @@ export default async function TeamPage() {
   if (!tenant) {
     return <Forbidden reason="Pick a workspace via the tenant switcher first." />;
   }
-  if (!canManageMemberships(tenant.role)) {
+
+  // Two gating regimes:
+  //   - ADMIN+ sees the full team-admin surface (invite, manage roles,
+  //     workspace policy, ownership card if they're the OWNER).
+  //   - A non-admin MEMBER who is the PENDING TARGET of an ownership
+  //     transfer is allowed in too — but they only see the
+  //     "Ownership offered to you" card. Everything else is hidden.
+  //     Without this carve-out the notification link from
+  //     owner-transfer would 403 for the very user being asked to act.
+  // The transfer-target check requires loading the tenant config
+  // up-front (before the wider data fetch) to decide whether to
+  // proceed or refuse.
+  const isAdminSurface = canManageMemberships(tenant.role);
+  const targetCheck = await prisma.tenant.findUnique({
+    where: { id: tenant.id },
+    select: { pendingOwnerTransferToUserId: true },
+  });
+  const isPendingTransferTargetEarly =
+    targetCheck?.pendingOwnerTransferToUserId === user.id;
+  if (!isAdminSurface && !isPendingTransferTargetEarly) {
     return (
       <Forbidden reason="Workspace member management requires ADMIN or OWNER role in this workspace." />
+    );
+  }
+
+  // Non-admin transfer-target: minimal page surface, just the offer
+  // card. Skip the broad member/invite/limits fetch they can't see
+  // anyway.
+  if (!isAdminSurface && isPendingTransferTargetEarly) {
+    const initiatedAt = await prisma.tenant
+      .findUnique({
+        where: { id: tenant.id },
+        select: { pendingOwnerTransferInitiatedAt: true },
+      })
+      .then((t) => t?.pendingOwnerTransferInitiatedAt ?? null);
+    return (
+      <div className="flex flex-col gap-6">
+        <div>
+          <h2 className="text-xl font-semibold text-ink-900">Ownership</h2>
+          <p className="text-xs text-ink-500">
+            The OWNER of <span className="font-mono">{tenant.slug}</span> has
+            offered to transfer ownership to you.
+          </p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Ownership transfer</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <OwnerTransferCard mode="TARGET_PENDING" initiatedAt={initiatedAt} />
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
