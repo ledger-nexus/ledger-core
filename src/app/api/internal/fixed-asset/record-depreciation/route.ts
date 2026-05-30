@@ -176,9 +176,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Resolve asset + book + attrs.
+  // Resolve asset + book + attrs. Scope the lookup by the token's
+  // tenantId so a cross-tenant asset is invisible — same pattern as
+  // /api/internal/journal-entries (a token from tenant A asking about
+  // tenant B's asset gets UNKNOWN_ASSET, not TENANT_SCOPE_MISMATCH).
+  // Defense-in-depth: postJournalEntry below would also reject, but
+  // returning invisibility here avoids leaking existence.
   const asset = await prisma.fixedAsset.findFirst({
-    where: { code: body.assetCode, entity: { code: body.entityCode } },
+    where: {
+      code: body.assetCode,
+      entity: { code: body.entityCode, tenantId: identity.tenantId },
+    },
     select: {
       id: true,
       code: true,
