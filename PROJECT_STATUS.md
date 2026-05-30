@@ -302,8 +302,14 @@ the polish + harder pieces:
       high-cost Server Actions (Anthropic calls, sync runs, depreciation)
       hard-refuse when `BILLING_ENFORCE_LIMITS=true`. revenue-rec + fa-amort
       gated to Growth+; integrations gated to Scale.
-- [ ] **Withdraw your own pending JE.** Today the submitter can't
-      cancel their own submission — has to ask an admin to reject it.
+- [x] **Withdraw your own pending JE.** Shipped 2026-05-29
+      (commit `b7dfb4f`). `withdrawJournalEntry` lifecycle helper
+      with an inverse SoD check (only the submitter can withdraw).
+      Reuses the VOID rejection columns with a `Withdrawn:` reason
+      prefix so audit log + JE detail can distinguish withdrawal
+      from third-party rejection. UI: WithdrawAction client component
+      on `/journal-entries/[id]` for PENDING_APPROVAL entries where
+      `entry.submittedById === currentUser.id`. 6 new lifecycle tests.
 - [ ] **Threshold-based JE approval.** Today requireJeApproval is
       tenant-wide on/off. A natural future enhancement is "only entries
       above $X require approval".
@@ -666,3 +672,12 @@ mapper / UI choices that shaped v0.2 through v1.0.)
   `v0.3-ish` production-deployment scaffolding commits but no
   end-to-end deploy guide. Tenant onboarding is the gating item before
   any of this matters to a stranger.
+- **Known test flakiness**: 2026-05-29 saw ~28/616 tests fail in a
+  single `vitest run` then 0/623 on the immediate re-run. Each failing
+  test passes 100% in isolation. The flakiness is shared-DB state
+  pollution between files — pre-existing fixtures from one file leak
+  into another's queries. Mitigation: re-run the suite on a failure to
+  distinguish flake from real regression. Longer-term fix: scope
+  every test's setup + teardown by a SUFFIX-stamped tenant slug so
+  files never see each other's data. Not blocking but worth a focused
+  session.
