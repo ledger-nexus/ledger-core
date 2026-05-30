@@ -15,6 +15,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const mockCookieStore = new Map<string, { value: string }>();
 vi.mock("next/headers", () => ({
@@ -117,10 +118,15 @@ afterAll(async () => {
     select: { id: true },
   });
   const tenantIds = testTenants.map((t) => t.id);
-  await prisma.auditLog.deleteMany({ where: { actorUserId: testUser.id } });
-  if (tenantIds.length > 0) {
-    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
-  }
+  // Audit log is append-only at the DB level. Use the test-only
+  // escape hatch to clean up between runs without leaving orphan
+  // rows that block tenant deletion.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { actorUserId: testUser.id } });
+    if (tenantIds.length > 0) {
+      await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    }
+  });
   await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
   await prisma.user.deleteMany({ where: { id: testUser.id } }).catch(() => {});
   await prisma.$disconnect();
@@ -383,9 +389,13 @@ describe("createMyFirstTenantAction", () => {
 
     expect(mockCookieStore.get(TENANT_COOKIE_NAME)?.value).toBe(slug);
 
-    // Clean up. auditPrivilegedAction now writes a tenant-scoped row;
+    // Clean up. auditPrivilegedAction writes a tenant-scoped row;
     // FK blocks tenant delete unless audit_log rows are gone first.
-    await prisma.auditLog.deleteMany({ where: { tenantId: dbTenant!.id } });
+    // audit_log is DB-level append-only — use the test-only escape
+    // hatch.
+    await withAuditLogMutable(prisma, async () => {
+      await prisma.auditLog.deleteMany({ where: { tenantId: dbTenant!.id } });
+    });
     await prisma.tenant.delete({ where: { id: dbTenant!.id } });
   });
 
@@ -400,8 +410,10 @@ describe("createMyFirstTenantAction", () => {
     // Clean up — same FK-aware pattern as above.
     const created = await prisma.tenant.findMany({ where: { slug }, select: { id: true } });
     if (created.length > 0) {
-      await prisma.auditLog.deleteMany({
-        where: { tenantId: { in: created.map((t) => t.id) } },
+      await withAuditLogMutable(prisma, async () => {
+        await prisma.auditLog.deleteMany({
+          where: { tenantId: { in: created.map((t) => t.id) } },
+        });
       });
       await prisma.tenant.deleteMany({ where: { slug } });
     }

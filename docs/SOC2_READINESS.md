@@ -500,26 +500,53 @@ Several "Missing" / "Critical gap" entries in the tables above are
 | (new) | Tenant scope on every query | Audit-pass swept TB/BS/IS/cash-flow/BTD/M3/consolidation/QBO/NS/seed/12 callers | session commits `1435559` → `f279111`; helper `assertTenantScope` |
 | Missing (CC2.2) | `/.well-known/security.txt` | Shipped 2026-05-29 (this commit) | `public/.well-known/security.txt` |
 
-### What's NOT shipped (the real remaining gaps)
+### What's NOT shipped (the real remaining gaps, post-2026-05-29)
 
-Even after the above, these are unaddressed and still block a Type 2
-audit:
+Even after the above + the second 2026-05-29 hardening pass, these
+remain and still block a Type 2 audit:
 
-- **Sentry / Datadog error monitoring** — biggest single remaining
-  CC7 gap. Pick one and wire it in all 5 repos.
-- **Content-Security-Policy** — deliberately deferred in `next.config.js`
-  pending nonce work.
-- **Dependabot + `npm audit` gating in CI** — known CVEs likely still
-  present in transitive deps.
+- **Sentry transmission** — the monitoring shim is wired
+  (`src/lib/monitoring/index.ts`) with `redactPii()` running before
+  every capture, falls back to console.error when DSN absent.
+  Provision a Sentry org + set `SENTRY_DSN` env var in each Vercel
+  project and the integration goes live without further code. (Was
+  the biggest remaining CC7 gap.)
+- **Content-Security-Policy** — deliberately deferred in
+  `next.config.js` pending nonce work.
 - **Field-level encryption for confidential data at rest** — emails,
-  party names, source documents all stored plaintext.
-- **Data classification taxonomy** — no doc; `docs/policies/data-classification.md`
-  is a template, not filled in.
-- **Vendor SOC 2 receipt inventory** — Vercel, Neon, Anthropic, Plaid,
-  Clerk SOC 2 reports need to be downloaded and stored.
-- **Formal risk register** — `docs/policies/risk-register.md` template
-  exists; not populated.
-- **External penetration test** — $5–15k engagement.
+  party names, source documents all stored plaintext (Neon's
+  Postgres-level encryption covers blob-at-rest; per-field is the
+  next layer).
+- **Data classification taxonomy** — `docs/policies/data-classification.md`
+  has a 4-level taxonomy template; needs field-by-field mapping for
+  every customer-data column.
+- **GDPR/CCPA right-to-deletion procedure** — required for any tenant
+  in EU/California scope (see risk-register item #16).
+- **External penetration test** — $5–15k engagement, business
+  decision rather than code.
+
+### Already shipped (was previously listed as gap)
+
+- **Vendor SOC 2 receipt inventory** — `docs/policies/vendor-management.md`
+  now lists all 10 production vendors with trust-portal links + DPA
+  status (updated 2026-05-29).
+- **Formal risk register** — `docs/policies/risk-register.md`
+  populated with 21 scored risks (updated 2026-05-29); 14 Mitigated,
+  5 Partial, 2 Open.
+- **Dependabot config** — `.github/dependabot.yml` in all 5 repos,
+  weekly cadence + immediate security fires.
+- **npm audit + gitleaks + CodeQL in CI** — `.github/workflows/security.yml`
+  in all 5 repos: production-only audit at `--audit-level=high`,
+  full-history gitleaks scan, weekly schedule + every PR.
+
+The helper module (`src/lib/soc2/index.ts`) + monitoring shim
+(`src/lib/monitoring/index.ts`) + `/soc2` skill + `/soc2-check`
+slash command + pre-commit hook + CLAUDE.md SOC 2 section close the
+**"future code drifts from these standards"** failure mode the user
+explicitly called out — every new feature now has a canonical
+reference to import from, Claude sessions auto-invoke the framework
+on auth/data/audit work, and a preventive hook fires before secrets
+or PII reach the repo.
 
 The helper module (`src/lib/soc2/index.ts`) + `/soc2` skill close
 the **"future code drifts from these standards"** failure mode that

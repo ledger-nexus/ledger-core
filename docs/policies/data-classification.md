@@ -1,6 +1,15 @@
 # Data classification + retention policy
 
-**Version:** 1.0 · **Effective date:** {{DATE}} · **Owner:** {{NAME}}
+**Version:** 1.1
+**Effective date:** 2026-05-29
+**Owner:** Hosung Son (founder)
+**Last reviewed:** 2026-05-29
+
+The PII-field list in `src/lib/soc2/index.ts` (the `PII_FIELD_NAMES`
+constant) is the runtime enforcement of this classification — every
+log line that includes a sensitive field name gets redacted before
+emit. When you add a new CONFIDENTIAL field below, also add its
+column name to that constant.
 
 ## Classification levels
 
@@ -94,6 +103,37 @@ Stored exclusively in:
 - [ ] **Soft-delete enforcement.** `User.deactivatedAt` exists but other models lack it. Add `deletedAt` to `JournalEntry`, etc., for non-financial-record models that should be subject to deletion.
 - [ ] **GDPR / CCPA data subject requests.** When a customer asks "what do you have on me?", we need a procedure to answer (data export) and to delete (right-to-be-forgotten). Today no procedure exists.
 
+### `Tenant` (CONFIDENTIAL for billing fields, INTERNAL otherwise)
+
+| Field | Classification | Notes |
+|---|---|---|
+| `name`, `slug` | CONFIDENTIAL | Customer organization name; identifies the customer |
+| `stripeCustomerId`, `stripeSubscriptionId` | CONFIDENTIAL | Billing identifiers (PCI-adjacent; Stripe owns the card data itself) |
+| `monthlyAiSpendCapUsd`, `jeApprovalMinAmount` | INTERNAL | Configuration values |
+| `pendingOwnerTransferToUserId` | INTERNAL | Workflow state |
+| `ownerUserId`, `requireJeApproval` | INTERNAL | Configuration |
+
+### `TenantInvite` (CONFIDENTIAL)
+
+| Field | Classification | Notes |
+|---|---|---|
+| `email` | CONFIDENTIAL | PII; the invited person's email |
+| `token` | RESTRICTED | Single-use secret; constant-time-compared on accept |
+| `expiresAt`, `acceptedAt`, `revokedAt` | INTERNAL | Lifecycle timestamps |
+
+### `EmailDelivery` (CONFIDENTIAL)
+
+| Field | Classification | Notes |
+|---|---|---|
+| `toEmail` | CONFIDENTIAL | PII |
+| `subject`, `bodyText`, `bodyHtml` | CONFIDENTIAL | Email content — may include JE memos / tenant info |
+| `providerId` (Resend message id) | INTERNAL | Tracking |
+| `metadata` | INTERNAL | Includes `tenantId`, `entryId`; no raw PII (we don't pass it through) |
+
+### Plaid `Connection.credentialsJson` (RESTRICTED)
+
+The `accessToken` field nested inside is a Plaid access token — it grants ongoing access to the customer's bank data. Treated as RESTRICTED. Never logged; only read inside `src/lib/connectors/plaid/client.ts`.
+
 ## Annual review
 
-Reviewed annually on {{REVIEW_DATE}}. Walk through every model in `prisma/schema.prisma` and verify classifications match.
+Reviewed annually. **Next review: 2027-05-29.** Walk through every model in `prisma/schema.prisma`; for any new column added since the last review, classify it here and update the `PII_FIELD_NAMES` constant in `src/lib/soc2/index.ts` if it should be redacted in logs.
