@@ -421,7 +421,12 @@ shipped except where noted.
       AI screening with the resulting JE entry numbers — closes the
       AI loop end-to-end (screen → flag → measure → JE).
 - [ ] Bonus depreciation / §179
-- [ ] SL crossover convention for DDB
+- [x] **SL crossover convention for DDB.** Shipped 2026-05-29
+      (fa-amort commit `b750f61`). Per-month max(DDB candidate,
+      SL crossover candidate) — stateless, idempotent on re-run.
+      Final month absorbs rounding residual so cumulative ties
+      exactly to (cost - salvage). Closes the v0.2 carve-out in
+      fa-amort's CLAUDE.md non-negotiable #5.
 - [ ] MACRS mid-quarter + mid-month conventions (real property)
 
 ---
