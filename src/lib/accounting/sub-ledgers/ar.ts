@@ -383,14 +383,22 @@ export async function estimateBadDebtAllowance(
 
 // Sum of open + partial item balances for a (entity, book). Should equal
 // the AR control account balance — the headline AR invariant.
+//
+// tenantId is optional but strongly recommended: without it, the
+// `entity: { code }` relation filter matches cross-tenant (Phase 4b
+// composite uniques allow duplicate entity codes across tenants).
+// Adding `tenantId` to the relation filter constrains the match to
+// this tenant's entity only. Same fix pattern as the report-side
+// audit-pass.
 export async function openArBalance(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  tenantId?: string
 ): Promise<Decimal> {
   const rows = await prisma.arOpenItem.findMany({
     where: {
-      entity: { code: entityCode },
+      entity: tenantId ? { code: entityCode, tenantId } : { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
     },
@@ -410,11 +418,13 @@ export async function arAging(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,
-  asOf: Date
+  asOf: Date,
+  tenantId?: string
 ): Promise<ArAgingBucket[]> {
+  // See openArBalance for the tenantId rationale.
   const items = await prisma.arOpenItem.findMany({
     where: {
-      entity: { code: entityCode },
+      entity: tenantId ? { code: entityCode, tenantId } : { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
     },

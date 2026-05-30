@@ -202,14 +202,17 @@ export async function applyApPayment(
   });
 }
 
+// Mirror of openArBalance — tenantId is optional but strongly
+// recommended; see the AR helper for the full rationale.
 export async function openApBalance(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  tenantId?: string
 ): Promise<Decimal> {
   const rows = await prisma.apOpenItem.findMany({
     where: {
-      entity: { code: entityCode },
+      entity: tenantId ? { code: entityCode, tenantId } : { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
     },
@@ -229,11 +232,13 @@ export async function apAging(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,
-  asOf: Date
+  asOf: Date,
+  tenantId?: string
 ): Promise<ApAgingBucket[]> {
+  // See openArBalance for the tenantId rationale.
   const items = await prisma.apOpenItem.findMany({
     where: {
-      entity: { code: entityCode },
+      entity: tenantId ? { code: entityCode, tenantId } : { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
     },

@@ -39,11 +39,11 @@ export default async function ApAgingPage({
   const asOfDate = new Date(asOf);
 
   const [buckets, total, items] = await Promise.all([
-    apAging(prisma, scope.entityCode, scope.bookCode, asOfDate),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
+    apAging(prisma, scope.entityCode, scope.bookCode, asOfDate, scope.tenantId),
+    openApBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.apOpenItem.findMany({
       where: {
-        entity: { code: scope.entityCode },
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
       },

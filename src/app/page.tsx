@@ -125,9 +125,9 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     getBalanceSheet(prisma, scope, ASOF),
     getIncomeStatement(prisma, scope, YEAR_START, ASOF),
-    openArBalance(prisma, scope.entityCode, scope.bookCode),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
-    netBookValue(prisma, scope.entityCode, scope.bookCode),
+    openArBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
+    openApBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
+    netBookValue(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.journalEntry.findMany({
       where: {
         entityId: scope.entityId,

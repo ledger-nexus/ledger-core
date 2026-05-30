@@ -2,8 +2,7 @@
 
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { openArBalance } from "@/lib/accounting/sub-ledgers/ar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -14,15 +13,26 @@ import { ApplyArPaymentRow } from "./apply-payment-row";
 import { ReassignArRow } from "./reassign-ar-row";
 
 export default async function ArPage() {
-  const scope = getScope();
-  // Tenant scope (Phase 4c) — defense in depth against cross-tenant reads.
-  const tenant = await getCurrentTenant();
-  const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
+  // Tenant-verified scope. Closes the cross-tenant read leak the raw
+  // lc-scope cookie used to enable; supersedes the old getScope() +
+  // separate getCurrentTenant() pattern with a single resolver.
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-ink-900">Open Accounts Receivable</h2>
+        <EmptyState
+          title="No scope available"
+          description="Sign in and select a tenant with at least one entity to view AR."
+        />
+      </div>
+    );
+  }
   const [openItems, total, cashAccounts, users, queues] = await Promise.all([
     prisma.arOpenItem.findMany({
       where: {
-        ...tenantFilter,
-        entity: { code: scope.entityCode },
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
       },
@@ -42,12 +52,13 @@ export default async function ArPage() {
         party: { select: { code: true, displayName: true } },
       },
     }),
-    openArBalance(prisma, scope.entityCode, scope.bookCode),
+    openArBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.account.findMany({
       where: {
         active: true,
         isBank: true,
-        OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
+        tenantId: scope.tenantId,
+        OR: [{ entityId: null }, { entityId: scope.entityId }],
       },
       orderBy: { code: "asc" },
       select: { code: true, name: true },

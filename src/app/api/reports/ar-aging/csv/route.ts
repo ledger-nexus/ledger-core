@@ -19,11 +19,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const [buckets, total, items] = await Promise.all([
-    arAging(prisma, scope.entityCode, scope.bookCode, new Date(asOf)),
-    openArBalance(prisma, scope.entityCode, scope.bookCode),
+    arAging(prisma, scope.entityCode, scope.bookCode, new Date(asOf), scope.tenantId),
+    openArBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.arOpenItem.findMany({
       where: {
-        entity: { code: scope.entityCode },
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
       },

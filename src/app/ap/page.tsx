@@ -2,8 +2,7 @@
 
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { openApBalance } from "@/lib/accounting/sub-ledgers/ap";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -14,15 +13,25 @@ import { ApplyApPaymentRow } from "./apply-payment-row";
 import { ReassignApRow } from "./reassign-ap-row";
 
 export default async function ApPage() {
-  const scope = getScope();
-  // Tenant scope (Phase 4c).
-  const tenant = await getCurrentTenant();
-  const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
+  // Tenant-verified scope (replaces the prior getScope() + manual
+  // getCurrentTenant() filter pattern).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-ink-900">Open Accounts Payable</h2>
+        <EmptyState
+          title="No scope available"
+          description="Sign in and select a tenant with at least one entity to view AP."
+        />
+      </div>
+    );
+  }
   const [openItems, total, cashAccounts, users, queues] = await Promise.all([
     prisma.apOpenItem.findMany({
       where: {
-        ...tenantFilter,
-        entity: { code: scope.entityCode },
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
       },
@@ -42,12 +51,13 @@ export default async function ApPage() {
         party: { select: { code: true, displayName: true } },
       },
     }),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
+    openApBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.account.findMany({
       where: {
         active: true,
         isBank: true,
-        OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
+        tenantId: scope.tenantId,
+        OR: [{ entityId: null }, { entityId: scope.entityId }],
       },
       orderBy: { code: "asc" },
       select: { code: true, name: true },

@@ -692,14 +692,17 @@ export async function impairFixedAsset(
 }
 
 // Net book value per (entity, book) = sum of acquisitionCost - accumDep across in-service assets.
+// tenantId is optional but strongly recommended; see openArBalance for
+// the cross-tenant rationale.
 export async function netBookValue(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  tenantId?: string
 ): Promise<{ totalGross: Decimal; totalAccumDep: Decimal; nbv: Decimal }> {
   const assets = await prisma.fixedAsset.findMany({
     where: {
-      entity: { code: entityCode },
+      entity: tenantId ? { code: entityCode, tenantId } : { code: entityCode },
       status: { in: ["IN_SERVICE", "IDLE"] },
     },
     include: {
