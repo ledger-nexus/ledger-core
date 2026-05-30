@@ -83,7 +83,7 @@ when crossing repo boundaries.
 | CC6.3 | Role-granular access | `src/lib/auth/policy.ts` — 16 named permissions × 4 roles (OWNER/ADMIN/MEMBER/VIEWER); every Server Action calls `requirePermission(...)` | Mitigated |
 | CC6.4 | Restricts access to data | Per-tenant scope on every customer-data query (CC6.1 entry); per-role policy gate (CC6.3 entry) | Mitigated |
 | CC6.5 | Asset disposal | N/A — cloud-only; covered by vendor responsibilities (Neon, Vercel) | Mitigated |
-| CC6.6 | Network boundary | `next.config.js` — security headers (HSTS, X-Frame, nosniff, Referrer-Policy, Permissions-Policy); internal HTTP boundaries token-gated via `INTERNAL_API_TOKEN`; CSP deferred to future | Partial |
+| CC6.6 | Network boundary | `next.config.js` — security headers (HSTS, X-Frame, nosniff, Referrer-Policy, Permissions-Policy); `src/middleware.ts` — per-request CSP with nonce + `strict-dynamic`, blocks framing + plugins, forces HTTPS upgrade (tests: `tests/csp-nonce.test.ts` 9/9); internal HTTP boundaries token-gated via `INTERNAL_API_TOKEN` | Mitigated |
 | CC6.7 | Restricts transmission (secrets) | `src/lib/env.ts` — boot-time validation refuses to boot in production with missing secrets; `scripts/pre-commit-secrets-scan.sh` blocks committing secrets; `src/lib/soc2/index.ts` exports `constantTimeEqual` for token comparison | Mitigated |
 | CC6.8 | Endpoint protection | N/A — cloud-only | N/A |
 | — | **Webhook signature verification** | Plaid: `integrations/src/lib/connectors/plaid/webhook-verification.ts` (ES256 JWT, 15 tests); Stripe: `src/app/api/billing/webhook/route.ts` (HMAC-SHA256) | Mitigated |

@@ -511,8 +511,11 @@ remain and still block a Type 2 audit:
   Provision a Sentry org + set `SENTRY_DSN` env var in each Vercel
   project and the integration goes live without further code. (Was
   the biggest remaining CC7 gap.)
-- **Content-Security-Policy** — deliberately deferred in
-  `next.config.js` pending nonce work.
+- ~~**Content-Security-Policy**~~ — Shipped 2026-05-29. Per-request
+  nonce + `strict-dynamic` set in `src/middleware.ts`; static
+  headers in `next.config.js` cover everything else. Allows Clerk,
+  Sentry, Stripe domains; blocks framing + plugins; forces HTTPS
+  upgrade. 9 unit tests at `tests/csp-nonce.test.ts`.
 - **Field-level encryption for confidential data at rest** — emails,
   party names, source documents all stored plaintext (Neon's
   Postgres-level encryption covers blob-at-rest; per-field is the
