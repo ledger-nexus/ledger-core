@@ -289,8 +289,12 @@ the polish + harder pieces:
       Pricing page, demo flow, /sign-up CTA.
 - [~] **Email templates beyond invites.** Shipped 2026-05-27 (later):
       je_approved + je_rejected templates fire automatically from the
-      maker-checker Server Actions. Period close 3 days out, AI suggestion
-      ready, sync failed, weekly digest are still future work.
+      maker-checker Server Actions. Extended 2026-05-29:
+      owner_transfer_offered + _accepted + _withdrawn/_declined wired
+      into the ownership-transfer actions (mirror of the bell-icon
+      notifications, fire-and-forget). Period close 3 days out, AI
+      suggestion ready, sync failed, weekly digest are still future
+      work.
 - [x] **Ownership transfer.** Shipped 2026-05-29 (commit `4827ad5`).
       Two-step opt-in: current OWNER initiates an offer; target
       accepts via `/admin/team`; either side can cancel.
