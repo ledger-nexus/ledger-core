@@ -23,8 +23,10 @@ vi.mock("../src/lib/rules/integration", () => ({
 import {
   approveJournalEntry,
   rejectJournalEntry,
+  withdrawJournalEntry,
   EntryNotPendingError,
   SelfApprovalError,
+  NotSubmitterError,
   RejectionReasonRequiredError,
 } from "../src/lib/accounting/approval";
 import { PeriodClosedError } from "../src/lib/accounting/types";
@@ -279,5 +281,127 @@ describe("rejectJournalEntry", () => {
         reason: "Some reason",
       })
     ).rejects.toThrow(EntryNotPendingError);
+  });
+});
+
+describe("withdrawJournalEntry", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("flips status PENDING_APPROVAL -> VOID when the submitter withdraws", async () => {
+    const prisma = mockPrismaWith({ entry: pendingEntry() });
+    const res = await withdrawJournalEntry(prisma as never, {
+      entryId: ENTRY_ID,
+      tenantId: TENANT_ID,
+      withdrawerUserId: SUBMITTER_ID,
+      withdrawerEmail: "maker@example.com",
+      reason: "Wrong period",
+    });
+    expect(res.newStatus).toBe("VOID");
+    expect(res.previousStatus).toBe("PENDING_APPROVAL");
+    // Atomicity: both writes happen inside one $transaction.
+    const txCalls = (prisma as unknown as { _txCalls: { journalEntryUpdate: number; recordEventCreate: number } })._txCalls;
+    expect(txCalls.journalEntryUpdate).toBe(1);
+    expect(txCalls.recordEventCreate).toBe(1);
+  });
+
+  it("works without a reason — withdrawal is the submitter's own choice", async () => {
+    const prisma = mockPrismaWith({ entry: pendingEntry() });
+    const res = await withdrawJournalEntry(prisma as never, {
+      entryId: ENTRY_ID,
+      tenantId: TENANT_ID,
+      withdrawerUserId: SUBMITTER_ID,
+      withdrawerEmail: "maker@example.com",
+      // no reason
+    });
+    expect(res.newStatus).toBe("VOID");
+  });
+
+  it("refuses when a non-submitter tries to withdraw — the action is intentional, not third-party", async () => {
+    const prisma = mockPrismaWith({ entry: pendingEntry() });
+    await expect(
+      withdrawJournalEntry(prisma as never, {
+        entryId: ENTRY_ID,
+        tenantId: TENANT_ID,
+        withdrawerUserId: APPROVER_ID, // not the submitter!
+        withdrawerEmail: "approver@example.com",
+      })
+    ).rejects.toThrow(NotSubmitterError);
+  });
+
+  it("refuses when the entry is not in PENDING_APPROVAL", async () => {
+    const prisma = mockPrismaWith({
+      entry: pendingEntry({ status: "POSTED" }),
+    });
+    await expect(
+      withdrawJournalEntry(prisma as never, {
+        entryId: ENTRY_ID,
+        tenantId: TENANT_ID,
+        withdrawerUserId: SUBMITTER_ID,
+        withdrawerEmail: "maker@example.com",
+      })
+    ).rejects.toThrow(EntryNotPendingError);
+  });
+
+  it("refuses when the entry doesn't exist or is in another tenant", async () => {
+    const prisma = mockPrismaWith({ entry: null });
+    await expect(
+      withdrawJournalEntry(prisma as never, {
+        entryId: ENTRY_ID,
+        tenantId: TENANT_ID,
+        withdrawerUserId: SUBMITTER_ID,
+        withdrawerEmail: "maker@example.com",
+      })
+    ).rejects.toThrow(EntryNotPendingError);
+  });
+
+  it("writes the reason with a `Withdrawn:` marker so audit-log readers can distinguish", async () => {
+    let captured: { rejectionReason?: string } = {};
+    const prisma = {
+      ...(mockPrismaWith({ entry: pendingEntry() }) as Record<string, unknown>),
+      $transaction: vi.fn().mockImplementation(async (cb: (t: unknown) => unknown) => {
+        return cb({
+          journalEntry: {
+            update: vi.fn().mockImplementation(async (args: { data: { rejectionReason?: string } }) => {
+              captured = args.data;
+            }),
+          },
+          recordEvent: { create: vi.fn() },
+        });
+      }),
+    };
+    await withdrawJournalEntry(prisma as never, {
+      entryId: ENTRY_ID,
+      tenantId: TENANT_ID,
+      withdrawerUserId: SUBMITTER_ID,
+      withdrawerEmail: "maker@example.com",
+      reason: "Wrong period",
+    });
+    expect(captured.rejectionReason).toBe("Withdrawn: Wrong period");
+  });
+
+  it("falls back to a generic marker when no reason is supplied", async () => {
+    let captured: { rejectionReason?: string } = {};
+    const prisma = {
+      ...(mockPrismaWith({ entry: pendingEntry() }) as Record<string, unknown>),
+      $transaction: vi.fn().mockImplementation(async (cb: (t: unknown) => unknown) => {
+        return cb({
+          journalEntry: {
+            update: vi.fn().mockImplementation(async (args: { data: { rejectionReason?: string } }) => {
+              captured = args.data;
+            }),
+          },
+          recordEvent: { create: vi.fn() },
+        });
+      }),
+    };
+    await withdrawJournalEntry(prisma as never, {
+      entryId: ENTRY_ID,
+      tenantId: TENANT_ID,
+      withdrawerUserId: SUBMITTER_ID,
+      withdrawerEmail: "maker@example.com",
+    });
+    expect(captured.rejectionReason).toBe("Withdrawn by submitter");
   });
 });

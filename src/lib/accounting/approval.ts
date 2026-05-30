@@ -1,6 +1,6 @@
 // Maker-checker approval lifecycle for journal entries.
 //
-// Three transitions:
+// Four transitions:
 //
 //   approveJournalEntry  — PENDING_APPROVAL -> POSTED
 //                          Refuses if the period has closed since submit,
@@ -10,6 +10,15 @@
 //
 //   rejectJournalEntry   — PENDING_APPROVAL -> VOID (with reason)
 //                          Same separation-of-duties guard.
+//
+//   withdrawJournalEntry — PENDING_APPROVAL -> VOID (by submitter)
+//                          Inverse SoD check: only the original submitter
+//                          can withdraw their own pending submission.
+//                          Reuses the rejection columns (rejectedAt /
+//                          rejectedById / rejectionReason) — distinguished
+//                          from a real rejection by the marker
+//                          (submitterId === rejectedById) and a
+//                          "Withdrawn:" prefix on the reason.
 //
 //   resubmitJournalEntry — VOID (rejected) -> PENDING_APPROVAL
 //                          Lets the submitter retry after rejection.
@@ -232,9 +241,9 @@ export async function rejectJournalEntry(
   }
   if (entry.submittedById === input.rejectorUserId) {
     // Same separation-of-duties guard: don't let the submitter reject
-    // their own entry. They should use the (future) "withdraw" flow.
-    // Today, withdrawing your own pending entry isn't supported — ask
-    // another admin to reject it.
+    // their own entry. The intentional withdrawal path is
+    // withdrawJournalEntry below — which uses the same VOID terminal
+    // state but a different audit trail.
     throw new SelfApprovalError(input.entryId);
   }
 
@@ -259,6 +268,112 @@ export async function rejectJournalEntry(
         newValue: { status: "VOID", reason },
         actorUserId: input.rejectorUserId,
         actorReason: `maker-checker: rejected — ${reason}`,
+      },
+    });
+  });
+
+  return {
+    entryId: entry.id,
+    entryNumber: entry.entryNumber,
+    previousStatus: "PENDING_APPROVAL",
+    newStatus: "VOID",
+  };
+}
+
+// ─── Withdraw (submitter cancels their own pending submission) ─────────────
+
+export class NotSubmitterError extends Error {
+  constructor(public readonly entryId: string) {
+    super(
+      `Only the original submitter can withdraw a pending entry. ` +
+        `Ask an ADMIN to reject it if you can't withdraw yourself.`
+    );
+    this.name = "NotSubmitterError";
+  }
+}
+
+export interface WithdrawJournalEntryInput {
+  /** Entry to withdraw. Must currently be PENDING_APPROVAL. */
+  entryId: string;
+  /** Tenant scope check — the entry's tenantId must equal this. */
+  tenantId: string;
+  /** The withdrawer. Must be the original submittedById. */
+  withdrawerUserId: string;
+  withdrawerEmail: string;
+  /**
+   * Optional free-text reason ("changed my mind", "wrong period",
+   * "found a mistake before approval"). Stored on rejectionReason
+   * with a "Withdrawn:" prefix so the audit log distinguishes it
+   * from an admin rejection.
+   */
+  reason?: string;
+}
+
+export interface WithdrawJournalEntryResult {
+  entryId: string;
+  entryNumber: string;
+  previousStatus: "PENDING_APPROVAL";
+  newStatus: "VOID";
+}
+
+export async function withdrawJournalEntry(
+  prisma: PrismaClient,
+  input: WithdrawJournalEntryInput
+): Promise<WithdrawJournalEntryResult> {
+  const entry = await prisma.journalEntry.findFirst({
+    where: { id: input.entryId, tenantId: input.tenantId },
+    select: {
+      id: true,
+      entryNumber: true,
+      status: true,
+      submittedById: true,
+    },
+  });
+  if (!entry) {
+    throw new EntryNotPendingError(input.entryId, "not-found");
+  }
+  if (entry.status !== "PENDING_APPROVAL") {
+    throw new EntryNotPendingError(input.entryId, entry.status);
+  }
+  if (entry.submittedById !== input.withdrawerUserId) {
+    // Inverse of the rejection SoD check: only the submitter can
+    // withdraw their own submission. A non-submitter who wants this
+    // entry voided uses rejectJournalEntry instead.
+    throw new NotSubmitterError(input.entryId);
+  }
+
+  // Normalize the reason: trim, fall back to a generic marker, and
+  // prefix with "Withdrawn:" so downstream readers (audit log, JE
+  // detail page) can distinguish withdrawal from rejection by the
+  // reason string alone — in addition to the submitterId === rejectedById
+  // structural marker.
+  const trimmed = input.reason?.trim() ?? "";
+  const reasonText =
+    trimmed.length > 0
+      ? `Withdrawn: ${trimmed}`
+      : `Withdrawn by submitter`;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.journalEntry.update({
+      where: { id: entry.id },
+      data: {
+        status: "VOID",
+        rejectedById: input.withdrawerUserId,
+        rejectedAt: new Date(),
+        rejectionReason: reasonText,
+        updatedBy: input.withdrawerEmail,
+      },
+    });
+    await tx.recordEvent.create({
+      data: {
+        tenantId: input.tenantId,
+        recordType: "JournalEntry",
+        recordId: entry.id,
+        eventType: "STATE_CHANGED",
+        previousValue: { status: "PENDING_APPROVAL" },
+        newValue: { status: "VOID", withdrawn: true, reason: trimmed || null },
+        actorUserId: input.withdrawerUserId,
+        actorReason: `maker-checker: withdrawn by submitter`,
       },
     });
   });

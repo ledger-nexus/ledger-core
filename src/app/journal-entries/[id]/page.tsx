@@ -16,6 +16,7 @@ import { formatDate, formatMoney } from "@/lib/utils/format";
 import ReverseButton from "./reverse-button";
 import NotesCard from "./notes-card";
 import { ApprovalActions } from "./approval-actions";
+import { WithdrawAction } from "./withdraw-action";
 
 export default async function JournalEntryDetailPage({
   params,
@@ -134,16 +135,33 @@ export default async function JournalEntryDetailPage({
         </div>
       </div>
 
-      {/* Maker-checker UI surfaces. PENDING_APPROVAL entries show the
-          approve/reject card to ADMIN+; rejected entries show the
-          rejection reason for the submitter to see what to fix. */}
+      {/* Maker-checker UI surfaces.
+          PENDING_APPROVAL surfaces three mutually-compatible cards:
+            1. ApprovalActions — for ADMIN+ approvers (separation-of-
+               duties blocks the submitter from approving / rejecting
+               their own entry).
+            2. WithdrawAction — for the submitter (anyone, including an
+               admin who happened to be the submitter).
+            3. A passive "awaiting approval" hint for the non-admin
+               non-submitter case (so they can see why their report is
+               missing this entry).
+          VOID entries with a rejection reason render below — the
+          message label flips between "Rejected" and "Withdrawn"
+          based on the reason-text marker. */}
       {entry.status === "PENDING_APPROVAL" &&
         tenant &&
-        canApproveJournalEntries(tenant.role) && (
+        canApproveJournalEntries(tenant.role) &&
+        entry.submittedById !== currentUser?.id && (
           <ApprovalActions entryId={entry.id} entryNumber={entry.entryNumber} />
         )}
       {entry.status === "PENDING_APPROVAL" &&
-        (!tenant || !canApproveJournalEntries(tenant.role)) && (
+        currentUser &&
+        entry.submittedById === currentUser.id && (
+          <WithdrawAction entryId={entry.id} entryNumber={entry.entryNumber} />
+        )}
+      {entry.status === "PENDING_APPROVAL" &&
+        (!tenant || !canApproveJournalEntries(tenant.role)) &&
+        entry.submittedById !== currentUser?.id && (
           <Card>
             <CardContent className="px-5 py-3 bg-amber-50">
               <div className="text-sm text-amber-800">
@@ -153,23 +171,38 @@ export default async function JournalEntryDetailPage({
             </CardContent>
           </Card>
         )}
-      {entry.status === "VOID" && entry.rejectionReason && (
-        <Card>
-          <CardContent className="px-5 py-3 bg-red-50">
-            <div className="text-sm font-medium text-red-900">
-              Rejected
-            </div>
-            <p className="mt-1 text-xs text-red-700 whitespace-pre-wrap">
-              {entry.rejectionReason}
-            </p>
-            {entry.rejectedAt && (
-              <p className="mt-1 text-[11px] text-red-600">
-                Rejected on {entry.rejectedAt.toISOString().slice(0, 10)}
+      {entry.status === "VOID" && entry.rejectionReason && (() => {
+        // "Withdrawn:" prefix is the marker the withdrawal lifecycle
+        // writes (in addition to submittedById === rejectedById). Use it
+        // to flip the label + color from rejection-amber to neutral-ink.
+        const wasWithdrawn = entry.rejectionReason.startsWith("Withdrawn");
+        return (
+          <Card>
+            <CardContent
+              className={`px-5 py-3 ${wasWithdrawn ? "bg-ink-50" : "bg-red-50"}`}
+            >
+              <div
+                className={`text-sm font-medium ${wasWithdrawn ? "text-ink-900" : "text-red-900"}`}
+              >
+                {wasWithdrawn ? "Withdrawn by submitter" : "Rejected"}
+              </div>
+              <p
+                className={`mt-1 text-xs whitespace-pre-wrap ${wasWithdrawn ? "text-ink-700" : "text-red-700"}`}
+              >
+                {entry.rejectionReason}
               </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+              {entry.rejectedAt && (
+                <p
+                  className={`mt-1 text-[11px] ${wasWithdrawn ? "text-ink-500" : "text-red-600"}`}
+                >
+                  {wasWithdrawn ? "Withdrawn" : "Rejected"} on{" "}
+                  {entry.rejectedAt.toISOString().slice(0, 10)}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Field label="Entity" value={entry.entity.code} />
