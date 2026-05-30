@@ -10,7 +10,7 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -20,19 +20,33 @@ import { formatDate } from "@/lib/utils/format";
 import PeriodActions from "./period-actions";
 
 export default async function PeriodsPage() {
-  const scope = getScope();
+  // Tenant-verified scope. Closes the cross-tenant read leak the
+  // raw lc-scope cookie used to enable.
+  const scope = await getCurrentScope();
   const user = await getCurrentUser();
   const admin = isAdmin(user);
 
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
-  const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode },
-    select: { id: true, code: true, name: true },
-  });
-  const book = await prisma.book.findUnique({
-    where: { code: scope.bookCode },
-    select: { id: true, code: true, name: true },
-  });
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity to view periods."
+      />
+    );
+  }
+
+  // Entity is already resolved + tenant-verified inside getCurrentScope.
+  // Look up by entityId directly to skip the redundant findFirst.
+  const [entity, book] = await Promise.all([
+    prisma.legalEntity.findUnique({
+      where: { id: scope.entityId },
+      select: { id: true, code: true, name: true },
+    }),
+    prisma.book.findUnique({
+      where: { code: scope.bookCode },
+      select: { id: true, code: true, name: true },
+    }),
+  ]);
 
   if (!entity || !book) {
     return (
@@ -43,10 +57,11 @@ export default async function PeriodsPage() {
     );
   }
 
-  // Pull every period across every calendar. In v1 a company typically
-  // has ONE calendar (monthly 12-period); multi-calendar tenants are
-  // rare. We sort by startsOn DESC so the most recent month is on top.
+  // Periods are per-calendar; calendars belong to a tenant. Scope to
+  // the resolved tenant so we never cross over into another tenant's
+  // fiscal-calendar setup.
   const periods = await prisma.period.findMany({
+    where: { tenantId: scope.tenantId },
     orderBy: { startsOn: "desc" },
     select: {
       id: true,

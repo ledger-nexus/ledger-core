@@ -11,7 +11,8 @@
 import { notFound } from "next/navigation";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
+import { EmptyState } from "@/components/ui/empty-state";
 import { NewEntryForm } from "./new-entry-form";
 
 export default async function NewEntryPage({
@@ -19,19 +20,32 @@ export default async function NewEntryPage({
 }: {
   searchParams: { duplicate?: string };
 }) {
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-ink-900">New journal entry</h2>
+        <EmptyState
+          title="No scope available"
+          description="Sign in and select a tenant with at least one entity before posting an entry."
+        />
+      </div>
+    );
+  }
   const [accounts, parties] = await Promise.all([
     prisma.account.findMany({
       where: {
         active: true,
-        OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
+        tenantId: scope.tenantId,
+        OR: [{ entityId: null }, { entityId: scope.entityId }],
       },
       orderBy: { code: "asc" },
       select: { code: true, name: true, type: true },
     }),
     prisma.party.findMany({
       where: {
-        OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
+        tenantId: scope.tenantId,
+        OR: [{ entityId: null }, { entityId: scope.entityId }],
       },
       orderBy: { code: "asc" },
       select: { code: true, displayName: true },

@@ -4,8 +4,7 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -22,25 +21,25 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default async function AccountsPage() {
-  const tenant = await getCurrentTenant();
-  if (!tenant) {
+  // Tenant-verified scope replaces getScope() + manual getCurrentTenant().
+  const scope = await getCurrentScope();
+  if (!scope) {
     return (
       <EmptyState
-        title="No active tenant"
-        description="Sign in and select a tenant to view the chart of accounts."
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity to view the chart of accounts."
       />
     );
   }
   const user = await getCurrentUser();
   const admin = isAdmin(user);
-  const scope = getScope();
   const accounts = await prisma.account.findMany({
     where: {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       active: true,
       OR: [
         { entityId: null },
-        { entity: { code: scope.entityCode } },
+        { entityId: scope.entityId },
       ],
     },
     orderBy: [{ type: "asc" }, { code: "asc" }],

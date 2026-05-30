@@ -4,7 +4,7 @@ import { BookSwitcher } from "@/components/nav/book-switcher";
 import { UserSwitcher } from "@/components/nav/user-switcher";
 import { NotificationBell } from "@/components/nav/notification-bell";
 import { TenantSwitcher } from "@/components/nav/tenant-switcher";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { isClerkEnabled } from "@/lib/auth/clerk";
@@ -19,8 +19,13 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const scope = getScope();
-  const [currentUser, currentTenant, users] = await Promise.all([
+  // Use the tenant-verified scope so the header reflects what's
+  // actually being queried. With raw getScope(), a stale cookie naming
+  // a different tenant's entity would show up in the header even
+  // though the pages (after the migration to getCurrentScope) render
+  // this tenant's fallback entity — confusing UX.
+  const [scope, currentUser, currentTenant, users] = await Promise.all([
+    getCurrentScope(),
     getCurrentUser(),
     getCurrentTenant(),
     prisma.user.findMany({
@@ -55,8 +60,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       <span className="mx-2 text-ink-300">·</span>
                     </>
                   )}
-                  {scope.entityCode} <span className="text-ink-400">/</span>{" "}
-                  <span className="text-ink-700">{scope.bookCode}</span>
+                  {scope ? (
+                    <>
+                      {scope.entityCode} <span className="text-ink-400">/</span>{" "}
+                      <span className="text-ink-700">{scope.bookCode}</span>
+                    </>
+                  ) : (
+                    <span className="text-ink-400">no scope</span>
+                  )}
                 </h1>
                 <p className="text-xs text-ink-500">
                   Scope: every report on this page is computed for the (entity, book) above.
@@ -85,13 +96,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     </CardContent>
                   </Card>
                 </div>
-                <div className="w-64">
-                  <Card className="shadow-none">
-                    <CardContent className="px-3 py-3">
-                      <BookSwitcher scope={scope} />
-                    </CardContent>
-                  </Card>
-                </div>
+                {scope && (
+                  <div className="w-64">
+                    <Card className="shadow-none">
+                      <CardContent className="px-3 py-3">
+                        <BookSwitcher scope={scope} />
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
               </div>
             </header>
             <div className="flex-1 overflow-y-auto px-8 py-6">{children}</div>

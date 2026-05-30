@@ -15,7 +15,7 @@ import {
 } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { canClosePeriods } from "@/lib/auth/policy";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import {
   Card,
   CardContent,
@@ -69,7 +69,9 @@ export default async function FxRevaluationPage() {
     );
   }
 
-  const scope = await getScope();
+  // Tenant-verified scope. The form already null-handles via the
+  // `?? ""` / `?? "US_GAAP"` fallbacks below, so we don't gate-block.
+  const scope = await getCurrentScope();
   const today = new Date().toISOString().slice(0, 10);
 
   return (

@@ -7,25 +7,25 @@
 // each line in the new-entry form. Now they paste once.
 
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { EmptyState } from "@/components/ui/empty-state";
 import PasteForm from "./paste-form";
 
 export default async function PastePage() {
-  const tenant = await getCurrentTenant();
-  if (!tenant) {
+  // Tenant-verified scope replaces the prior getScope() + manual
+  // getCurrentTenant() pattern.
+  const scope = await getCurrentScope();
+  if (!scope) {
     return (
       <EmptyState
-        title="No active tenant"
-        description="Sign in and select a tenant before pasting entries."
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before pasting entries."
       />
     );
   }
-  const scope = getScope();
   const [entities, books] = await Promise.all([
     prisma.legalEntity.findMany({
-      where: { tenantId: tenant.id },
+      where: { tenantId: scope.tenantId },
       orderBy: { code: "asc" },
       select: { code: true, name: true },
     }),

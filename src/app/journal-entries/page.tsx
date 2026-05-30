@@ -11,8 +11,7 @@
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +26,21 @@ export default async function JournalEntriesPage({
 }: {
   searchParams: { from?: string; to?: string; q?: string; page?: string };
 }) {
-  const scope = getScope();
+  // Tenant-verified scope. Closes the cross-tenant read leak the raw
+  // lc-scope cookie used to enable (supersedes the prior getScope() +
+  // separate getCurrentTenant() pattern).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-ink-900">Journal Entries</h2>
+        <EmptyState
+          title="No scope available"
+          description="Sign in and select a tenant with at least one entity to view journal entries."
+        />
+      </div>
+    );
+  }
   const from = searchParams.from ?? "2026-01-01";
   const to = searchParams.to ?? "2026-12-31";
   const q = (searchParams.q ?? "").trim();
@@ -37,13 +50,6 @@ export default async function JournalEntriesPage({
   const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
   const fromDate = new Date(from);
   const toDate = new Date(to);
-
-  // Tenant-scope (Phase 4c): defense-in-depth against cross-tenant reads.
-  // JournalEntry has a denormalized tenantId; filtering on it cuts the
-  // query plan AND closes the leak when Phase 4b makes entityCode no
-  // longer globally unique.
-  const tenant = await getCurrentTenant();
-  const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
 
   // Search predicate. Postgres' `mode: "insensitive"` does an ILIKE
   // under the hood; for v1 we accept the full-table scan (the date
@@ -69,8 +75,8 @@ export default async function JournalEntriesPage({
     : {};
 
   const whereClause = {
-    ...tenantFilter,
-    entity: { code: scope.entityCode },
+    tenantId: scope.tenantId,
+    entityId: scope.entityId,
     book: { code: scope.bookCode },
     documentDate: { gte: fromDate, lte: toDate },
     ...searchFilter,
