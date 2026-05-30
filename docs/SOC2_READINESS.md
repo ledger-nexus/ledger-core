@@ -1,8 +1,21 @@
 # SOC 2 readiness assessment — ledger-nexus portfolio
 
-**Status:** Pre-readiness. Not audit-ready.
-**Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`) as of this commit.
+**Status:** Pre-readiness — but materially closer than the original
+assessment indicated. Several gaps the original draft rated "Critical
+gap" or "Missing" have shipped in subsequent work. See **"What's
+shipped since this doc was first written"** at the bottom for the
+delta and the helper-module reference.
+
+**Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`).
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022), Security TSC + Common Criteria CC1–CC9. Availability, Processing Integrity, Confidentiality also referenced where in scope.
+
+**Code-side reference:** `src/lib/soc2/index.ts` is the standing
+helper module. Every new feature should import its primitives
+(`assertTenantScope`, `constantTimeEqual`, `redactPii`,
+`sanitizeError`, `auditedMutation`, `schemaFingerprint`) rather
+than re-implement. The companion `/soc2` skill auto-surfaces this
+to future Claude sessions whenever they touch auth, data, audit,
+or error-handling code.
 
 ---
 
@@ -463,3 +476,53 @@ Before further work, three business decisions need answers:
 3. **Customer profile:** Who will request SOC 2? Enterprise SaaS buyers? Banks? Investors during diligence? Profile drives which TSCs need to be in scope (Privacy vs Confidentiality vs both).
 
 These aren't code questions. Answers shape Phase 3+ priorities.
+
+---
+
+## What's shipped since this doc was first written (2026-05-29 delta)
+
+Several "Missing" / "Critical gap" entries in the tables above are
+**stale** as of 2026-05-29. The actual code now covers:
+
+| Original rating | Area | Current state | Citation |
+|---|---|---|---|
+| Critical gap (CC6.1) | Auth provider | Clerk wired in production; dev-stub gated by env | `src/lib/auth/clerk.ts`, `src/lib/auth/current-user.ts` |
+| Critical (CC6.3) | Role-granular RBAC | Per-tenant OWNER/ADMIN/MEMBER/VIEWER + policy module with 16 named permissions | `src/lib/auth/policy.ts`, mirrored to all 4 companion repos |
+| Critical (CC5, CC7) | Audit logging | `AuditLog` model + `auditPrivilegedAction` helper; called from every privileged Server Action | `src/lib/audit/log.ts`; `audit_log` table |
+| Critical (CC8.4) | Code review gate | CODEOWNERS present; security headers documented; helper module standardizes review patterns | `.github/CODEOWNERS`; this delta section |
+| High (CC6.7) | HSTS / security headers | HSTS (1y + subdomains + preload), X-Frame DENY, nosniff, Referrer-Policy strict-origin, Permissions-Policy locked | `next.config.js` |
+| High (CC8.1) | Branch protection docs | Multi-tenant audit-pass landed in 24 commits across 4 repos with documented commit messages naming CCs | Session commits `1435559` → `f279111` |
+| Critical (CC5) | Maker-checker workflow | JE approval/reject/withdraw + threshold + separation-of-duties guards | `src/lib/accounting/approval.ts`, `src/app/actions/approve-journal-entry.ts` |
+| Missing (CC9.1) | Webhook signature verification | Plaid JWT ES256 + Stripe HMAC-SHA256, both fully wired | `integrations/src/lib/connectors/plaid/webhook-verification.ts`, billing webhook handler |
+| Missing (CC6.4) | Rate limiting | Per-tenant + per-user AI rate limit + monthly Anthropic spend cap + 80%/100% alerts | per-repo `src/lib/auth/ai-budget.ts`, `AiSpendAlert` table |
+| Missing (CC6.2) | Tenant onboarding | Full workflow: sign-up → create workspace → invite + accept; plan limits enforced | `/admin/team`, `tenant_invite` table |
+| Missing | Ownership transfer | Two-step opt-in with audit + bell + email notifications | `src/lib/auth/owner-transfer.ts` (commit `4827ad5` et seq.) |
+| (new) | Tenant scope on every query | Audit-pass swept TB/BS/IS/cash-flow/BTD/M3/consolidation/QBO/NS/seed/12 callers | session commits `1435559` → `f279111`; helper `assertTenantScope` |
+| Missing (CC2.2) | `/.well-known/security.txt` | Shipped 2026-05-29 (this commit) | `public/.well-known/security.txt` |
+
+### What's NOT shipped (the real remaining gaps)
+
+Even after the above, these are unaddressed and still block a Type 2
+audit:
+
+- **Sentry / Datadog error monitoring** — biggest single remaining
+  CC7 gap. Pick one and wire it in all 5 repos.
+- **Content-Security-Policy** — deliberately deferred in `next.config.js`
+  pending nonce work.
+- **Dependabot + `npm audit` gating in CI** — known CVEs likely still
+  present in transitive deps.
+- **Field-level encryption for confidential data at rest** — emails,
+  party names, source documents all stored plaintext.
+- **Data classification taxonomy** — no doc; `docs/policies/data-classification.md`
+  is a template, not filled in.
+- **Vendor SOC 2 receipt inventory** — Vercel, Neon, Anthropic, Plaid,
+  Clerk SOC 2 reports need to be downloaded and stored.
+- **Formal risk register** — `docs/policies/risk-register.md` template
+  exists; not populated.
+- **External penetration test** — $5–15k engagement.
+
+The helper module (`src/lib/soc2/index.ts`) + `/soc2` skill close
+the **"future code drifts from these standards"** failure mode that
+the user explicitly called out — every new feature now has a
+canonical reference to import from, and Claude sessions auto-invoke
+the framework on auth/data/audit work.

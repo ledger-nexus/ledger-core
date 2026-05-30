@@ -1,0 +1,10 @@
+# SOC 2 CC2.2 — external responsible-disclosure channel.
+# RFC 9116: https://www.rfc-editor.org/rfc/rfc9116
+
+Contact: mailto:security@revrecengine.com
+Expires: 2027-05-29T00:00:00.000Z
+Encryption: https://revrecengine.com/.well-known/pgp-key.asc
+Preferred-Languages: en
+Canonical: https://revrecengine.com/.well-known/security.txt
+Policy: https://revrecengine.com/security
+Hiring: https://revrecengine.com/careers

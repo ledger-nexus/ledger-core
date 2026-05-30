@@ -203,11 +203,19 @@ from feature work.
   60/user/minute, $50/tenant/month. Env-overridable.
 
 **SOC 2 readiness:**
-- Audit log with hash chaining (CC4)
-- Security headers + CSP (CC6)
+- Audit log with hash chaining (CC4) — `audit_log` + `auditPrivilegedAction`
+- Security headers, HSTS, Permissions-Policy (CC6) — `next.config.js`
 - CI scans: gitleaks, npm audit (CC7)
 - CODEOWNERS
-- Written policies in `docs/soc2/` + 90-day implementation roadmap
+- Written policies in `docs/policies/` (9 docs) + readiness gap analysis at
+  `docs/SOC2_READINESS.md`
+- **Helper module + skill (2026-05-29):** `src/lib/soc2/index.ts` is the
+  standing reference every new feature imports from — primitives for
+  tenant scope (`assertTenantScope`), constant-time compare, PII
+  redaction, sanitized error responses, audited mutations,
+  schema-drift detection. The `/soc2` skill auto-surfaces this to
+  Claude sessions on any auth / data / audit feature work, ensuring
+  future code doesn't drift from the controls.
 
 ---
 

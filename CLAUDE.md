@@ -116,6 +116,52 @@ The roadmap from v0.2 (universal substrate scaffolding) to v1.0 (full multi-enti
 - The scope cookie (`lc-scope`) is the canonical source for which `(entity, book)` the UI is viewing. Read with `getScope()` (Server Components); write via `setScopeAction` (Server Action). Never plumb scope through query params except for one-shot overrides (e.g. the BTD report's from/to book selectors).
 - Database access: import `prisma` from `@/lib/db` (the singleton). Never `new PrismaClient()` in a page or component — that exhausts the connection pool in dev under HMR.
 
+### SOC 2 — every change must satisfy these controls
+This is financial software. SOC 2 Trust Services Criteria apply. The full
+framework + helper module is in `src/lib/soc2/index.ts`; the `/soc2`
+skill auto-surfaces it on auth/data/audit work. Before completing any
+task, verify the change conforms to the rules below — if a rule can't
+be satisfied, flag it explicitly and ask before proceeding. Run
+`/soc2-check` on the diff before marking work done.
+
+- **Multi-tenant isolation (CC6.1):** every customer-data table carries
+  `tenantId` (UUID, `@db.Uuid`, `@@index([tenantId])`). Every query that
+  loads a row by id ALSO constrains by tenantId. Use
+  `findFirst({ where: { id, tenantId } })` then `assertTenantScope()`
+  from `@/lib/soc2` — never `findUnique({ where: { id } })` on
+  customer data. The 2026-05-29 audit-pass swept this across reports,
+  mappers, seeds, and UI; do not regress.
+- **Audit logging (CC5/CC6/CC7):** every privileged mutation calls
+  `auditPrivilegedAction` (from `@/lib/audit/log`, re-exported by
+  `@/lib/soc2`). For new Server Actions, use the `auditedMutation()`
+  wrapper which emits SUCCESS + FAILURE rows around the mutation.
+  `audit_log` is append-only — never UPDATE or DELETE rows.
+- **Authorization is per-tenant role-granular (CC6.3):** every Server
+  Action calls `requirePermission(...)` against `@/lib/auth/policy`.
+  "User is signed in" is necessary but NEVER sufficient — the role
+  must match the named permission.
+- **Input validation (CC6.8):** every Server Action body validates
+  via Zod before use. Never trust a client-supplied id without
+  re-checking ownership server-side via the read-with-tenantId
+  pattern.
+- **Secrets handling (CC6.7):** no hardcoded secrets, API keys, or
+  tokens. Read from `process.env`. Token comparisons go through
+  `constantTimeEqual` from `@/lib/soc2` — never `===`. Webhook
+  signatures (Plaid JWT, Stripe HMAC) are always verified.
+- **Logging hygiene (Confidentiality TSC):** every `console.log` /
+  Sentry call that includes user data runs the payload through
+  `redactPii()` first. The PII field list lives in
+  `src/lib/soc2/index.ts`; add new sensitive field names there, not
+  inline.
+- **Error responses (CC7):** every error sent to a client goes
+  through `sanitizeError()`. Raw `err.message + err.stack` MUST NOT
+  cross the wire — it leaks schema, paths, and config.
+
+When you finish a unit of work, run `/soc2-check` on the diff. Commit
+messages on security-relevant changes should cite the Common Criterion
+(e.g., `(CC6 — IDOR defense)`). See `docs/SOC2_READINESS.md` for the
+full gap analysis; update it when a gap closes.
+
 ## How to start a session
 
 1. Read this file
