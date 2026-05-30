@@ -310,9 +310,13 @@ the polish + harder pieces:
       from third-party rejection. UI: WithdrawAction client component
       on `/journal-entries/[id]` for PENDING_APPROVAL entries where
       `entry.submittedById === currentUser.id`. 6 new lifecycle tests.
-- [ ] **Threshold-based JE approval.** Today requireJeApproval is
-      tenant-wide on/off. A natural future enhancement is "only entries
-      above $X require approval".
+- [x] **Threshold-based JE approval.** Shipped 2026-05-29
+      (commit `8eedcbe`). Tenant.jeApprovalMinAmount Decimal? (18,4);
+      null preserves the original binary behavior, positive value
+      filters which entries actually queue. Pure helper
+      `resolveApprovalRoute` (4-axis matrix → ApprovalRoute) with 11
+      unit tests. `/admin/team` adds a $-prefixed numeric input
+      below the existing toggle.
 
 ### Category 3 — Fill out the accounting features
 
