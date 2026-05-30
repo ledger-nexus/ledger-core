@@ -4,7 +4,7 @@ The single source of truth for "where the portfolio is and what's next."
 Updated end-of-session so the next pickup (human or Claude Code) doesn't
 need to re-derive context.
 
-**Last updated:** 2026-05-29 (post-multi-tenant audit-pass + self-audit)
+**Last updated:** 2026-05-29 (post-multi-tenant audit-pass + getScope sweep)
 
 ---
 
@@ -217,17 +217,23 @@ Three categories, in roughly the order they should land.
 
 ### Category 1 — Close the door (security + multi-tenant completeness)
 
-Mostly done after this session. Remaining:
+Effectively complete after the 2026-05-29 audit-pass + getScope sweep.
+Remaining:
 
 - [ ] **External pen test.** Four self-administered passes is good
       discipline but doesn't substitute for an independent red team.
-- [ ] **Anthropic spend alerting.** A cap blocks; an alert warns.
-      Slack/email at 80% of the per-tenant monthly cap.
-- [ ] **Rate-limit cleanup cron.** `RateLimitEvent` rows grow indefinitely
-      today. Periodic `DELETE WHERE createdAt < now() - INTERVAL '7 days'`
-      either via pg_boss or `vercel.json` cron.
-- [ ] **`/admin/ai-budget` page.** Per-tenant view of this month's spend,
-      cap, and recent throttled requests. Data is already in the tables.
+      Worth $5–15k; before signing first paying customer.
+- [x] **Anthropic spend alerting.** Shipped — `emitSpendAlertIfThresholdCrossed`
+      in each AI-using companion's `src/lib/auth/ai-budget.ts`. 80% + 100%
+      thresholds, AiSpendAlert table for per-repo per-month dedup, optional
+      AI_ALERT_WEBHOOK_URL for Slack/Discord/email-relay POSTs.
+- [x] **Rate-limit cleanup cron.** Shipped — `vercel.json` cron at 3 AM
+      nightly hits `/api/cron/cleanup-rate-limits` in each companion;
+      bounded delete of RateLimitEvent rows older than 7 days.
+- [x] **`/admin/ai-budget` page.** Shipped — `src/app/admin/ai-budget/page.tsx`
+      reads cross-repo aggregates via raw SQL (substrate→consumer reverse
+      dependency avoided), shows per-tenant month-to-date spend, recent
+      threshold alerts, last-30-days usage-report panel.
 
 ### Category 2 — Make it usable by a stranger (productize)
 
@@ -273,9 +279,12 @@ the polish + harder pieces:
       separation-of-duties guard + period-close re-check. /journal-
       entries/pending FIFO queue + inline approve/reject card on entry
       detail. Tenant.requireJeApproval toggle on /admin/team.
-- [ ] **Stripe usage-based metering.** Report AI token volume to a
-      metered Price in Stripe via a daily cron. Lets us bill heavy AI
-      users more than light ones without a custom invoicing flow.
+- [x] **Stripe usage-based metering.** Shipped 2026-05-28
+      (commit `e0458d2`). Daily cron `/api/cron/report-ai-usage`
+      reports the prior day's per-tenant token volume to a metered
+      Price in Stripe. AiUsageReport table per-day idempotency. Lets
+      us bill heavy AI users more than light ones without a custom
+      invoicing flow.
 - [ ] **Marketing site.** Separate Next.js project (or static site).
       Pricing page, demo flow, /sign-up CTA.
 - [~] **Email templates beyond invites.** Shipped 2026-05-27 (later):
