@@ -94,6 +94,18 @@ model Tenant {
   /// Toggle via /admin/team or the future /admin/settings page.
   requireJeApproval Boolean @default(false)
 
+  /// Optional minimum entry total (sum of debit lines) above which
+  /// requireJeApproval kicks in. Null means "every non-admin entry
+  /// requires approval" (the original binary behavior). When set,
+  /// entries whose total is BELOW this threshold post directly even
+  /// with requireJeApproval=true — useful for tenants that want
+  /// oversight on material entries (e.g. $1,000+) without queue-
+  /// thrashing on petty cash. Comparison is in the entry's currency;
+  /// ledger-core posts one currency per entry so cross-currency
+  /// thresholds aren't a concern. Evaluated only when
+  /// requireJeApproval=true.
+  jeApprovalMinAmount Decimal? @db.Decimal(18, 4)
+
   /// Maximum Anthropic spend per calendar month, in USD.
   /// Enforced by the companion repos' AI Server Actions (recon's
   /// proposeMatches, revenue-rec's extractContract, fa-amort's

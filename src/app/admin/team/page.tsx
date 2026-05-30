@@ -75,7 +75,7 @@ export default async function TeamPage() {
     getTenantLimits(tenant.id),
     prisma.tenant.findUnique({
       where: { id: tenant.id },
-      select: { requireJeApproval: true },
+      select: { requireJeApproval: true, jeApprovalMinAmount: true },
     }),
   ]);
 
@@ -148,6 +148,11 @@ export default async function TeamPage() {
         <CardContent>
           <ApprovalToggle
             initialEnabled={tenantConfig?.requireJeApproval ?? false}
+            initialThreshold={
+              tenantConfig?.jeApprovalMinAmount
+                ? tenantConfig.jeApprovalMinAmount.toString()
+                : null
+            }
           />
         </CardContent>
       </Card>

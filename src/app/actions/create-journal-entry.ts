@@ -2,8 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import Decimal from "decimal.js";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { resolveApprovalRoute } from "@/lib/accounting/approval-threshold";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { canApproveJournalEntries } from "@/lib/auth/policy";
@@ -47,16 +49,18 @@ export async function createJournalEntryAction(
     // AND the current user is not ADMIN+, the entry goes to
     // PENDING_APPROVAL instead of POSTED. ADMIN/OWNER bypass the queue
     // (they're the approvers; their own direct postings are trusted).
+    // Threshold support: when Tenant.jeApprovalMinAmount > 0, only
+    // entries whose total >= threshold actually queue — smaller entries
+    // post directly even when the flag is on. See
+    // src/lib/accounting/approval-threshold.ts for the pure helper.
     const tenant = await getCurrentTenant();
     const tenantConfig = tenant
       ? await prisma.tenant.findUnique({
           where: { id: tenant.id },
-          select: { requireJeApproval: true },
+          select: { requireJeApproval: true, jeApprovalMinAmount: true },
         })
       : null;
     const userIsApprover = tenant ? canApproveJournalEntries(tenant.role) : false;
-    const requireApproval =
-      (tenantConfig?.requireJeApproval ?? false) && !userIsApprover;
 
     const documentDateStr = String(formData.get("documentDate") ?? "");
     const memo = String(formData.get("memo") ?? "").trim();
@@ -84,6 +88,26 @@ export async function createJournalEntryAction(
     if (!Array.isArray(lines) || lines.length < 2) {
       return { ok: false, error: "Entry must have at least 2 lines" };
     }
+
+    // Compute the entry total (sum of debit lines) before deciding the
+    // approval route. Empty / malformed amounts contribute zero —
+    // postJournalEntry below will reject genuinely-broken lines with
+    // a clearer error than the threshold helper would produce.
+    const entryTotal = lines.reduce((acc, l) => {
+      if (l.side !== "DEBIT") return acc;
+      const n = new Decimal(l.amount || "0");
+      return n.isFinite() && n.greaterThan(0) ? acc.plus(n) : acc;
+    }, new Decimal(0));
+
+    const route = resolveApprovalRoute({
+      requireJeApproval: tenantConfig?.requireJeApproval ?? false,
+      jeApprovalMinAmount: tenantConfig?.jeApprovalMinAmount
+        ? new Decimal(tenantConfig.jeApprovalMinAmount.toString())
+        : null,
+      entryTotal,
+      actorIsApprover: userIsApprover,
+    });
+    const requireApproval = route === "PENDING_APPROVAL";
 
     const result = await postJournalEntry(prisma, {
       tenantId: scope.tenantId,
