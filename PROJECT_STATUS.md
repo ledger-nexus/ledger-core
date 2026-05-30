@@ -362,7 +362,16 @@ shipped except where noted.
 - [ ] OVER_TIME_MILESTONE pattern (still throws — named-completion-point
       recognition is more involved than usage; needs milestone-level
       inputs not just date math)
-- [ ] Variable consideration (expected value / most-likely-amount)
+- [x] **Variable consideration** (expected value / most-likely-amount).
+      Shipped — schema has `VariableConsideration` +
+      `VariableConsiderationOutcome` + `VariableConsiderationReassessment`
+      models; methods enum covers both EXPECTED_VALUE and
+      MOST_LIKELY_AMOUNT. Server Actions in
+      `src/app/actions/variable-consideration.ts` (proposeVarCons,
+      resolveVariableConsiderationAction, removeVariableConsiderationAction,
+      reassessAction with ASC 606-10-32-14 cumulative catch-up).
+      Self-audit fix landed this session (commit `0686944`) — throws on
+      negative back-derived base instead of silently clamping to 0.
 - [ ] Contract modifications (cumulative catch-up vs prospective vs
       separate-contract)
 - [ ] Multi-book recognition basis differences (schema supports it; engine
