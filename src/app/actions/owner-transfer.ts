@@ -37,6 +37,9 @@ import {
 } from "@/lib/auth/owner-transfer";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { notify } from "@/lib/notifications";
+import { sendOwnerTransferOfferedEmail } from "@/lib/email/templates/owner-transfer-offered";
+import { sendOwnerTransferAcceptedEmail } from "@/lib/email/templates/owner-transfer-accepted";
+import { sendOwnerTransferCancelledEmail } from "@/lib/email/templates/owner-transfer-cancelled";
 
 export interface OwnerTransferActionState {
   ok: boolean;
@@ -69,7 +72,7 @@ export async function initiateOwnerTransferAction(
 
     // Notify the target so they don't have to navigate to /admin/team
     // unprompted. Failure-isolated — the action succeeds even if the
-    // bell doesn't ring.
+    // bell or the mailer doesn't ring.
     await safeNotify({
       recipient: { type: "USER", id: result.targetUserId },
       category: "SYSTEM",
@@ -80,6 +83,12 @@ export async function initiateOwnerTransferAction(
       recordType: "Tenant",
       recordId: tenant.id,
       tenantId: tenant.id,
+    });
+    await safeEmailTargetOnInitiate({
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      targetUserId: result.targetUserId,
+      initiatorName: user.displayName,
     });
 
     revalidatePath("/admin/team");
@@ -130,6 +139,12 @@ export async function acceptOwnerTransferAction(): Promise<OwnerTransferActionSt
       recordType: "Tenant",
       recordId: tenant.id,
       tenantId: tenant.id,
+    });
+    await safeEmailPreviousOwnerOnAccept({
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      previousOwnerUserId: result.previousOwnerUserId,
+      accepterName: user.displayName,
     });
 
     revalidatePath("/admin/team");
@@ -183,6 +198,13 @@ export async function cancelOwnerTransferAction(): Promise<OwnerTransferActionSt
       recordId: tenant.id,
       tenantId: tenant.id,
     });
+    await safeEmailOtherPartyOnCancel({
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      otherPartyUserId: result.otherPartyUserId,
+      cancellerName: user.displayName,
+      cancelledBy: result.cancelledBy,
+    });
 
     revalidatePath("/admin/team");
 
@@ -211,6 +233,98 @@ async function safeNotify(
     await notify(prisma, input);
   } catch (e) {
     console.error("[owner-transfer] notification emit failed:", e);
+  }
+}
+
+// ─── Email helpers ─────────────────────────────────────────────────────────
+//
+// Each helper resolves the recipient's email + display name, builds the
+// /admin/team URL, and fires the matching template via sendEmail. Failure-
+// isolated mirrors the bell-icon notify pattern: the lifecycle already
+// committed; the user just doesn't get an email if the mailer is down
+// or the recipient was deactivated between transitions.
+
+function teamUrl(): string {
+  const base = process.env.APP_BASE_URL || "";
+  return `${base}/admin/team`;
+}
+
+async function loadRecipient(
+  userId: string
+): Promise<{ email: string; displayName: string } | null> {
+  const u = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, displayName: true, isActive: true },
+  });
+  if (!u || !u.isActive) return null;
+  return { email: u.email, displayName: u.displayName };
+}
+
+async function safeEmailTargetOnInitiate(args: {
+  tenantId: string;
+  tenantName: string;
+  targetUserId: string;
+  initiatorName: string;
+}): Promise<void> {
+  try {
+    const recipient = await loadRecipient(args.targetUserId);
+    if (!recipient) return;
+    await sendOwnerTransferOfferedEmail({
+      to: recipient.email,
+      recipientName: recipient.displayName,
+      initiatorName: args.initiatorName,
+      tenantName: args.tenantName,
+      teamUrl: teamUrl(),
+      tenantId: args.tenantId,
+    });
+  } catch (e) {
+    console.error("[owner-transfer] email-on-initiate failed:", e);
+  }
+}
+
+async function safeEmailPreviousOwnerOnAccept(args: {
+  tenantId: string;
+  tenantName: string;
+  previousOwnerUserId: string;
+  accepterName: string;
+}): Promise<void> {
+  try {
+    const recipient = await loadRecipient(args.previousOwnerUserId);
+    if (!recipient) return;
+    await sendOwnerTransferAcceptedEmail({
+      to: recipient.email,
+      recipientName: recipient.displayName,
+      accepterName: args.accepterName,
+      tenantName: args.tenantName,
+      teamUrl: teamUrl(),
+      tenantId: args.tenantId,
+    });
+  } catch (e) {
+    console.error("[owner-transfer] email-on-accept failed:", e);
+  }
+}
+
+async function safeEmailOtherPartyOnCancel(args: {
+  tenantId: string;
+  tenantName: string;
+  otherPartyUserId: string;
+  cancellerName: string;
+  cancelledBy: "OWNER" | "TARGET";
+}): Promise<void> {
+  try {
+    const recipient = await loadRecipient(args.otherPartyUserId);
+    if (!recipient) return;
+    await sendOwnerTransferCancelledEmail({
+      to: recipient.email,
+      recipientName: recipient.displayName,
+      cancellerName: args.cancellerName,
+      cancelledBy: args.cancelledBy,
+      tenantName: args.tenantName,
+      teamUrl: teamUrl(),
+      tenantId: args.tenantId,
+    });
+  } catch (e) {
+    console.error("[owner-transfer] email-on-cancel failed:", e);
   }
 }
 
