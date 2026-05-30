@@ -139,7 +139,7 @@ when crossing repo boundaries.
 | Control | Evidence | Status |
 |---|---|---|
 | Data classification | `docs/policies/data-classification.md` (field-by-field) | Mitigated |
-| Encryption at rest | Neon Postgres encryption at rest by default; field-level encryption for confidential columns NOT yet shipped | Partial |
+| Encryption at rest | Neon Postgres encryption at rest by default (volume-level); field-level helper shipped (`src/lib/soc2/field-encryption.ts` + 15 tests). Column rollout pending — see `data-classification.md`. | Mitigated (helper) / Open (rollout) |
 | Encryption in transit | TLS 1.3 via Vercel + Neon defaults; HSTS via `next.config.js` | Mitigated |
 | Data loss prevention | Audit log every export; tenant scope on every export query | Mitigated |
 

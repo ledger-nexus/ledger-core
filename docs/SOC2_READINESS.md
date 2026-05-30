@@ -516,10 +516,12 @@ remain and still block a Type 2 audit:
   headers in `next.config.js` cover everything else. Allows Clerk,
   Sentry, Stripe domains; blocks framing + plugins; forces HTTPS
   upgrade. 9 unit tests at `tests/csp-nonce.test.ts`.
-- **Field-level encryption for confidential data at rest** — emails,
-  party names, source documents all stored plaintext (Neon's
-  Postgres-level encryption covers blob-at-rest; per-field is the
-  next layer).
+- ~~**Field-level encryption for confidential data at rest**~~ —
+  Helper shipped 2026-05-29 (`src/lib/soc2/field-encryption.ts`,
+  15 tests). AES-256-GCM via node:crypto, keyed off
+  `FIELD_ENCRYPTION_KEY` env var (32 bytes hex), version byte for
+  future rotation. **Next step:** column-by-column rollout —
+  start with `JournalEntry.memo` (highest-value target).
 - **Data classification taxonomy** — `docs/policies/data-classification.md`
   has a 4-level taxonomy template; needs field-by-field mapping for
   every customer-data column.

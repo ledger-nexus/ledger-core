@@ -83,6 +83,15 @@ const ENV_SPECS: EnvSpec[] = [
       "Clerk client-side publishable key (pk_test_... or pk_live_...). " +
       "Required whenever CLERK_SECRET_KEY is set.",
   },
+  {
+    name: "FIELD_ENCRYPTION_KEY",
+    requiredInProduction: false, // until columns are encrypted; flip on rollout
+    minLength: 64, // 32 bytes hex = 64 chars
+    description:
+      "AES-256-GCM key for field-level encryption (Confidentiality TSC). " +
+      "Generate via `openssl rand -hex 32`. Required when any column uses " +
+      "encryptField from @/lib/soc2/field-encryption.",
+  },
 ];
 
 export interface EnvValidationResult {

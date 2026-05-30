@@ -413,5 +413,14 @@ export {
   auditTokenUse,
 } from "@/lib/audit/log";
 
+// Field-level encryption (Confidentiality TSC).
+export {
+  encryptField,
+  decryptField,
+  looksEncrypted,
+  FieldEncryptionError,
+  KeyNotConfiguredError,
+} from "./field-encryption";
+
 // Re-export Prisma type for ergonomic helper signatures elsewhere.
 export type { PrismaClient };

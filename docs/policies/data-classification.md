@@ -83,8 +83,21 @@ Stored exclusively in:
 | RESTRICTED | Vercel env / 1Password | TLS in transit; vendor-encrypted at rest |
 
 **Gaps to close:**
-- [ ] **Field-level encryption** for the most sensitive columns (`JournalEntry.memo`, `BankStatementLine.description`). Today they're plaintext in Postgres. Auditor will flag.
-- [ ] **Encryption key management** — when field-level encryption lands, where do keys live? AWS KMS? Vercel's encrypted env? Document.
+- [x] **Field-level encryption helper shipped** 2026-05-29 —
+  `src/lib/soc2/field-encryption.ts` provides `encryptField` /
+  `decryptField` via AES-256-GCM (`node:crypto`), keyed off
+  `FIELD_ENCRYPTION_KEY` env var (32 bytes hex). Wire format includes
+  a version byte for future key rotation. 15 unit tests cover round-
+  trip, tampered-ciphertext rejection (GCM auth tag), wrong-key
+  rejection, multibyte unicode, and KeyNotConfiguredError. **What's
+  next:** column-by-column rollout — update Prisma write/read paths
+  for `JournalEntry.memo` first (highest-value target), then
+  `EmailDelivery.bodyText`, then bank-statement-line descriptions.
+- [x] **Encryption key management** — `FIELD_ENCRYPTION_KEY` lives
+  in Vercel's encrypted env (RESTRICTED tier per the inventory
+  above). Rotation procedure in `docs/policies/access-control.md`.
+  Future: AWS KMS / Vercel Secrets — drop-in via the `loadKey()`
+  helper.
 
 ## Retention
 
