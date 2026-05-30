@@ -30,19 +30,44 @@ const prisma = new PrismaClient();
 const ENTITY = "SUBLEDGER_TEST";
 
 async function clearAll() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.fixedAssetBookAttributes.deleteMany();
-  await prisma.fixedAsset.deleteMany();
-  await prisma.leaseBookAttributes.deleteMany();
-  await prisma.lease.deleteMany();
-  await prisma.revenueContractBookAttributes.deleteMany();
-  await prisma.performanceObligation.deleteMany();
-  await prisma.revenueContract.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+  // Scope to SUBLEDGER_TEST only. The earlier unscoped form raced with
+  // sibling test files: cross-tenant AR/AP open items + JEs left in the
+  // shared Neon DB blocked the global `journalEntry.deleteMany()` via
+  // the ar_open_item_openedByEntryId_fkey (RESTRICT) the moment a
+  // prior file's items survived its own afterAll.
+  const ent = await prisma.legalEntity.findFirst({
+    where: { code: ENTITY },
+    select: { id: true },
+  });
+  if (!ent) return;
+  const entityId = ent.id;
+  await prisma.arApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.apApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.arOpenItem.deleteMany({ where: { entityId } });
+  await prisma.apOpenItem.deleteMany({ where: { entityId } });
+  await prisma.fixedAssetBookAttributes.deleteMany({
+    where: { asset: { entityId } },
+  });
+  await prisma.fixedAsset.deleteMany({ where: { entityId } });
+  await prisma.leaseBookAttributes.deleteMany({
+    where: { lease: { entityId } },
+  });
+  await prisma.lease.deleteMany({ where: { entityId } });
+  await prisma.revenueContractBookAttributes.deleteMany({
+    where: { contract: { entityId } },
+  });
+  await prisma.performanceObligation.deleteMany({
+    where: { contract: { entityId } },
+  });
+  await prisma.revenueContract.deleteMany({ where: { entityId } });
+  await prisma.journalLine.deleteMany({
+    where: { entry: { entityId } },
+  });
+  await prisma.journalEntry.deleteMany({ where: { entityId } });
 }
 
 async function seedMasterData() {

@@ -19,12 +19,30 @@ const ENTITY = "CF_TEST";
 const GAAP = { entityCode: ENTITY, bookCode: "US_GAAP" };
 
 async function clearAll() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+  // Scope to CF_TEST only. The earlier unscoped form raced with
+  // sibling test files: cross-tenant AR/AP open items + JEs left in
+  // the shared Neon DB blocked the global `journalEntry.deleteMany()`
+  // via the ar_open_item_openedByEntryId_fkey (RESTRICT) the moment a
+  // prior file's items survived its own afterAll. (Same fix as
+  // sub-ledgers.test.ts.)
+  const ent = await prisma.legalEntity.findFirst({
+    where: { code: ENTITY },
+    select: { id: true },
+  });
+  if (!ent) return;
+  const entityId = ent.id;
+  await prisma.arApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.apApplication.deleteMany({
+    where: { openItem: { entityId } },
+  });
+  await prisma.arOpenItem.deleteMany({ where: { entityId } });
+  await prisma.apOpenItem.deleteMany({ where: { entityId } });
+  await prisma.journalLine.deleteMany({
+    where: { entry: { entityId } },
+  });
+  await prisma.journalEntry.deleteMany({ where: { entityId } });
 }
 
 async function seedMasterData() {
