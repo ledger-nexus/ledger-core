@@ -231,6 +231,8 @@ export interface CancelOwnerTransferResult {
   tenantId: string;
   /** Who clicked the cancel button — OWNER or pending TARGET. */
   cancelledBy: "OWNER" | "TARGET";
+  /** The user on the OTHER side of the cancelled transfer — for notification. */
+  otherPartyUserId: string;
 }
 
 export async function cancelOwnerTransfer(
@@ -266,5 +268,11 @@ export async function cancelOwnerTransfer(
   return {
     tenantId: input.tenantId,
     cancelledBy: isOwner ? "OWNER" : "TARGET",
+    // The other party (the one who didn't click cancel) — for the
+    // notification the action layer will fire so the loser-of-this-
+    // race learns the offer is gone.
+    otherPartyUserId: isOwner
+      ? tenant.pendingOwnerTransferToUserId
+      : tenant.ownerUserId,
   };
 }

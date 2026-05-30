@@ -36,6 +36,7 @@ import {
   NotTransferPartyError,
 } from "@/lib/auth/owner-transfer";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import { notify } from "@/lib/notifications";
 
 export interface OwnerTransferActionState {
   ok: boolean;
@@ -64,6 +65,21 @@ export async function initiateOwnerTransferAction(
       resource: "Tenant",
       resourceId: tenant.id,
       metadata: { targetUserId: result.targetUserId },
+    });
+
+    // Notify the target so they don't have to navigate to /admin/team
+    // unprompted. Failure-isolated — the action succeeds even if the
+    // bell doesn't ring.
+    await safeNotify({
+      recipient: { type: "USER", id: result.targetUserId },
+      category: "SYSTEM",
+      title: `${user.displayName} offered to transfer ownership of ${tenant.name} to you`,
+      body: "Visit Team admin to accept or decline.",
+      link: "/admin/team",
+      actorUserId: user.id,
+      recordType: "Tenant",
+      recordId: tenant.id,
+      tenantId: tenant.id,
     });
 
     revalidatePath("/admin/team");
@@ -102,6 +118,20 @@ export async function acceptOwnerTransferAction(): Promise<OwnerTransferActionSt
       },
     });
 
+    // Notify the previous OWNER that the swap completed and they are
+    // now ADMIN.
+    await safeNotify({
+      recipient: { type: "USER", id: result.previousOwnerUserId },
+      category: "SYSTEM",
+      title: `${user.displayName} accepted ownership of ${tenant.name}`,
+      body: "You are now an ADMIN on this workspace.",
+      link: "/admin/team",
+      actorUserId: user.id,
+      recordType: "Tenant",
+      recordId: tenant.id,
+      tenantId: tenant.id,
+    });
+
     revalidatePath("/admin/team");
     revalidatePath("/admin");
     revalidatePath("/");
@@ -137,6 +167,23 @@ export async function cancelOwnerTransferAction(): Promise<OwnerTransferActionSt
       metadata: { cancelledBy: result.cancelledBy },
     });
 
+    // Notify the OTHER party so they know the offer is gone.
+    // OWNER cancelled → recipient sees the transfer disappear.
+    // TARGET declined → OWNER sees the decline.
+    await safeNotify({
+      recipient: { type: "USER", id: result.otherPartyUserId },
+      category: "SYSTEM",
+      title:
+        result.cancelledBy === "OWNER"
+          ? `${user.displayName} cancelled the ownership transfer of ${tenant.name}`
+          : `${user.displayName} declined the ownership transfer of ${tenant.name}`,
+      link: "/admin/team",
+      actorUserId: user.id,
+      recordType: "Tenant",
+      recordId: tenant.id,
+      tenantId: tenant.id,
+    });
+
     revalidatePath("/admin/team");
 
     return {
@@ -148,6 +195,22 @@ export async function cancelOwnerTransferAction(): Promise<OwnerTransferActionSt
     };
   } catch (e) {
     return mapError(e);
+  }
+}
+
+// ─── Notification helper ──────────────────────────────────────────────────
+//
+// Wraps notify() in try/catch — owner-transfer should never roll back
+// because the bell didn't ring. Log + continue mirrors the
+// reassign-notification + je-approval-notification pattern.
+
+async function safeNotify(
+  input: Parameters<typeof notify>[1]
+): Promise<void> {
+  try {
+    await notify(prisma, input);
+  } catch (e) {
+    console.error("[owner-transfer] notification emit failed:", e);
   }
 }
 

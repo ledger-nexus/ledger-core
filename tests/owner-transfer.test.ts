@@ -233,6 +233,9 @@ describe("cancelOwnerTransfer", () => {
       cancellerUserId: OWNER_ID,
     });
     expect(r.cancelledBy).toBe("OWNER");
+    // The "other party" for an OWNER cancellation is the TARGET —
+    // they're the one who needs to be notified that the offer is gone.
+    expect(r.otherPartyUserId).toBe(TARGET_ID);
   });
 
   it("the pending TARGET can decline a transfer", async () => {
@@ -244,6 +247,8 @@ describe("cancelOwnerTransfer", () => {
       cancellerUserId: TARGET_ID,
     });
     expect(r.cancelledBy).toBe("TARGET");
+    // The "other party" for a TARGET decline is the OWNER.
+    expect(r.otherPartyUserId).toBe(OWNER_ID);
   });
 
   it("refuses when there is no pending transfer", async () => {
