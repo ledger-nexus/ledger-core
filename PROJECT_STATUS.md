@@ -380,9 +380,17 @@ shipped except where noted.
       runConnectionSync with triggerType=WEBHOOK; ITEM / ERROR
       marks Connection.status=ERROR. Every payload audited via
       PlaidWebhookEvent regardless of outcome.
-- [ ] Plaid JWT signature verification (the v2 auth posture; v1
-      uses URL-token shared secret. Plaid signs each webhook with
-      ES256; full key-fetch + verify is a follow-up.)
+- [x] **Plaid JWT signature verification.** Shipped (already
+      live). `src/lib/connectors/plaid/webhook-verification.ts`
+      hand-rolls ES256 verification on `node:crypto` (no `jose`
+      dep): JWT parse, JWK fetch from
+      `/webhook_verification_key/get` with in-process kid cache,
+      signature verify with `ieee-p1363` raw `r||s`, 5-minute
+      replay window via `iat`, body-hash check against the signed
+      `request_body_sha256`. Wired into the webhook route with a
+      two-ladder auth policy: JWT first (production-required by
+      default), URL-token belt-and-suspenders if both env vars
+      set. 15 unit tests + e2e plaid-webhook tests.
 - [ ] Scheduled syncs via pg_boss
 - [ ] Stripe connector → AR open items
 - [ ] Gusto connector → payroll JE via posting-rules
