@@ -291,10 +291,14 @@ the polish + harder pieces:
       je_approved + je_rejected templates fire automatically from the
       maker-checker Server Actions. Period close 3 days out, AI suggestion
       ready, sync failed, weekly digest are still future work.
-- [ ] **Ownership transfer.** Currently OWNER can't be demoted /
-      removed. Need a flow where current OWNER promotes another member,
-      they accept, ownership atomically swaps. Schema-only change to
-      `Tenant.ownerUserId` plus the migration UI.
+- [x] **Ownership transfer.** Shipped 2026-05-29 (commit `4827ad5`).
+      Two-step opt-in: current OWNER initiates an offer; target
+      accepts via `/admin/team`; either side can cancel.
+      Tenant.pendingOwnerTransferToUserId + initiatedAt columns
+      track the offer; accept runs the swap (target → OWNER,
+      previous → ADMIN, ownerUserId rotated, pending cleared) in
+      one $transaction. 13 lifecycle tests. Audit log captures
+      `tenant.owner_transfer_initiate / _accept / _cancel`.
 - [x] **Companion-repo plan enforcement.** Shipped 2026-05-27 (later).
       Each companion repo (recon / revenue-rec / fa-amort / integrations)
       now has `src/lib/auth/repo-access.ts` mirroring the plan catalog's
