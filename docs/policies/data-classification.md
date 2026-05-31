@@ -39,7 +39,7 @@ Per-model classification of every field that could contain regulated data:
 |---|---|---|
 | `memo` | CONFIDENTIAL | Free-form; may contain customer/vendor names. **Encrypted at rest** (2026-05-29) via the Prisma extension. |
 | `documentDate`, `postingDate` | CONFIDENTIAL | Could reveal customer activity timing |
-| `sourcePayload` | CONFIDENTIAL | Frozen ERP payload; may contain PII from source system |
+| `sourcePayload` | CONFIDENTIAL | Frozen ERP payload (Json column). Often the highest single-row PII density in the substrate — embeds customer/vendor names, full addresses, dollar amounts per line, source-ERP user emails, custom-field values, tax IDs. **Encrypted at rest** (2026-05-31) via the Prisma extension in `type: "json"` mode (JSON.stringify before AES-GCM; JSON.parse after decrypt; roundtrip is bit-exact). |
 | `sourceRecordId` | INTERNAL | Identifier, not data |
 
 ### `Party` (CONFIDENTIAL)

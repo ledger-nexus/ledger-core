@@ -593,3 +593,108 @@ describe("encrypted-fields extension: User.displayName (Confidentiality TSC)", (
     expect(u?.displayName).toBe(plaintextDisplayName);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JournalEntry.sourcePayload — first Json-column rollout. Verifies the
+// type:"json" extension mode round-trips a complex JsonValue exactly
+// (object structure, primitives, unicode) AND that the on-disk Json
+// column holds a string (the ciphertext envelope) — not the original
+// nested object.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: JournalEntry.sourcePayload (Json mode, Confidentiality TSC)", () => {
+  let entryId: string;
+  // A representative QBO-shaped payload: nested objects, arrays,
+  // primitives, unicode, embedded PII (customer name, dollar amounts,
+  // tax IDs). The extension must round-trip this byte-for-byte.
+  const plaintextSourcePayload = {
+    qboInvoiceId: `INV-${SUFFIX}`,
+    customerRef: { value: "1234", name: `Acme Corp ${SUFFIX}` },
+    totalAmt: 5000.0,
+    txnTaxDetail: { totalTax: 412.5, taxLine: [{ amount: 412.5 }] },
+    customField: [
+      { name: "po", value: `PO-${SUFFIX}` },
+      { name: "notes", value: "Föräljning av tjänster — internal note" },
+    ],
+    lines: [
+      { lineNum: 1, description: "Consulting services", amount: 4587.5 },
+      { lineNum: 2, description: "Sales tax", amount: 412.5 },
+    ],
+  };
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    // Post a JE through the standard path so the extension's write
+    // hook fires. postJournalEntry accepts sourcePayload and threads
+    // it onto the row.
+    const result = await postJournalEntry(prisma as PrismaClient, {
+      entityCode: ENTITY,
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-01-15"),
+      memo: `Json-mode test ${SUFFIX}`,
+      source: "MANUAL",
+      sourceSystem: "QBO_TEST",
+      sourceRecordType: "Invoice",
+      sourceRecordId: `qbo-test-${SUFFIX}-${randomBytes(2).toString("hex")}`,
+      sourcePayload: plaintextSourcePayload,
+      lines: [
+        { accountCode: "1000", debit: 5000 },
+        { accountCode: "4000", credit: 5000 },
+      ],
+    });
+    entryId = result.id;
+  });
+
+  it("on-disk sourcePayload is a STRING (the ciphertext envelope), not the original object", async () => {
+    const raw = await rawPrisma.journalEntry.findUnique({
+      where: { id: entryId },
+      select: { sourcePayload: true },
+    });
+    // Raw client returns the verbatim Json column value. If the
+    // extension worked, that's a quoted-string JsonValue holding the
+    // base64 envelope — NOT the original object.
+    expect(typeof raw?.sourcePayload).toBe("string");
+    expect(looksEncrypted(raw?.sourcePayload as string)).toBe(true);
+    // Sanity: the ciphertext is nowhere near a substring of the
+    // plaintext's distinctive bits (Acme Corp, SUFFIX, PO-...).
+    const rawStr = String(raw?.sourcePayload ?? "");
+    expect(rawStr).not.toContain("Acme");
+    expect(rawStr).not.toContain(SUFFIX);
+    expect(rawStr).not.toContain("Föräljning");
+  });
+
+  it("app surface decrypts sourcePayload back into the exact original JsonValue", async () => {
+    const { prisma } = await import("@/lib/db");
+    const entry = await prisma.journalEntry.findUnique({
+      where: { id: entryId },
+      select: { sourcePayload: true, memo: true },
+    });
+    // Round-trip: deep-equal to the original. JSON.stringify round-
+    // tripping handles the nested objects, arrays, primitives, and
+    // unicode characters identically.
+    expect(entry?.sourcePayload).toEqual(plaintextSourcePayload);
+  });
+
+  it("findMany decrypts sourcePayload across multiple rows", async () => {
+    const { prisma } = await import("@/lib/db");
+    const ent = await rawPrisma.legalEntity.findFirstOrThrow({
+      where: { code: ENTITY },
+      select: { id: true },
+    });
+    const entries = await prisma.journalEntry.findMany({
+      where: { entityId: ent.id, sourceSystem: "QBO_TEST" },
+      select: { sourcePayload: true },
+    });
+    for (const e of entries) {
+      // Every QBO_TEST row gets the same shape; verify it's a real
+      // parsed object (not a string), and it has the expected top-
+      // level keys (proxy for "JSON.parse round-trip happened").
+      expect(typeof e.sourcePayload).toBe("object");
+      expect(e.sourcePayload).not.toBeNull();
+      const sp = e.sourcePayload as Record<string, unknown>;
+      expect(sp).toHaveProperty("qboInvoiceId");
+      expect(sp).toHaveProperty("customerRef");
+      expect(sp).toHaveProperty("lines");
+    }
+  });
+});

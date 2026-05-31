@@ -54,10 +54,25 @@ import {
  * Tuples of (Prisma model name, field name) for every column the
  * extension transparently encrypts. Order doesn't matter; lookups
  * happen by model + field.
+ *
+ * Type modes:
+ *   - default ("string"): the column is `String?` or `String` in
+ *     Prisma. The plaintext is encrypted as-is; the ciphertext
+ *     envelope is stored as a String column value.
+ *   - "json": the column is `Json?` or `Json` in Prisma. The value
+ *     can be any JsonValue (object / array / primitive / null). On
+ *     write we JSON.stringify before encrypt; on read we JSON.parse
+ *     after decrypt. The ciphertext envelope is a base64 string, and
+ *     a quoted string is itself a valid JsonValue — so Prisma is
+ *     happy storing it in a Json column. Mixed plaintext / ciphertext
+ *     during rollout works because looksEncrypted gates the parse.
  */
+export type EncryptedColumnType = "string" | "json";
+
 export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   model: string;
   field: string;
+  type?: EncryptedColumnType;
 }> = [
   { model: "JournalEntry", field: "memo" },
   // EmailDelivery body fields contain literal email content sent to
@@ -122,6 +137,29 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // and is a separate workstream). Audited 2026-05-31: zero
   // filter-by-displayName queries; only display reads.
   { model: "User", field: "displayName" },
+  // JournalEntry.sourcePayload is the FROZEN verbatim payload from
+  // the source ERP — QBO Invoice JSON, NetSuite Transaction with
+  // nested lines, etc. Per CLAUDE.md mapper discipline: "Every
+  // imported row MUST populate sourcePayload (the frozen raw
+  // original — verbatim, not a re-encoding). The roundtrip proof
+  // depends on sourcePayload being preserved exactly."
+  //
+  // Content can include: customer/vendor names + addresses, dollar
+  // amounts on every line, source-ERP user emails, custom-field
+  // values, tax IDs from the source system. Highest per-row PII
+  // density in the substrate.
+  //
+  // The Json-column encryption mode (type: "json") JSON.stringify's
+  // on write + JSON.parse's on read — the column stays Prisma type
+  // Json (storing the ciphertext envelope as a JSON string), the
+  // app surface still sees the original JsonValue. Roundtrip
+  // exactness is preserved bit-for-bit.
+  //
+  // Audited 2026-05-31: zero filter queries on sourcePayload. Only
+  // displayed verbatim via JSON.stringify on /journal-entries/[id],
+  // and read by QBO/NetSuite reverse-mappers (export paths) which
+  // also reconstruct from the same JsonValue.
+  { model: "JournalEntry", field: "sourcePayload", type: "json" },
   // Add new rows here as the rollout proceeds. Each addition needs a
   // matching migration script in prisma/sql/ that backfills existing
   // rows. See README in that directory.
@@ -133,6 +171,14 @@ function isEncryptedColumn(model: string, field: string): boolean {
 
 function fieldsForModel(model: string): string[] {
   return ENCRYPTED_COLUMNS.filter((c) => c.model === model).map((c) => c.field);
+}
+
+/** Returns the encryption mode for a (model, field), or "string" by default. */
+function columnType(model: string, field: string): EncryptedColumnType {
+  const entry = ENCRYPTED_COLUMNS.find(
+    (c) => c.model === model && c.field === field
+  );
+  return entry?.type ?? "string";
 }
 
 /**
@@ -226,6 +272,71 @@ function safeDecrypt(value: unknown): unknown {
       // The ciphertext is in the row but we can't decrypt. Return a
       // sentinel so the application can render "[Encryption error]"
       // rather than crash.
+      return "[encrypted — key not configured]";
+    }
+    if (e instanceof FieldEncryptionError) {
+      return "[encryption error — contact support]";
+    }
+    throw e;
+  }
+}
+
+/**
+ * Encrypt a JsonValue. We JSON.stringify the value first so the
+ * AES-GCM helper can do its thing on a string, then store the base64
+ * ciphertext envelope as the Json column's value. Quoted strings are
+ * legal JsonValues, so Prisma is happy.
+ *
+ * Null / undefined skip encryption (Prisma writes a SQL NULL).
+ *
+ * "Already encrypted" idempotency: if Prisma hands us a string that
+ * looksEncrypted, we leave it alone (this happens on legacy rows
+ * being re-saved, or on the backfill script's UPDATE selector
+ * pattern).
+ */
+function safeEncryptJson(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string" && looksEncrypted(value)) return value;
+  try {
+    return encryptField(JSON.stringify(value));
+  } catch (e) {
+    if (e instanceof KeyNotConfiguredError) {
+      if (!warnedAboutMissingKey) {
+        console.warn(
+          "[encrypted-fields] FIELD_ENCRYPTION_KEY is not set; Json columns " +
+            "in ENCRYPTED_COLUMNS write plaintext. Set the env var to enable."
+        );
+        warnedAboutMissingKey = true;
+      }
+      return value;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Decrypt a JsonValue read from Prisma. If Prisma gave us a string
+ * that looksEncrypted, decrypt + JSON.parse to recover the original
+ * JsonValue. Otherwise (legacy row, plaintext JSON value, primitive,
+ * null) pass through unchanged — this is what enables mixed
+ * plaintext/ciphertext during the rollout window.
+ */
+function safeDecryptJson(value: unknown): unknown {
+  if (typeof value !== "string" || value.length === 0) return value;
+  if (!looksEncrypted(value)) return value;
+  try {
+    const plaintext = decryptField(value);
+    if (plaintext === null) return value;
+    try {
+      return JSON.parse(plaintext);
+    } catch {
+      // Shouldn't happen — we JSON.stringify on write — but if a row
+      // was written by some other path with non-JSON ciphertext,
+      // surface the decrypted string rather than crash.
+      return plaintext;
+    }
+  } catch (e) {
+    if (e instanceof KeyNotConfiguredError) {
       return "[encrypted — key not configured]";
     }
     if (e instanceof FieldEncryptionError) {
@@ -342,15 +453,19 @@ function encryptDataObject(model: string, data: unknown): unknown {
       out[field] = value;
       continue;
     }
+    // Route by registry type. Json columns get JSON.stringify before
+    // AES-GCM; String columns go straight in.
+    const type = columnType(model, field);
+    const encrypt = type === "json" ? safeEncryptJson : safeEncrypt;
     // Prisma write-operation values can be `{ set: ... }` for nested
     // update inputs. Unwrap before encrypting and re-wrap on the way
     // out so the underlying generator still recognizes the shape.
-    if (typeof value === "object" && "set" in value) {
+    if (typeof value === "object" && value !== null && "set" in value) {
       const wrapped = value as { set: unknown };
-      out[field] = { set: safeEncrypt(wrapped.set) };
+      out[field] = { set: encrypt(wrapped.set) };
       continue;
     }
-    out[field] = safeEncrypt(value);
+    out[field] = encrypt(value);
   }
 
   // Recurse into nested relation writes. Prisma's $extends query
@@ -401,7 +516,8 @@ function decryptRow<T>(model: string, row: T): T {
     if (!(field in out)) continue;
     const value = out[field];
     if (value === null || value === undefined) continue;
-    out[field] = safeDecrypt(value);
+    const type = columnType(model, field);
+    out[field] = type === "json" ? safeDecryptJson(value) : safeDecrypt(value);
   }
   return out as T;
 }

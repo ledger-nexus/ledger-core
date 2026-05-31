@@ -552,6 +552,14 @@ remain and still block a Type 2 audit:
       longer-form variant. Category enum stays plaintext (used
       for filtering / grouping). Zero filter queries on either
       column.
+    * `JournalEntry.sourcePayload` (2026-05-31, Json mode) —
+      frozen ERP payload from QBO / NetSuite / future imports.
+      First Json-column rollout: the extension grew a
+      `type: "json"` mode that JSON.stringify's on write +
+      JSON.parse's on read so the column stays Json-typed end-to-
+      end and roundtrip is bit-exact. Zero filter queries
+      portfolio-wide; only displayed verbatim on the JE detail
+      page and read by reverse mappers.
     * `LegalEntity.name` (2026-05-31) — customer's legal company
       name as displayed in reports, headers, BTD, and the
       consolidation hierarchy. `code` stays plaintext (the lookup
@@ -583,6 +591,7 @@ remain and still block a Type 2 audit:
     * `ledger-core/scripts/encrypt-party-display-names.ts`
     * `ledger-core/scripts/encrypt-journal-entry-note-bodies.ts`
     * `ledger-core/scripts/encrypt-tenant-names.ts`
+    * `ledger-core/scripts/encrypt-journal-entry-source-payloads.ts`
     * `ledger-core/scripts/encrypt-notification-text.ts`
     * `ledger-core/scripts/encrypt-legal-entity-and-user-names.ts`
     * `recon/scripts/encrypt-bank-statement-line-descriptions.ts`
