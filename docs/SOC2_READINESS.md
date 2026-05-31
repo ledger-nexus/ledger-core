@@ -524,16 +524,22 @@ remain and still block a Type 2 audit:
   - Extension (`src/lib/db/encrypted-fields-extension.ts`, 3 tests
     with real DB roundtrip): transparent encrypt-on-write +
     decrypt-on-read for columns in `ENCRYPTED_COLUMNS`
-  - Encrypted columns:
+  - Encrypted columns (ledger-core):
     * `JournalEntry.memo` (commit `664d6c3`)
     * `EmailDelivery.subject` / `.bodyText` / `.bodyHtml`
-      (second column rollout)
+      (commit `ae8dd87`)
+  - Encrypted columns (recon, commit `711da29`):
+    * `BankStatementLine.description` — via the mirrored
+      extension that also handles nested writes
+      (`BankStatement.create({ lines: { create: [...] } })`)
   - Backfill scripts (idempotent via `looksEncrypted`):
-    * `scripts/encrypt-journal-entry-memos.ts`
-    * `scripts/encrypt-email-delivery-bodies.ts`
-  **Next column to add:** `BankStatementLine.description` (recon)
-  — needs the extension mirrored into recon's repo. Then
-  `Party.displayName` as a longer-term target.
+    * `ledger-core/scripts/encrypt-journal-entry-memos.ts`
+    * `ledger-core/scripts/encrypt-email-delivery-bodies.ts`
+    * `recon/scripts/encrypt-bank-statement-line-descriptions.ts`
+  **Next column on the runway:** `Party.displayName` (customer +
+  vendor names — long-term target). The pattern is now well-
+  established; adding a new column is a 5-line registry entry +
+  backfill script + roundtrip test.
 - **Data classification taxonomy** — `docs/policies/data-classification.md`
   has a 4-level taxonomy template; needs field-by-field mapping for
   every customer-data column.
