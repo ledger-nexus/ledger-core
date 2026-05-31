@@ -143,9 +143,15 @@ when crossing repo boundaries.
 | Encryption in transit | TLS 1.3 via Vercel + Neon defaults; HSTS via `next.config.js` | Mitigated |
 | Data loss prevention | Audit log every export; tenant scope on every export query | Mitigated |
 
-### Privacy TSC — not currently in scope
+### Privacy TSC
 
-Portfolio handles minimal PII (User.email, User.displayName, Party.displayName). Becomes critical once a customer in EU/California scope onboards. Right-to-deletion procedure TBD per risk-register item #16.
+Portfolio handles minimal PII (User.email, User.displayName, Party.displayName). Becomes critical once a customer in EU/California scope onboards.
+
+| Control | Evidence | Status |
+|---|---|---|
+| GDPR Art. 15 (right of access) | `src/lib/privacy/user-data.ts buildUserDataExport`; UI at `/admin/data-subject-requests` (self-export available to any member) | Mitigated |
+| GDPR Art. 17 (right to erasure) | `src/lib/privacy/user-data.ts eraseUserPii`; OWNER-only Server Action; financial records preserved (legal-retention exemption per Art. 17(3)(b/e)); audit-logged as `DATA_ERASURE` | Mitigated |
+| Data retention | `docs/policies/data-classification.md` retention table | Mitigated |
 
 ---
 

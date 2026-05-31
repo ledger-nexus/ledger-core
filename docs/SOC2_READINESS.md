@@ -525,8 +525,16 @@ remain and still block a Type 2 audit:
 - **Data classification taxonomy** — `docs/policies/data-classification.md`
   has a 4-level taxonomy template; needs field-by-field mapping for
   every customer-data column.
-- **GDPR/CCPA right-to-deletion procedure** — required for any tenant
-  in EU/California scope (see risk-register item #16).
+- ~~**GDPR/CCPA right-to-deletion procedure**~~ — Shipped 2026-05-29.
+  `src/lib/privacy/user-data.ts` exports `buildUserDataExport`
+  (Art. 15) and `eraseUserPii` (Art. 17). Server Actions at
+  `src/app/actions/data-subject-request.ts` (export gated to
+  ADMIN+ or self; erasure gated to OWNER); UI at
+  `/admin/data-subject-requests`. 4 unit tests; `audit_log`
+  emits `DATA_EXPORT` + `DATA_ERASURE` events. Financial records
+  (JE, audit log) keep the user_id pointer — legal-retention
+  exemption applies — but the User row + email_delivery PII gets
+  redacted on erasure.
 - **External penetration test** — $5–15k engagement, business
   decision rather than code.
 
