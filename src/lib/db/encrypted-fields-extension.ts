@@ -81,6 +81,50 @@ function fieldsForModel(model: string): string[] {
   return ENCRYPTED_COLUMNS.filter((c) => c.model === model).map((c) => c.field);
 }
 
+/**
+ * Parent-to-child relation map. Lets the encryption walker recurse
+ * into nested writes like:
+ *   prisma.bankStatement.create({ data: { lines: { create: [{...}] } } })
+ * Prisma's $extends query hook only fires on the TOP-LEVEL model;
+ * the nested create payload never sees the child's hook. We
+ * compensate by enumerating the relation paths that lead to
+ * encrypted columns and walking them explicitly.
+ *
+ * Empty in ledger-core today (no nested-write paths land in an
+ * encrypted child). Recon's mirror populates this.
+ */
+const RELATION_MAP: ReadonlyArray<{
+  parent: string;
+  relation: string;
+  child: string;
+}> = [
+  // Add { parent, relation, child } when a feature in ledger-core
+  // does a nested create that writes into an encrypted column.
+];
+
+function relationsForModel(parent: string): Array<{
+  relation: string;
+  child: string;
+}> {
+  return RELATION_MAP.filter((r) => r.parent === parent).map((r) => ({
+    relation: r.relation,
+    child: r.child,
+  }));
+}
+
+/**
+ * True iff this model has either an encrypted column directly OR a
+ * relation path to a child model that does. Used by the query hooks
+ * to decide whether to walk args.data at all.
+ */
+function modelTouchesEncryption(model: string): boolean {
+  if (fieldsForModel(model).length > 0) return true;
+  for (const r of RELATION_MAP) {
+    if (r.parent === model && fieldsForModel(r.child).length > 0) return true;
+  }
+  return false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Encryption helpers (safe wrappers — never crash the query)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,14 +200,14 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
   query: {
     $allModels: {
       async create({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         args.data = encryptDataObject(model, args.data) as typeof args.data;
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async createMany({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         const data = args.data as unknown;
         if (Array.isArray(data)) {
           args.data = data.map((row) => encryptDataObject(model, row)) as typeof args.data;
@@ -174,20 +218,20 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
       },
 
       async update({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         args.data = encryptDataObject(model, args.data) as typeof args.data;
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async updateMany({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         args.data = encryptDataObject(model, args.data) as typeof args.data;
         return query(args);
       },
 
       async upsert({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         args.create = encryptDataObject(model, args.create) as typeof args.create;
         args.update = encryptDataObject(model, args.update) as typeof args.update;
         const result = await query(args);
@@ -195,31 +239,31 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
       },
 
       async findUnique({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findUniqueOrThrow({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findFirst({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findFirstOrThrow({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findMany({ model, args, query }) {
-        if (fieldsForModel(model).length === 0) return query(args);
+        if (!modelTouchesEncryption(model)) return query(args);
         const result = await query(args);
         if (!Array.isArray(result)) return result;
         return result.map((row) => decryptRow(model, row));
@@ -254,6 +298,43 @@ function encryptDataObject(model: string, data: unknown): unknown {
     }
     out[field] = safeEncrypt(value);
   }
+
+  // Recurse into nested relation writes. Prisma's $extends query
+  // hooks only fire on the TOP-LEVEL model; if a feature does a
+  // nested write into a model with encrypted columns, the child's
+  // hook never sees the payload. We walk the relation map to
+  // compensate.
+  for (const { relation, child } of relationsForModel(model)) {
+    if (!(relation in out)) continue;
+    const nested = out[relation];
+    if (!nested || typeof nested !== "object") continue;
+    const nestedRec = nested as Record<string, unknown>;
+
+    if ("create" in nestedRec) {
+      const createPayload = nestedRec.create;
+      if (Array.isArray(createPayload)) {
+        nestedRec.create = createPayload.map((item) =>
+          encryptDataObject(child, item)
+        );
+      } else if (createPayload && typeof createPayload === "object") {
+        nestedRec.create = encryptDataObject(child, createPayload);
+      }
+    }
+    if (
+      "createMany" in nestedRec &&
+      nestedRec.createMany &&
+      typeof nestedRec.createMany === "object"
+    ) {
+      const cm = nestedRec.createMany as Record<string, unknown>;
+      if (Array.isArray(cm.data)) {
+        cm.data = cm.data.map((item) => encryptDataObject(child, item));
+      } else if (cm.data && typeof cm.data === "object") {
+        cm.data = encryptDataObject(child, cm.data);
+      }
+    }
+    out[relation] = nestedRec;
+  }
+
   return out;
 }
 

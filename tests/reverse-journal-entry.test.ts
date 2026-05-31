@@ -11,6 +11,7 @@
 //      reverse-journal-entry and metadata.{source,reversal}EntryNumber.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 import { PrismaClient } from "@prisma/client";
 
 const mockCookieStore = new Map<string, { value: string }>();
@@ -128,7 +129,12 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  // audit_log is DB-level append-only — use the test-only escape
+  // hatch so cleanup can delete the rows that block the cascading
+  // tenant.delete FK.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
