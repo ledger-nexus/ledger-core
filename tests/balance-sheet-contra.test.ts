@@ -31,7 +31,7 @@
 //
 //   A = 9,000 = L (0) + E (9,000) ✓
 
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 import { Decimal } from "decimal.js";
@@ -47,13 +47,19 @@ beforeAll(async () => {
   await seedMasterData();
 });
 
-beforeEach(async () => {
+async function clearLedger() {
   await prisma.journalLine.deleteMany({
     where: { entry: { entity: { code: ENTITY_CODE } } },
   });
   await prisma.journalEntry.deleteMany({
     where: { entity: { code: ENTITY_CODE } },
   });
+}
+
+beforeEach(clearLedger);
+afterAll(async () => {
+  await clearLedger();
+  await prisma.$disconnect();
 });
 
 async function seedMasterData() {

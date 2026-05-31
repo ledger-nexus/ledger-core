@@ -136,6 +136,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await clearLedger();
   await prisma.$disconnect();
 });
 

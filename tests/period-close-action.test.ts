@@ -20,7 +20,7 @@
 // (controller@northwind.test) and the exported _internal.encode helper
 // to produce a valid cookie.
 
-import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
@@ -69,7 +69,7 @@ beforeAll(async () => {
   await seedMasterData();
 });
 
-beforeEach(async () => {
+async function clearLedger() {
   // Wipe close state + journal entries for this test entity; preserve seed data.
   await prisma.periodClose.deleteMany({
     where: { entity: { code: ENTITY_CODE } },
@@ -80,6 +80,12 @@ beforeEach(async () => {
   await prisma.journalEntry.deleteMany({
     where: { entity: { code: ENTITY_CODE } },
   });
+}
+
+beforeEach(clearLedger);
+afterAll(async () => {
+  await clearLedger();
+  await prisma.$disconnect();
 });
 
 async function seedMasterData() {

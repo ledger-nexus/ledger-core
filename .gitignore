@@ -11,3 +11,8 @@ coverage
 *.tsbuildinfo
 .prisma/
 prisma/generated/
+
+# Ad-hoc debug + scratch scripts at the repo root. Real scripts go under
+# scripts/ where the pre-commit hook can scan them.
+/dbcheck.ts
+/scratch-*.ts

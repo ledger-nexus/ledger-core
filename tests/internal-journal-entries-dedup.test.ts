@@ -13,7 +13,7 @@
 // We invoke the route handler directly with a synthetic NextRequest;
 // no HTTP server is started. This keeps the test fast and deterministic.
 
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
@@ -30,13 +30,19 @@ beforeAll(async () => {
   await seedMasterData();
 });
 
-beforeEach(async () => {
+async function clearLedger() {
   await prisma.journalLine.deleteMany({
     where: { entry: { entity: { code: ENTITY_CODE } } },
   });
   await prisma.journalEntry.deleteMany({
     where: { entity: { code: ENTITY_CODE } },
   });
+}
+
+beforeEach(clearLedger);
+afterAll(async () => {
+  await clearLedger();
+  await prisma.$disconnect();
 });
 
 async function seedMasterData() {

@@ -167,6 +167,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await clearAll();
   await prisma.$disconnect();
 });
 
