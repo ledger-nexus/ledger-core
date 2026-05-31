@@ -76,6 +76,16 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // searchable), so AES-GCM is safe — no need for deterministic
   // encryption or a secondary search index.
   { model: "Party", field: "displayName" },
+  // JournalEntryNote.body is plain-text prose CPAs write to annotate
+  // ledger entries. The schema comment says it directly: "CPAs write
+  // short prose." Annotations regularly include customer names,
+  // vendor invoices, internal context ("this is the disputed Acme
+  // invoice — see email thread 4/22"). The notes UI displays one note
+  // at a time, ordered by createdAt — no text-search filter has ever
+  // been requested, and the resolve UI keys off `resolvedAt` not body
+  // content. Audited 2026-05-30 across all 5 repos: zero filter-by-
+  // body queries. Standard AES-GCM is safe.
+  { model: "JournalEntryNote", field: "body" },
   // Add new rows here as the rollout proceeds. Each addition needs a
   // matching migration script in prisma/sql/ that backfills existing
   // rows. See README in that directory.

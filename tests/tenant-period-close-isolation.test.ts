@@ -45,6 +45,7 @@ import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { PeriodClosedError } from "@/lib/accounting/types";
 import { closePeriodAction } from "@/app/actions/period-close";
 import { _internal as authInternal } from "@/lib/auth/current-user";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -167,7 +168,12 @@ afterAll(async () => {
   });
   await prisma.account.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: { in: tenantIds } } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  // audit_log is append-only at the DB level (CC6). Wrap test
+  // cleanup in the escape hatch so the rule doesn't leave FK refs
+  // blocking tenant.deleteMany below.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  });
   await prisma.recordEvent.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenantMembership.deleteMany({
     where: { tenantId: { in: tenantIds } },

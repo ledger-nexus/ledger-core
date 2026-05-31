@@ -528,12 +528,17 @@ remain and still block a Type 2 audit:
     * `JournalEntry.memo` (commit `664d6c3`)
     * `EmailDelivery.subject` / `.bodyText` / `.bodyHtml`
       (commit `ae8dd87`)
-    * `Party.displayName` (2026-05-30) — customer/vendor names.
-      Verified zero filter-by-displayName queries across all 5
-      repos before encrypting; only `Party.code` (intentionally
-      plaintext, the searchable lookup key) is used in WHERE
-      clauses. Confidentiality TSC + competitive-intelligence
-      protection.
+    * `Party.displayName` (2026-05-30, commit `a5536cd`) —
+      customer/vendor names. Verified zero filter-by-displayName
+      queries across all 5 repos before encrypting; only
+      `Party.code` (intentionally plaintext, the searchable lookup
+      key) is used in WHERE clauses. Confidentiality TSC +
+      competitive-intelligence protection.
+    * `JournalEntryNote.body` (2026-05-30) — plain-text CPA prose
+      annotating ledger entries. Notes regularly include customer
+      names + internal context. UI only orders by createdAt /
+      keys resolve on `resolvedAt`; no body-text search. Audited
+      across all 5 repos: zero filter-by-body queries.
   - Encrypted columns (recon, commit `711da29`):
     * `BankStatementLine.description` — via the mirrored
       extension that also handles nested writes
@@ -554,6 +559,7 @@ remain and still block a Type 2 audit:
     * `ledger-core/scripts/encrypt-journal-entry-memos.ts`
     * `ledger-core/scripts/encrypt-email-delivery-bodies.ts`
     * `ledger-core/scripts/encrypt-party-display-names.ts`
+    * `ledger-core/scripts/encrypt-journal-entry-note-bodies.ts`
     * `recon/scripts/encrypt-bank-statement-line-descriptions.ts`
   **What's encrypted so far:** every free-text column that can
   surface PII or competitive intelligence in this repo's domain

@@ -155,6 +155,10 @@ const PII_FIELD_NAMES = new Set<string>([
   "subject",
   "bodyText",
   "bodyHtml",
+  // JournalEntryNote.body — encrypted at rest (2026-05-30).
+  // Already-listed "notes" above catches singular-aliased fields;
+  // "body" catches the actual column name on JournalEntryNote.
+  "body",
 ]);
 
 const REDACTED = "[REDACTED]";

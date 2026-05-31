@@ -49,6 +49,14 @@ Per-model classification of every field that could contain regulated data:
 | `displayName` | CONFIDENTIAL | Customer/vendor names. **Encrypted at rest** (2026-05-30) via the Prisma extension in ledger-core (write side) and recon (read side; recon reads via the matching candidate pipeline). |
 | `code` | INTERNAL | Stable identifier; the searchable lookup key, intentionally NOT encrypted. |
 
+### `JournalEntryNote` (CONFIDENTIAL)
+
+| Field | Classification | Notes |
+|---|---|---|
+| `body` | CONFIDENTIAL | CPA-authored plain-text annotation on a journal entry. Regularly includes customer / vendor names + internal context. **Encrypted at rest** (2026-05-30) via the Prisma extension. |
+| `authorEmail` | CONFIDENTIAL | PII; preserved at write time so authorship survives if the User row goes away. |
+| `resolvedAt`, `createdAt` | INTERNAL | Lifecycle timestamps. |
+
 ### `BankAccount`, `BankStatement`, `BankStatementLine` (CONFIDENTIAL, possibly RESTRICTED)
 
 Bank-related data is the highest-sensitivity in the system. Recon's bank statement lines include transaction amounts, dates, and descriptions that can reveal customer identity, business patterns, and account activity.

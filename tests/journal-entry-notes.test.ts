@@ -43,7 +43,12 @@ import {
   deleteJournalEntryNoteAction,
 } from "@/app/actions/journal-entry-notes";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { prisma as extendedPrisma } from "@/lib/db";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
+// Raw client for setup + cleanup. Reads that touch encrypted columns
+// (JournalEntryNote.body) go through `extendedPrisma` so the
+// field-encryption extension auto-decrypts on the way out.
 const prisma = new PrismaClient();
 const SUFFIX = ("NOTE" + Date.now().toString(36) + Math.floor(Math.random() * 9999)).toUpperCase();
 const ENTITY_CODE = `NOTE-${SUFFIX}`;
@@ -132,7 +137,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.journalEntryNote.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  // audit_log is append-only at the DB level (CC6 — append-only RULE).
+  // Wrap test-only deletion in the escape hatch so test cleanup
+  // doesn't leave FK refs blocking tenant.delete.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
@@ -168,7 +178,9 @@ describe("createJournalEntryNoteAction", () => {
     expect(r.ok).toBe(true);
     expect(r.noteId).toBeDefined();
 
-    const note = await prisma.journalEntryNote.findUniqueOrThrow({
+    // Read via extendedPrisma so `body` auto-decrypts —
+    // JournalEntryNote.body is in the field-encryption registry.
+    const note = await extendedPrisma.journalEntryNote.findUniqueOrThrow({
       where: { id: r.noteId! },
     });
     expect(note.entryId).toBe(entryId);

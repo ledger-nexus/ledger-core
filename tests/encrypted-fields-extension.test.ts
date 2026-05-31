@@ -295,3 +295,58 @@ describe("encrypted-fields extension: Party (Confidentiality TSC)", () => {
     expect(party?.code).toBe(partyCode);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JournalEntryNote.body — fourth column rollout
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: JournalEntryNote (Confidentiality TSC)", () => {
+  let noteId: string;
+  let parentEntryId: string;
+  const plaintextBody = `CPA prose ${SUFFIX} — disputed Acme invoice — see thread 4/22`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    // Need a JournalEntry to anchor the note (FK cascade). Reuse the
+    // ENC_TEST entity + a fresh entry.
+    const tenantId = await getDefaultTenantId(prisma as PrismaClient);
+    const entry = await postJournalEntry(prisma as PrismaClient, {
+      entityCode: ENTITY,
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-01-15"),
+      memo: `Anchor for note encryption test ${SUFFIX}`,
+      source: "MANUAL",
+      lines: [
+        { accountCode: "1000", debit: 50 },
+        { accountCode: "4000", credit: 50 },
+      ],
+    });
+    parentEntryId = entry.id;
+    const note = await prisma.journalEntryNote.create({
+      data: {
+        tenantId,
+        entryId: parentEntryId,
+        body: plaintextBody,
+      },
+    });
+    noteId = note.id;
+  });
+
+  it("on-disk body is encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.journalEntryNote.findUnique({
+      where: { id: noteId },
+      select: { body: true },
+    });
+    expect(raw?.body).not.toBe(plaintextBody);
+    expect(looksEncrypted(raw?.body)).toBe(true);
+  });
+
+  it("app surface sees plaintext body (auto-decrypt)", async () => {
+    const { prisma } = await import("@/lib/db");
+    const note = await prisma.journalEntryNote.findUnique({
+      where: { id: noteId },
+      select: { body: true },
+    });
+    expect(note?.body).toBe(plaintextBody);
+  });
+});
