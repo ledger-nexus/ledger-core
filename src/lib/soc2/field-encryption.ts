@@ -179,11 +179,33 @@ export function decryptField(blob: string | null | undefined): string | null {
  */
 export function looksEncrypted(value: string | null | undefined): boolean {
   if (value == null || value === "") return false;
+  // Reject anything that isn't a STRICT base64 string. Buffer.from
+  // silently skips non-base64 chars (spaces, commas, punctuation), so
+  // an arbitrary plaintext like "Acme Corp, 3-year SaaS subscription"
+  // would otherwise base64-decode to a buffer whose first byte
+  // happens to equal VERSION_V1 and pass the original heuristic — a
+  // false positive that causes safeEncrypt to SKIP encryption (writing
+  // plaintext to disk) AND safeDecrypt to surface "[encryption error]"
+  // (because the "ciphertext" is really plaintext that can't be
+  // decrypted). Caught 2026-05-31 during the revenue-rec rollout when
+  // "Acme Corp 3-year SaaS subscription, Tier B…" tripped the bug.
+  //
+  // Defense in depth:
+  //   1. Length must be a multiple of 4 (real ciphertext always is).
+  //   2. Only chars from the base64 alphabet + optional `=` padding.
+  //   3. Min decoded length covers version + IV + GCM tag.
+  //   4. Version byte must match.
+  //   5. Round-trip the decoded buffer back to base64 and compare —
+  //      the only string that decodes-then-encodes to itself IS a
+  //      valid base64 string (Node's decoder is lenient on whitespace
+  //      otherwise).
+  if (value.length % 4 !== 0) return false;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
   try {
     const raw = Buffer.from(value, "base64");
-    return (
-      raw.length >= 1 + IV_BYTES + TAG_BYTES && raw[0] === VERSION_V1
-    );
+    if (raw.length < 1 + IV_BYTES + TAG_BYTES) return false;
+    if (raw[0] !== VERSION_V1) return false;
+    return raw.toString("base64") === value;
   } catch {
     return false;
   }
