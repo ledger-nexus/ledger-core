@@ -139,7 +139,7 @@ Stored exclusively in:
 | Field | Classification | Notes |
 |---|---|---|
 | `toEmail` | CONFIDENTIAL | PII |
-| `subject`, `bodyText`, `bodyHtml` | CONFIDENTIAL | Email content — may include JE memos / tenant info |
+| `subject`, `bodyText`, `bodyHtml` | CONFIDENTIAL | Email content — may include JE memos / tenant info. **Encrypted at rest** (2026-05-29) via the Prisma extension. |
 | `providerId` (Resend message id) | INTERNAL | Tracking |
 | `metadata` | INTERNAL | Includes `tenantId`, `entryId`; no raw PII (we don't pass it through) |
 

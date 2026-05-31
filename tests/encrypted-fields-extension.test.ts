@@ -107,7 +107,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Targeted cleanup of test JEs only.
+  // Targeted cleanup of test JEs + test EmailDelivery rows only.
   const ent = await rawPrisma.legalEntity.findFirst({
     where: { code: ENTITY },
     select: { id: true },
@@ -118,6 +118,10 @@ afterAll(async () => {
     });
     await rawPrisma.journalEntry.deleteMany({ where: { entityId: ent.id } });
   }
+  // EmailDelivery test rows: identified by the SUFFIX-stamped toEmail.
+  await rawPrisma.emailDelivery.deleteMany({
+    where: { toEmail: { contains: SUFFIX } },
+  });
   await rawPrisma.$disconnect();
 });
 
@@ -177,5 +181,68 @@ describe("encrypted-fields extension (Confidentiality TSC)", () => {
       // Either the test plaintext or another test's plaintext.
       expect(typeof e.memo).toBe("string");
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EmailDelivery — second column rollout
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: EmailDelivery (Confidentiality TSC)", () => {
+  let deliveryId: string;
+  const plaintextSubject = `Test subject ${SUFFIX}`;
+  const plaintextBodyText = `Hi Alice,\n\nYour journal entry #1234 was approved.\n\n— Acme Co.\n[token: ${SUFFIX}]`;
+  const plaintextBodyHtml = `<p>Hi Alice,</p><p>Your journal entry #1234 was approved.</p>`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    const created = await prisma.emailDelivery.create({
+      data: {
+        toEmail: `subject-${SUFFIX}@example.com`,
+        template: "test_template",
+        subject: plaintextSubject,
+        bodyText: plaintextBodyText,
+        bodyHtml: plaintextBodyHtml,
+        status: "DELIVERED",
+      },
+    });
+    deliveryId = created.id;
+  });
+
+  it("on-disk subject/bodyText/bodyHtml are encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.emailDelivery.findUnique({
+      where: { id: deliveryId },
+      select: { subject: true, bodyText: true, bodyHtml: true, toEmail: true },
+    });
+    // Subject + bodies must be ciphertext.
+    expect(raw?.subject).not.toBe(plaintextSubject);
+    expect(looksEncrypted(raw?.subject)).toBe(true);
+    expect(raw?.bodyText).not.toBe(plaintextBodyText);
+    expect(looksEncrypted(raw?.bodyText)).toBe(true);
+    expect(raw?.bodyHtml).not.toBe(plaintextBodyHtml);
+    expect(looksEncrypted(raw?.bodyHtml)).toBe(true);
+    // toEmail is intentionally NOT encrypted (we query by it for the
+    // GDPR data subject request flow). Verify it's still plaintext.
+    expect(raw?.toEmail).toBe(`subject-${SUFFIX}@example.com`);
+  });
+
+  it("app surface sees plaintext on all three columns", async () => {
+    const { prisma } = await import("@/lib/db");
+    const delivery = await prisma.emailDelivery.findUnique({
+      where: { id: deliveryId },
+    });
+    expect(delivery?.subject).toBe(plaintextSubject);
+    expect(delivery?.bodyText).toBe(plaintextBodyText);
+    expect(delivery?.bodyHtml).toBe(plaintextBodyHtml);
+  });
+
+  it("findMany over EmailDelivery decrypts each row", async () => {
+    const { prisma } = await import("@/lib/db");
+    const rows = await prisma.emailDelivery.findMany({
+      where: { id: deliveryId },
+      select: { subject: true, bodyText: true },
+    });
+    expect(rows[0].subject).toBe(plaintextSubject);
+    expect(rows[0].bodyText).toBe(plaintextBodyText);
   });
 });

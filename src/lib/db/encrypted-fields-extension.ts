@@ -60,6 +60,14 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   field: string;
 }> = [
   { model: "JournalEntry", field: "memo" },
+  // EmailDelivery body fields contain literal email content sent to
+  // users — JE memos, owner-transfer offers, invite tokens. Highest-
+  // cost-per-leak after JE memo because a leaked email body typically
+  // reveals BOTH the tenant context AND the operational event in the
+  // same row.
+  { model: "EmailDelivery", field: "subject" },
+  { model: "EmailDelivery", field: "bodyText" },
+  { model: "EmailDelivery", field: "bodyHtml" },
   // Add new rows here as the rollout proceeds. Each addition needs a
   // matching migration script in prisma/sql/ that backfills existing
   // rows. See README in that directory.

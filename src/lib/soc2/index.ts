@@ -151,6 +151,10 @@ const PII_FIELD_NAMES = new Set<string>([
   "memo",
   "description",
   "notes",
+  // EmailDelivery body fields (encrypted at rest; never log either).
+  "subject",
+  "bodyText",
+  "bodyHtml",
 ]);
 
 const REDACTED = "[REDACTED]";

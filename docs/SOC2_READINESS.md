@@ -524,11 +524,15 @@ remain and still block a Type 2 audit:
   - Extension (`src/lib/db/encrypted-fields-extension.ts`, 3 tests
     with real DB roundtrip): transparent encrypt-on-write +
     decrypt-on-read for columns in `ENCRYPTED_COLUMNS`
-  - First column: `JournalEntry.memo`
-  - Backfill (`scripts/encrypt-journal-entry-memos.ts`):
-    idempotent via `looksEncrypted`; safe to interrupt + resume
-  **Next columns to add:** `EmailDelivery.bodyText` / `.bodyHtml` /
-  `.subject`; `BankStatementLine.description` (recon); then
+  - Encrypted columns:
+    * `JournalEntry.memo` (commit `664d6c3`)
+    * `EmailDelivery.subject` / `.bodyText` / `.bodyHtml`
+      (second column rollout)
+  - Backfill scripts (idempotent via `looksEncrypted`):
+    * `scripts/encrypt-journal-entry-memos.ts`
+    * `scripts/encrypt-email-delivery-bodies.ts`
+  **Next column to add:** `BankStatementLine.description` (recon)
+  — needs the extension mirrored into recon's repo. Then
   `Party.displayName` as a longer-term target.
 - **Data classification taxonomy** — `docs/policies/data-classification.md`
   has a 4-level taxonomy template; needs field-by-field mapping for
