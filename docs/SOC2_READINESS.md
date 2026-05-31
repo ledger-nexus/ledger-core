@@ -545,6 +545,22 @@ remain and still block a Type 2 audit:
       same shape as Party {code, displayName}. Audited across all
       5 repos: zero filter-by-name queries. Per-request crypto
       cost: microseconds; perf-neutral on session load.
+    * `Notification.title` + `Notification.body` (2026-05-31) —
+      rendered alert text in the notification bell + email
+      templates. Title often includes a verb + customer name +
+      amount ("Acme paid $5,000 invoice 1234"); body is the
+      longer-form variant. Category enum stays plaintext (used
+      for filtering / grouping). Zero filter queries on either
+      column.
+    * `LegalEntity.name` (2026-05-31) — customer's legal company
+      name as displayed in reports, headers, BTD, and the
+      consolidation hierarchy. `code` stays plaintext (the lookup
+      key in WHERE clauses everywhere); same {code, name} shape
+      as Tenant and Party.
+    * `User.displayName` (2026-05-31) — human-readable name on the
+      user's profile, audit log attributions, and owner-transfer
+      notifications. `email` stays plaintext (auth-keyed) until a
+      deterministic-encryption or HMAC-index workstream lands.
   - Encrypted columns (recon, commit `711da29`):
     * `BankStatementLine.description` — via the mirrored
       extension that also handles nested writes
@@ -567,6 +583,8 @@ remain and still block a Type 2 audit:
     * `ledger-core/scripts/encrypt-party-display-names.ts`
     * `ledger-core/scripts/encrypt-journal-entry-note-bodies.ts`
     * `ledger-core/scripts/encrypt-tenant-names.ts`
+    * `ledger-core/scripts/encrypt-notification-text.ts`
+    * `ledger-core/scripts/encrypt-legal-entity-and-user-names.ts`
     * `recon/scripts/encrypt-bank-statement-line-descriptions.ts`
   **What's encrypted so far:** every free-text column that can
   surface PII or competitive intelligence in this repo's domain

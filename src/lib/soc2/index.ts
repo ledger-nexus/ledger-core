@@ -159,6 +159,10 @@ const PII_FIELD_NAMES = new Set<string>([
   // Already-listed "notes" above catches singular-aliased fields;
   // "body" catches the actual column name on JournalEntryNote.
   "body",
+  // Notification.title — encrypted at rest (2026-05-31). Renders the
+  // alert text shown in the notification bell + email templates.
+  // Title often includes a verb + customer name + amount; redact.
+  "title",
 ]);
 
 const REDACTED = "[REDACTED]";

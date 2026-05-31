@@ -126,15 +126,34 @@ afterAll(async () => {
   await rawPrisma.party.deleteMany({
     where: { code: { contains: SUFFIX } },
   });
+  // LegalEntity test rows: SUFFIX-stamped code.
+  await rawPrisma.legalEntity.deleteMany({
+    where: { code: { contains: `ENC-LE-${SUFFIX}` } },
+  });
+  // User test rows: SUFFIX-stamped email. The Notification + Tenant
+  // tests already use enc-tenant-owner / enc-notif-owner prefixes;
+  // this catches the User-displayName test's enc-user prefix too.
+  await rawPrisma.user.deleteMany({
+    where: { email: { contains: `enc-user-${SUFFIX}` } },
+  });
   // Tenant test rows: identified by the SUFFIX-stamped slug. The new
   // tenant's owner user was a throwaway with SUFFIX-stamped email —
   // delete that too. Tenant has TenantMembership cascading via FK,
   // but the test never adds members, so a direct deleteMany is safe.
+  // (Both `enc-tenant-` and `enc-notif-` slugs match.)
+  await rawPrisma.notification.deleteMany({
+    where: { tenant: { slug: { contains: SUFFIX } } },
+  });
   await rawPrisma.tenant.deleteMany({
     where: { slug: { contains: SUFFIX } },
   });
   await rawPrisma.user.deleteMany({
-    where: { email: { contains: `enc-tenant-owner-${SUFFIX}` } },
+    where: {
+      OR: [
+        { email: { contains: `enc-tenant-owner-${SUFFIX}` } },
+        { email: { contains: `enc-notif-owner-${SUFFIX}` } },
+      ],
+    },
   });
   await rawPrisma.$disconnect();
 });
@@ -413,5 +432,164 @@ describe("encrypted-fields extension: Tenant (Confidentiality TSC)", () => {
     });
     expect(tenant?.name).toBe(plaintextName);
     expect(tenant?.slug).toBe(tenantSlug);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notification — sixth column block (title + body)
+// Title and body together render the alert ("Acme paid $5,000 invoice
+// 1234"); both are PII-loaded. Category enum stays plaintext for
+// filter use.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: Notification (Confidentiality TSC)", () => {
+  let notificationId: string;
+  let recipientUserId: string;
+  let notifTenantId: string;
+  const plaintextTitle = `Customer Acme paid $5,000 (test ${SUFFIX})`;
+  const plaintextBody = `Invoice #1234 from Acme Corp has been paid in full. (test ${SUFFIX})`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    // Spin up a throwaway user — Notification.recipientUserId is NOT NULL.
+    const perTest = randomBytes(2).toString("hex");
+    const owner = await rawPrisma.user.create({
+      data: {
+        email: `enc-notif-owner-${SUFFIX}-${perTest}@deleted.local`,
+        displayName: `Enc Notif Owner ${SUFFIX}`,
+      },
+    });
+    // Need a tenant scope for the notification — use a fresh one per
+    // run to keep cleanup simple.
+    const tenant = await rawPrisma.tenant.create({
+      data: {
+        slug: `enc-notif-${SUFFIX}-${perTest}`,
+        name: `Enc Notif Tenant ${SUFFIX}`,
+        ownerUserId: owner.id,
+      },
+    });
+    notifTenantId = tenant.id;
+    recipientUserId = owner.id;
+    const created = await prisma.notification.create({
+      data: {
+        tenantId: tenant.id,
+        recipientUserId: owner.id,
+        category: "SYSTEM",
+        title: plaintextTitle,
+        body: plaintextBody,
+      },
+    });
+    notificationId = created.id;
+  });
+
+  it("on-disk Notification.title and .body are ciphertext", async () => {
+    const raw = await rawPrisma.notification.findUnique({
+      where: { id: notificationId },
+      select: { title: true, body: true, category: true },
+    });
+    expect(raw?.title).not.toBe(plaintextTitle);
+    expect(looksEncrypted(raw?.title)).toBe(true);
+    expect(raw?.body).not.toBe(plaintextBody);
+    expect(looksEncrypted(raw?.body)).toBe(true);
+    // Category stays plaintext (it's the filter / display-grouping key).
+    expect(raw?.category).toBe("SYSTEM");
+  });
+
+  it("app surface decrypts title + body on read", async () => {
+    const { prisma } = await import("@/lib/db");
+    const n = await prisma.notification.findUnique({
+      where: { id: notificationId },
+      select: { title: true, body: true, category: true },
+    });
+    expect(n?.title).toBe(plaintextTitle);
+    expect(n?.body).toBe(plaintextBody);
+    expect(n?.category).toBe("SYSTEM");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LegalEntity.name + User.displayName — seventh column block. Both
+// follow the {searchable code, free-text display name} pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: LegalEntity (Confidentiality TSC)", () => {
+  let entityIdLE: string;
+  let entityCode: string;
+  const plaintextEntityName = `Acme Corp, Inc. (LE encryption ${SUFFIX})`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    const tenantId = await getDefaultTenantId(prisma as PrismaClient);
+    const perTest = randomBytes(2).toString("hex");
+    entityCode = `ENC-LE-${SUFFIX}-${perTest}`;
+    const created = await prisma.legalEntity.create({
+      data: {
+        tenantId,
+        code: entityCode,
+        name: plaintextEntityName,
+        functionalCurrencyId: "USD",
+      },
+    });
+    entityIdLE = created.id;
+  });
+
+  it("on-disk LegalEntity.name is encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.legalEntity.findUnique({
+      where: { id: entityIdLE },
+      select: { name: true, code: true },
+    });
+    expect(raw?.name).not.toBe(plaintextEntityName);
+    expect(looksEncrypted(raw?.name)).toBe(true);
+    // code stays plaintext — the lookup key.
+    expect(raw?.code).toBe(entityCode);
+  });
+
+  it("app surface decrypts LegalEntity.name on read", async () => {
+    const { prisma } = await import("@/lib/db");
+    const e = await prisma.legalEntity.findUnique({
+      where: { id: entityIdLE },
+      select: { name: true, code: true },
+    });
+    expect(e?.name).toBe(plaintextEntityName);
+    expect(e?.code).toBe(entityCode);
+  });
+});
+
+describe("encrypted-fields extension: User.displayName (Confidentiality TSC)", () => {
+  let userId: string;
+  const plaintextDisplayName = `Alice Q. Public (encryption test ${SUFFIX})`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    const perTest = randomBytes(2).toString("hex");
+    const created = await prisma.user.create({
+      data: {
+        // email stays plaintext (auth-keyed) — only displayName
+        // is in the registry.
+        email: `enc-user-${SUFFIX}-${perTest}@deleted.local`,
+        displayName: plaintextDisplayName,
+      },
+    });
+    userId = created.id;
+  });
+
+  it("on-disk User.displayName is encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true, email: true },
+    });
+    expect(raw?.displayName).not.toBe(plaintextDisplayName);
+    expect(looksEncrypted(raw?.displayName)).toBe(true);
+    // email stays plaintext — used as the auth key.
+    expect(raw?.email).toContain(`enc-user-${SUFFIX}`);
+  });
+
+  it("app surface decrypts User.displayName on read", async () => {
+    const { prisma } = await import("@/lib/db");
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true, email: true },
+    });
+    expect(u?.displayName).toBe(plaintextDisplayName);
   });
 });

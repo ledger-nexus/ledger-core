@@ -29,8 +29,8 @@ Per-model classification of every field that could contain regulated data:
 | Field | Classification | Notes |
 |---|---|---|
 | `id` | INTERNAL | Internal UUID; not customer-facing |
-| `email` | CONFIDENTIAL | PII; required for login + audit attribution |
-| `displayName` | CONFIDENTIAL | PII; not used for auth |
+| `email` | CONFIDENTIAL | PII; required for login + audit attribution. NOT encrypted at rest yet — login flow requires equality lookups; deterministic encryption or HMAC index column is a future workstream. |
+| `displayName` | CONFIDENTIAL | PII; not used for auth. **Encrypted at rest** (2026-05-31) via the Prisma extension. |
 | `isActive` | INTERNAL | Provisioning state |
 
 ### `JournalEntry` (CONFIDENTIAL)
@@ -142,6 +142,25 @@ Stored exclusively in:
 | `email` | CONFIDENTIAL | PII; the invited person's email |
 | `token` | RESTRICTED | Single-use secret; constant-time-compared on accept |
 | `expiresAt`, `acceptedAt`, `revokedAt` | INTERNAL | Lifecycle timestamps |
+
+### `LegalEntity` (CONFIDENTIAL)
+
+| Field | Classification | Notes |
+|---|---|---|
+| `name` | CONFIDENTIAL | Customer's legal company name (e.g. "Acme Corp, Inc."). **Encrypted at rest** (2026-05-31) via the Prisma extension. |
+| `code` | INTERNAL | Stable lookup key; the searchable identifier used in WHERE clauses, intentionally NOT encrypted. |
+| `parentEntityId` | INTERNAL | Hierarchy edge for consolidation. |
+| `functionalCurrencyId` | INTERNAL | FX setting. |
+
+### `Notification` (CONFIDENTIAL)
+
+| Field | Classification | Notes |
+|---|---|---|
+| `title` | CONFIDENTIAL | Rendered notification headline. Often includes customer / vendor names + dollar amounts. **Encrypted at rest** (2026-05-31) via the Prisma extension. |
+| `body` | CONFIDENTIAL | Optional longer text — same PII surface as title. **Encrypted at rest** (2026-05-31) via the Prisma extension. |
+| `category` | INTERNAL | Enum used for filter / grouping; intentionally NOT encrypted. |
+| `link` | INTERNAL | Internal route the bell click opens. |
+| `readAt`, `dismissedAt` | INTERNAL | Lifecycle. |
 
 ### `EmailDelivery` (CONFIDENTIAL)
 

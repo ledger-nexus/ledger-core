@@ -96,6 +96,32 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // authenticated request) — AES-GCM is microseconds so the per-
   // session decrypt is perf-neutral.
   { model: "Tenant", field: "name" },
+  // Notification.{title,body} carries the rendered per-user alert
+  // text: "Acme paid $5,000 invoice 1234", "Owner transfer to alice
+  // declined", "JE-2026-01 needs approval". The category enum is
+  // plaintext (used for filtering); the rendered text routinely
+  // includes customer names, vendor names, dollar amounts, JE
+  // numbers — the prose surface where multiple PII vectors land in
+  // one row. Audited 2026-05-31: zero filter queries on title or
+  // body; only display reads via the notification bell + user-data
+  // export.
+  { model: "Notification", field: "title" },
+  { model: "Notification", field: "body" },
+  // LegalEntity.name is the customer's legal company name (e.g.
+  // "Acme Corp, Inc."), distinct from `code` (the lookup key, in
+  // WHERE clauses everywhere) and `tenantId` (the actor scope).
+  // Same {code, name} shape as Tenant and Party — searchable id
+  // stays plaintext, free-text display name gets encrypted.
+  // Audited 2026-05-31: zero filter-by-name queries; only display
+  // reads in reports, headers, BTD, and the consolidation hierarchy.
+  { model: "LegalEntity", field: "name" },
+  // User.displayName is the human-readable name shown on the user's
+  // profile, audit log attributions, and owner-transfer
+  // notifications. NOT the email (email stays plaintext for the
+  // login flow — deterministic encryption is required for email
+  // and is a separate workstream). Audited 2026-05-31: zero
+  // filter-by-displayName queries; only display reads.
+  { model: "User", field: "displayName" },
   // Add new rows here as the rollout proceeds. Each addition needs a
   // matching migration script in prisma/sql/ that backfills existing
   // rows. See README in that directory.
