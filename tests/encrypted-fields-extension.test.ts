@@ -122,6 +122,10 @@ afterAll(async () => {
   await rawPrisma.emailDelivery.deleteMany({
     where: { toEmail: { contains: SUFFIX } },
   });
+  // Party test rows: identified by the SUFFIX-stamped code.
+  await rawPrisma.party.deleteMany({
+    where: { code: { contains: SUFFIX } },
+  });
   await rawPrisma.$disconnect();
 });
 
@@ -244,5 +248,50 @@ describe("encrypted-fields extension: EmailDelivery (Confidentiality TSC)", () =
     });
     expect(rows[0].subject).toBe(plaintextSubject);
     expect(rows[0].bodyText).toBe(plaintextBodyText);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Party — third column rollout (customer/vendor name)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: Party (Confidentiality TSC)", () => {
+  let partyId: string;
+  const plaintextDisplayName = `Acme Co (encryption test ${SUFFIX})`;
+  const partyCode = `ENC-PARTY-${SUFFIX}`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    const tenantId = await getDefaultTenantId(prisma as PrismaClient);
+    const created = await prisma.party.create({
+      data: {
+        tenantId,
+        code: partyCode,
+        displayName: plaintextDisplayName,
+      },
+    });
+    partyId = created.id;
+  });
+
+  it("on-disk displayName is encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.party.findUnique({
+      where: { id: partyId },
+      select: { displayName: true, code: true },
+    });
+    expect(raw?.displayName).not.toBe(plaintextDisplayName);
+    expect(looksEncrypted(raw?.displayName)).toBe(true);
+    // `code` stays plaintext (NOT in the registry — it's the lookup
+    // key used throughout the app).
+    expect(raw?.code).toBe(partyCode);
+  });
+
+  it("app surface sees plaintext displayName", async () => {
+    const { prisma } = await import("@/lib/db");
+    const party = await prisma.party.findUnique({
+      where: { id: partyId },
+      select: { displayName: true, code: true },
+    });
+    expect(party?.displayName).toBe(plaintextDisplayName);
+    expect(party?.code).toBe(partyCode);
   });
 });

@@ -68,6 +68,14 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   { model: "EmailDelivery", field: "subject" },
   { model: "EmailDelivery", field: "bodyText" },
   { model: "EmailDelivery", field: "bodyHtml" },
+  // Party.displayName is the customer / vendor / contact name as
+  // displayed across AR/AP, JE detail, and the aging reports. A
+  // leaked Party table = a leaked customer roster, which is also
+  // a competitive-intelligence asset. Audited 2026-05-29 across all
+  // 5 repos: zero queries filter by displayName (only `code` is
+  // searchable), so AES-GCM is safe — no need for deterministic
+  // encryption or a secondary search index.
+  { model: "Party", field: "displayName" },
   // Add new rows here as the rollout proceeds. Each addition needs a
   // matching migration script in prisma/sql/ that backfills existing
   // rows. See README in that directory.

@@ -37,7 +37,13 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { reverseJournalEntryAction } from "@/app/actions/reverse-journal-entry";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { prisma as extendedPrisma } from "@/lib/db";
 
+// Raw PrismaClient for setup + cleanup (we need to be able to write
+// audit_log via the cleanup helper and we want a single connection
+// that doesn't share state with the app). Reads that touch encrypted
+// columns (JournalEntry.memo) go through `extendedPrisma` so the
+// extension auto-decrypts on the way out.
 const prisma = new PrismaClient();
 
 const SUFFIX = ("REV" + Date.now().toString(36) + Math.floor(Math.random() * 9999)).toUpperCase();
@@ -164,7 +170,9 @@ describe("reverseJournalEntryAction — happy path", () => {
     expect(r.reversalEntryNumber).toMatch(/REV-/);
 
     // Reversal exists, dated 2027-01-01, with sign-flipped lines.
-    const reversal = await prisma.journalEntry.findUniqueOrThrow({
+    // Read via the extended client so `memo` auto-decrypts —
+    // JournalEntry.memo is in the field-encryption registry.
+    const reversal = await extendedPrisma.journalEntry.findUniqueOrThrow({
       where: { id: r.reversalId! },
       include: {
         lines: {

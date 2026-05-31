@@ -528,18 +528,40 @@ remain and still block a Type 2 audit:
     * `JournalEntry.memo` (commit `664d6c3`)
     * `EmailDelivery.subject` / `.bodyText` / `.bodyHtml`
       (commit `ae8dd87`)
+    * `Party.displayName` (2026-05-30) — customer/vendor names.
+      Verified zero filter-by-displayName queries across all 5
+      repos before encrypting; only `Party.code` (intentionally
+      plaintext, the searchable lookup key) is used in WHERE
+      clauses. Confidentiality TSC + competitive-intelligence
+      protection.
   - Encrypted columns (recon, commit `711da29`):
     * `BankStatementLine.description` — via the mirrored
       extension that also handles nested writes
       (`BankStatement.create({ lines: { create: [...] } })`)
+    * `Party.displayName` — READ side. Recon never writes Party
+      (ledger-core owns it) but `src/lib/matching/candidates.ts`
+      reads `party.displayName` for each match candidate; without
+      the registry entry on this side the UI would surface
+      ciphertext. Confirms that whenever a shared-DB consumer
+      reads a column ledger-core encrypts, that consumer must
+      mirror the registry entry. revenue-rec and fa-amort
+      currently do NOT read Party via Prisma (they only POST via
+      the HTTP bridge with `partyCode`), so they don't need the
+      registry entry — but if any future code path adds a Prisma
+      read of `party.displayName` in those repos, the registry
+      must be mirrored there too.
   - Backfill scripts (idempotent via `looksEncrypted`):
     * `ledger-core/scripts/encrypt-journal-entry-memos.ts`
     * `ledger-core/scripts/encrypt-email-delivery-bodies.ts`
+    * `ledger-core/scripts/encrypt-party-display-names.ts`
     * `recon/scripts/encrypt-bank-statement-line-descriptions.ts`
-  **Next column on the runway:** `Party.displayName` (customer +
-  vendor names — long-term target). The pattern is now well-
-  established; adding a new column is a 5-line registry entry +
-  backfill script + roundtrip test.
+  **What's encrypted so far:** every free-text column that can
+  surface PII or competitive intelligence in this repo's domain
+  (JE memos, party names, email bodies). Remaining considerations
+  for future iterations: `sourcePayload` on imported JEs (frozen
+  ERP JSON; encrypting it costs roundtrip-test fidelity), and any
+  AI-tool input/output columns (`AiSuggestion.inputJson` /
+  `outputJson` if those become user-visible).
 - **Data classification taxonomy** — `docs/policies/data-classification.md`
   has a 4-level taxonomy template; needs field-by-field mapping for
   every customer-data column.

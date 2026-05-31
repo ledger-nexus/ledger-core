@@ -1,7 +1,7 @@
 # Data classification + retention policy
 
 **Version:** 1.1
-**Effective date:** 2026-05-29
+**Effective date:** 2026-05-30
 **Owner:** Hosung Son (founder)
 **Last reviewed:** 2026-05-29
 
@@ -46,8 +46,8 @@ Per-model classification of every field that could contain regulated data:
 
 | Field | Classification | Notes |
 |---|---|---|
-| `displayName` | CONFIDENTIAL | Customer/vendor names |
-| `code` | INTERNAL | Stable identifier |
+| `displayName` | CONFIDENTIAL | Customer/vendor names. **Encrypted at rest** (2026-05-30) via the Prisma extension in ledger-core (write side) and recon (read side; recon reads via the matching candidate pipeline). |
+| `code` | INTERNAL | Stable identifier; the searchable lookup key, intentionally NOT encrypted. |
 
 ### `BankAccount`, `BankStatement`, `BankStatementLine` (CONFIDENTIAL, possibly RESTRICTED)
 
