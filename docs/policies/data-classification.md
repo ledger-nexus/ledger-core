@@ -1,7 +1,7 @@
 # Data classification + retention policy
 
 **Version:** 1.1
-**Effective date:** 2026-05-30
+**Effective date:** 2026-05-31
 **Owner:** Hosung Son (founder)
 **Last reviewed:** 2026-05-29
 
@@ -128,7 +128,8 @@ Stored exclusively in:
 
 | Field | Classification | Notes |
 |---|---|---|
-| `name`, `slug` | CONFIDENTIAL | Customer organization name; identifies the customer |
+| `name` | CONFIDENTIAL | Customer organization name. **Encrypted at rest** (2026-05-31) via the Prisma extension. |
+| `slug` | INTERNAL | URL-safe stable identifier; the lookup key, intentionally NOT encrypted. |
 | `stripeCustomerId`, `stripeSubscriptionId` | CONFIDENTIAL | Billing identifiers (PCI-adjacent; Stripe owns the card data itself) |
 | `monthlyAiSpendCapUsd`, `jeApprovalMinAmount` | INTERNAL | Configuration values |
 | `pendingOwnerTransferToUserId` | INTERNAL | Workflow state |

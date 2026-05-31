@@ -539,6 +539,12 @@ remain and still block a Type 2 audit:
       names + internal context. UI only orders by createdAt /
       keys resolve on `resolvedAt`; no body-text search. Audited
       across all 5 repos: zero filter-by-body queries.
+    * `Tenant.name` (2026-05-31) — customer organization name as
+      displayed in workspace switcher, billing pages, admin tools.
+      `slug` stays plaintext (URL key in WHERE clauses everywhere);
+      same shape as Party {code, displayName}. Audited across all
+      5 repos: zero filter-by-name queries. Per-request crypto
+      cost: microseconds; perf-neutral on session load.
   - Encrypted columns (recon, commit `711da29`):
     * `BankStatementLine.description` — via the mirrored
       extension that also handles nested writes
@@ -560,6 +566,7 @@ remain and still block a Type 2 audit:
     * `ledger-core/scripts/encrypt-email-delivery-bodies.ts`
     * `ledger-core/scripts/encrypt-party-display-names.ts`
     * `ledger-core/scripts/encrypt-journal-entry-note-bodies.ts`
+    * `ledger-core/scripts/encrypt-tenant-names.ts`
     * `recon/scripts/encrypt-bank-statement-line-descriptions.ts`
   **What's encrypted so far:** every free-text column that can
   surface PII or competitive intelligence in this repo's domain

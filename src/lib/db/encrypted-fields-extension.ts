@@ -86,6 +86,16 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // content. Audited 2026-05-30 across all 5 repos: zero filter-by-
   // body queries. Standard AES-GCM is safe.
   { model: "JournalEntryNote", field: "body" },
+  // Tenant.name is the customer's organization name as displayed in
+  // the workspace switcher, billing pages, and admin tools. It's NOT
+  // the slug (which stays plaintext — it's the URL key, in WHERE
+  // clauses everywhere). The pair of {slug, name} is the same shape
+  // as Party {code, displayName} — searchable id stays plaintext,
+  // free-text display name gets encrypted. Audited 2026-05-30: zero
+  // filter-by-name queries. Reads happen on Tenant load (every
+  // authenticated request) — AES-GCM is microseconds so the per-
+  // session decrypt is perf-neutral.
+  { model: "Tenant", field: "name" },
   // Add new rows here as the rollout proceeds. Each addition needs a
   // matching migration script in prisma/sql/ that backfills existing
   // rows. See README in that directory.

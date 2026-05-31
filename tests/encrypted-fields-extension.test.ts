@@ -126,6 +126,16 @@ afterAll(async () => {
   await rawPrisma.party.deleteMany({
     where: { code: { contains: SUFFIX } },
   });
+  // Tenant test rows: identified by the SUFFIX-stamped slug. The new
+  // tenant's owner user was a throwaway with SUFFIX-stamped email —
+  // delete that too. Tenant has TenantMembership cascading via FK,
+  // but the test never adds members, so a direct deleteMany is safe.
+  await rawPrisma.tenant.deleteMany({
+    where: { slug: { contains: SUFFIX } },
+  });
+  await rawPrisma.user.deleteMany({
+    where: { email: { contains: `enc-tenant-owner-${SUFFIX}` } },
+  });
   await rawPrisma.$disconnect();
 });
 
@@ -348,5 +358,60 @@ describe("encrypted-fields extension: JournalEntryNote (Confidentiality TSC)", (
       select: { body: true },
     });
     expect(note?.body).toBe(plaintextBody);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tenant.name — fifth column rollout (customer organization name)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: Tenant (Confidentiality TSC)", () => {
+  let tenantId: string;
+  let tenantSlug: string;
+  const plaintextName = `Acme Corp (encryption test ${SUFFIX})`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    // Per-test unique slug + owner email — beforeEach runs once per
+    // `it(...)` block so a constant SUFFIX would collide on the
+    // tenant.slug unique index.
+    const perTest = randomBytes(2).toString("hex");
+    tenantSlug = `enc-tenant-${SUFFIX}-${perTest}`;
+    // Spin up a throwaway owner user — Tenant.ownerUserId is NOT NULL.
+    const owner = await rawPrisma.user.create({
+      data: {
+        email: `enc-tenant-owner-${SUFFIX}-${perTest}@deleted.local`,
+        displayName: `Enc Tenant Owner ${SUFFIX}`,
+      },
+    });
+    const created = await prisma.tenant.create({
+      data: {
+        slug: tenantSlug,
+        name: plaintextName,
+        ownerUserId: owner.id,
+      },
+    });
+    tenantId = created.id;
+  });
+
+  it("on-disk tenant.name is encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true, slug: true },
+    });
+    expect(raw?.name).not.toBe(plaintextName);
+    expect(looksEncrypted(raw?.name)).toBe(true);
+    // slug stays plaintext — it's the URL key, in WHERE clauses everywhere.
+    expect(raw?.slug).toBe(tenantSlug);
+  });
+
+  it("app surface sees plaintext tenant.name", async () => {
+    const { prisma } = await import("@/lib/db");
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true, slug: true },
+    });
+    expect(tenant?.name).toBe(plaintextName);
+    expect(tenant?.slug).toBe(tenantSlug);
   });
 });
