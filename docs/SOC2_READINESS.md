@@ -517,11 +517,19 @@ remain and still block a Type 2 audit:
   Sentry, Stripe domains; blocks framing + plugins; forces HTTPS
   upgrade. 9 unit tests at `tests/csp-nonce.test.ts`.
 - ~~**Field-level encryption for confidential data at rest**~~ —
-  Helper shipped 2026-05-29 (`src/lib/soc2/field-encryption.ts`,
-  15 tests). AES-256-GCM via node:crypto, keyed off
-  `FIELD_ENCRYPTION_KEY` env var (32 bytes hex), version byte for
-  future rotation. **Next step:** column-by-column rollout —
-  start with `JournalEntry.memo` (highest-value target).
+  Helper + Prisma extension + first column rollout shipped
+  2026-05-29:
+  - Helper (`src/lib/soc2/field-encryption.ts`, 15 tests): AES-
+    256-GCM via node:crypto, version byte for rotation
+  - Extension (`src/lib/db/encrypted-fields-extension.ts`, 3 tests
+    with real DB roundtrip): transparent encrypt-on-write +
+    decrypt-on-read for columns in `ENCRYPTED_COLUMNS`
+  - First column: `JournalEntry.memo`
+  - Backfill (`scripts/encrypt-journal-entry-memos.ts`):
+    idempotent via `looksEncrypted`; safe to interrupt + resume
+  **Next columns to add:** `EmailDelivery.bodyText` / `.bodyHtml` /
+  `.subject`; `BankStatementLine.description` (recon); then
+  `Party.displayName` as a longer-term target.
 - **Data classification taxonomy** — `docs/policies/data-classification.md`
   has a 4-level taxonomy template; needs field-by-field mapping for
   every customer-data column.

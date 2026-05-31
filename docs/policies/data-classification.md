@@ -37,7 +37,7 @@ Per-model classification of every field that could contain regulated data:
 
 | Field | Classification | Notes |
 |---|---|---|
-| `memo` | CONFIDENTIAL | Free-form; may contain customer/vendor names |
+| `memo` | CONFIDENTIAL | Free-form; may contain customer/vendor names. **Encrypted at rest** (2026-05-29) via the Prisma extension. |
 | `documentDate`, `postingDate` | CONFIDENTIAL | Could reveal customer activity timing |
 | `sourcePayload` | CONFIDENTIAL | Frozen ERP payload; may contain PII from source system |
 | `sourceRecordId` | INTERNAL | Identifier, not data |
