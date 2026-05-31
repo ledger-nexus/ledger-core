@@ -42,6 +42,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { setupFirstEntityAction } from "@/app/actions/setup-first-entity";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -86,7 +87,11 @@ afterAll(async () => {
   await prisma.period.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  // audit_log is DB-level append-only (CC6 RULE) — escape hatch lets
+  // cleanup remove rows that would otherwise block tenant.delete via FK.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   await prisma.recordEvent.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.tenant.deleteMany({ where: { id: tenant.id } });
@@ -102,8 +107,11 @@ beforeEach(async () => {
   await prisma.period.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({
-    where: { tenantId: tenant.id, action: "setup-first-entity" },
+  // audit_log append-only escape hatch — same reason as the afterAll block.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
+      where: { tenantId: tenant.id, action: "setup-first-entity" },
+    });
   });
   mockCookieStore.clear();
 });

@@ -21,6 +21,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { logAuditEvent } from "@/lib/audit/log";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -75,13 +76,18 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({
-    where: {
-      OR: [
-        { tenantId: { in: [tenantA.id, tenantB.id] } },
-        { action: { contains: SUFFIX } },
-      ],
-    },
+  // audit_log is DB-level append-only (CC6 RULE) — use the test-only
+  // escape hatch so cleanup can delete rows that would otherwise block
+  // tenant.delete via FK.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
+      where: {
+        OR: [
+          { tenantId: { in: [tenantA.id, tenantB.id] } },
+          { action: { contains: SUFFIX } },
+        ],
+      },
+    });
   });
   await prisma.tenant.deleteMany({
     where: { id: { in: [tenantA.id, tenantB.id] } },

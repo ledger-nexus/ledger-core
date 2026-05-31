@@ -20,6 +20,7 @@ import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
 import { createFixedAsset } from "@/lib/accounting/sub-ledgers/fixed-assets";
 import { createLease } from "@/lib/accounting/sub-ledgers/leases";
 import { createRevenueContract } from "@/lib/accounting/sub-ledgers/revenue-contracts";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -109,7 +110,11 @@ afterAll(async () => {
   });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: { in: tenantIds } } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  // audit_log is DB-level append-only (CC6 RULE) — escape hatch lets
+  // cleanup remove rows that would otherwise block tenant.delete via FK.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  });
   // RecordEvent.tenantId is RESTRICT; clean before tenant delete.
   await prisma.recordEvent.deleteMany({ where: { tenantId: { in: tenantIds } } });
 

@@ -32,6 +32,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { GET } from "@/app/api/reports/trial-balance/csv/route";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -79,8 +80,12 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({
-    where: { tenantId: tenant.id },
+  // audit_log is DB-level append-only (CC6 RULE) — escape hatch lets
+  // cleanup remove rows that would otherwise block tenant.delete via FK.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
+      where: { tenantId: tenant.id },
+    });
   });
   await prisma.legalEntity.deleteMany({
     where: { tenantId: tenant.id },

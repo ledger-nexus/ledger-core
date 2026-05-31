@@ -47,6 +47,7 @@ import {
   updateAccountAction,
   deactivateAccountAction,
 } from "@/app/actions/accounts";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const SUFFIX = ("ACCT" + Date.now().toString(36)).toUpperCase();
@@ -101,7 +102,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  // audit_log is DB-level append-only (CC6 RULE) — escape hatch lets
+  // cleanup remove rows that would otherwise block tenant.delete via FK.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   // Includes both entity-scoped and shared (entityId=null) accounts
   // created in this tenant by any test.
   await prisma.account.deleteMany({ where: { tenantId: tenant.id } });
@@ -117,8 +122,11 @@ afterAll(async () => {
 beforeEach(async () => {
   // Each test starts with a clean account set (entity-scoped AND shared).
   await prisma.account.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({
-    where: { tenantId: tenant.id, resource: "Account" },
+  // audit_log append-only escape hatch — same reason as the afterAll block.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
+      where: { tenantId: tenant.id, resource: "Account" },
+    });
   });
 });
 
