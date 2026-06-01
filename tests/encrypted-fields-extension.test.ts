@@ -7,6 +7,7 @@
 // Confidentiality TSC.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
@@ -118,6 +119,14 @@ afterAll(async () => {
     });
     await rawPrisma.journalEntry.deleteMany({ where: { entityId: ent.id } });
   }
+  // AuditLog test rows for AuditLog.metadata describe block. Wrap in
+  // withAuditLogMutable since the append-only RULE would otherwise
+  // silently no-op the delete.
+  await withAuditLogMutable(rawPrisma, async () => {
+    await rawPrisma.auditLog.deleteMany({
+      where: { action: { contains: SUFFIX } },
+    });
+  });
   // EmailDelivery test rows: identified by the SUFFIX-stamped toEmail.
   await rawPrisma.emailDelivery.deleteMany({
     where: { toEmail: { contains: SUFFIX } },
@@ -696,5 +705,64 @@ describe("encrypted-fields extension: JournalEntry.sourcePayload (Json mode, Con
       expect(sp).toHaveProperty("customerRef");
       expect(sp).toHaveProperty("lines");
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AuditLog.metadata (Json) — write-path encryption only. Read path
+// works the same way; legacy rows in production stay plaintext per the
+// append-only RULE.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: AuditLog.metadata (Json mode, Confidentiality TSC)", () => {
+  let auditId: string;
+  const plaintextMetadata = {
+    action: "reverse-journal-entry",
+    reason: `Tested reversal for customer Acme Corp invoice ${SUFFIX}`,
+    sourceEntryNumber: `ENT-${SUFFIX}-001`,
+    reversalEntryNumber: `REV-${SUFFIX}-001`,
+    note: "Föräljning återbetalas",
+  };
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    const tenantId = await getDefaultTenantId(prisma as PrismaClient);
+    const created = await prisma.auditLog.create({
+      data: {
+        tenantId,
+        eventType: "PRIVILEGED_ACTION",
+        action: `test.${SUFFIX}`,
+        outcome: "SUCCESS",
+        metadata: plaintextMetadata,
+      },
+    });
+    auditId = created.id;
+  });
+
+  it("on-disk metadata is a STRING (the ciphertext envelope), not the original object", async () => {
+    const raw = await rawPrisma.auditLog.findUnique({
+      where: { id: auditId },
+      select: { metadata: true, action: true, eventType: true },
+    });
+    expect(typeof raw?.metadata).toBe("string");
+    expect(looksEncrypted(raw?.metadata as string)).toBe(true);
+    const rawStr = String(raw?.metadata ?? "");
+    expect(rawStr).not.toContain("Acme");
+    expect(rawStr).not.toContain(SUFFIX);
+    expect(rawStr).not.toContain("Föräljning");
+    // action + eventType stay plaintext — they're the filter columns
+    // on /admin/audit-log.
+    expect(raw?.action).toBe(`test.${SUFFIX}`);
+    expect(raw?.eventType).toBe("PRIVILEGED_ACTION");
+  });
+
+  it("app surface decrypts metadata back into the exact original object", async () => {
+    const { prisma } = await import("@/lib/db");
+    const row = await prisma.auditLog.findUnique({
+      where: { id: auditId },
+      select: { metadata: true, action: true },
+    });
+    expect(row?.metadata).toEqual(plaintextMetadata);
+    expect(row?.action).toBe(`test.${SUFFIX}`);
   });
 });

@@ -27,6 +27,7 @@ import { POST } from "../src/app/api/internal/journal-entries/route";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
+import { prisma as extendedPrisma } from "@/lib/db";
 
 const SUFFIX = "ts" + Date.now().toString(36) + Math.floor(Math.random() * 9999);
 
@@ -235,7 +236,7 @@ describe("/api/internal/journal-entries: tenant-scoped token enforcement", () =>
   it("Audit log captures the token label on success", async () => {
     const res = await POST(makeReq(tokenA, baseEntry(entityCodeA, "audit metadata test")));
     expect(res.status).toBe(200);
-    const log = await prisma.auditLog.findFirst({
+    const log = await extendedPrisma.auditLog.findFirst({
       where: {
         tenantId: tenantA.id,
         eventType: "TOKEN_USED",
@@ -256,7 +257,7 @@ describe("/api/internal/journal-entries: tenant-scoped token enforcement", () =>
     // rejection log is therefore scoped to tenant A. Tightening the
     // query rules out unrelated TOKEN_REJECTED logs (garbage Bearer
     // tests etc., which have tenantId = null).
-    const log = await prisma.auditLog.findFirst({
+    const log = await extendedPrisma.auditLog.findFirst({
       where: {
         eventType: "TOKEN_REJECTED",
         action: "POST /api/internal/journal-entries",

@@ -31,6 +31,7 @@ import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
+import { prisma as extendedPrisma } from "@/lib/db";
 
 const SUFFIX = ("jecsv" + Date.now().toString(36) + Math.floor(Math.random() * 9999)).toUpperCase();
 const ENTITY_CODE = `JECSV-${SUFFIX}`;
@@ -177,7 +178,7 @@ describe("GET /api/journal-entries/[id]/csv", () => {
     });
     expect(after).toBe(before + 1);
 
-    const row = await prisma.auditLog.findFirst({
+    const row = await extendedPrisma.auditLog.findFirst({
       where: {
         eventType: "DATA_EXPORT",
         tenantId: tenant.id,

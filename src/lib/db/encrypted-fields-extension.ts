@@ -137,6 +137,30 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // and is a separate workstream). Audited 2026-05-31: zero
   // filter-by-displayName queries; only display reads.
   { model: "User", field: "displayName" },
+  // AuditLog.metadata is the per-event payload for SOC 2 audit
+  // records — varies by eventType, examples:
+  //   - PRIVILEGED_ACTION → { action, reason, resource, resourceId, ... }
+  //   - DATA_EXPORT       → { format, rowCount }
+  //   - LOGIN_FAILED      → { reason, attemptedEmail (hashed) }
+  //   - JE_POSTED         → { entryNumber, lineCount, ... }
+  // Routinely embeds resource identifiers + actor context + reason
+  // text. While the audit-log row itself is protected by the
+  // append-only RULE + admin-only RBAC, the JSON body has high PII
+  // density per row and should be encrypted at rest.
+  //
+  // IMPORTANT — backfill posture: audit_log is append-only at the DB
+  // level (CC6). UPDATE/DELETE are blocked by Postgres rules in
+  // production. New writes from this rollout forward encrypt
+  // automatically (the extension's create hook fires). Legacy
+  // plaintext rows can only be migrated in dev/staging where
+  // withAuditLogMutable() can temporarily disable the rules.
+  // Production legacy rows stay plaintext for the 7-year retention
+  // period — a documented limitation, not a code gap.
+  //
+  // Audited 2026-05-31: zero filter queries on metadata. Display
+  // happens via JSON.stringify on /admin/audit-log; the snippet
+  // helper at metadataSnippet() also gets the decrypted JsonValue.
+  { model: "AuditLog", field: "metadata", type: "json" },
   // JournalEntry.sourcePayload is the FROZEN verbatim payload from
   // the source ERP — QBO Invoice JSON, NetSuite Transaction with
   // nested lines, etc. Per CLAUDE.md mapper discipline: "Every

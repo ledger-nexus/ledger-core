@@ -65,9 +65,9 @@ Bank-related data is the highest-sensitivity in the system. Recon's bank stateme
 
 | Field | Classification | Notes |
 |---|---|---|
-| `inputText` | CONFIDENTIAL | May contain pasted customer data or invoice content |
-| `outputJson` | CONFIDENTIAL | AI-generated structured data referencing customer specifics |
-| `metadata` (in AuditLog) | INTERNAL | Action metadata |
+| `inputText` | CONFIDENTIAL | May contain pasted customer data or invoice content. **Encrypted at rest** (fa-amort, 2026-05-31). |
+| `outputJson` | CONFIDENTIAL | AI-generated structured data referencing customer specifics. **Encrypted at rest** (Json mode — fa-amort, recon, revenue-rec, 2026-05-31). |
+| `metadata` (in AuditLog) | CONFIDENTIAL | Per-event payload (action, reason, resource ids, actor context). **Encrypted at rest** (Json mode, 2026-05-31). Note: production legacy rows stay plaintext for the 7-year retention window because the append-only RULE blocks UPDATE — new writes from rollout date forward encrypt automatically; dev/staging backfill works via `withAuditLogMutable`. |
 
 ### Production secrets (RESTRICTED)
 

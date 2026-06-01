@@ -35,6 +35,7 @@ import { GET } from "@/app/api/reports/trial-balance/csv/route";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
+import { prisma as extendedPrisma } from "@/lib/db";
 
 const SUFFIX = "rpt" + Date.now().toString(36) + Math.floor(Math.random() * 9999);
 
@@ -132,7 +133,7 @@ describe("report CSV: writes a DATA_EXPORT audit row on download", () => {
     });
     expect(after).toBe(before + 1);
 
-    const row = await prisma.auditLog.findFirst({
+    const row = await extendedPrisma.auditLog.findFirst({
       where: {
         eventType: "DATA_EXPORT",
         actorUserId: user.id,

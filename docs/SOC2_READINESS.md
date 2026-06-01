@@ -560,6 +560,13 @@ remain and still block a Type 2 audit:
       end and roundtrip is bit-exact. Zero filter queries
       portfolio-wide; only displayed verbatim on the JE detail
       page and read by reverse mappers.
+    * `AuditLog.metadata` (2026-05-31, Json mode) — per-event
+      payload (action, reason, resource ids, actor context).
+      New writes from rollout date forward encrypt automatically;
+      legacy production rows stay plaintext for the 7-year
+      retention window because the append-only RULE blocks
+      UPDATE. Backfill script uses withAuditLogMutable for
+      dev/staging environments.
     * `LegalEntity.name` (2026-05-31) — customer's legal company
       name as displayed in reports, headers, BTD, and the
       consolidation hierarchy. `code` stays plaintext (the lookup
@@ -592,6 +599,7 @@ remain and still block a Type 2 audit:
     * `ledger-core/scripts/encrypt-journal-entry-note-bodies.ts`
     * `ledger-core/scripts/encrypt-tenant-names.ts`
     * `ledger-core/scripts/encrypt-journal-entry-source-payloads.ts`
+    * `ledger-core/scripts/encrypt-audit-log-metadata.ts`
     * `ledger-core/scripts/encrypt-notification-text.ts`
     * `ledger-core/scripts/encrypt-legal-entity-and-user-names.ts`
     * `recon/scripts/encrypt-bank-statement-line-descriptions.ts`

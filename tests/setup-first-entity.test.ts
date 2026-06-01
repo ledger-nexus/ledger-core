@@ -45,6 +45,7 @@ import { setupFirstEntityAction } from "@/app/actions/setup-first-entity";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
+import { prisma as extendedPrisma } from "@/lib/db";
 
 // All-uppercase SUFFIX so entity codes (which the action force-uppercases)
 // match exactly when round-tripped through the DB.
@@ -316,7 +317,7 @@ describe("setupFirstEntityAction: audit", () => {
     });
     expect(after).toBe(before + 1);
 
-    const row = await prisma.auditLog.findFirst({
+    const row = await extendedPrisma.auditLog.findFirst({
       where: {
         tenantId: tenant.id,
         action: "setup-first-entity",

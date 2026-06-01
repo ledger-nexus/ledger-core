@@ -206,7 +206,7 @@ describe("reverseJournalEntryAction — happy path", () => {
     expect(refreshed.status).toBe("REVERSED");
 
     // Audit row written.
-    const auditRow = await prisma.auditLog.findFirst({
+    const auditRow = await extendedPrisma.auditLog.findFirst({
       where: {
         eventType: "PRIVILEGED_ACTION",
         action: "reverse-journal-entry",

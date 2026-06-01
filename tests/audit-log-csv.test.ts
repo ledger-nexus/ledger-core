@@ -42,6 +42,7 @@ import { GET } from "@/app/api/admin/audit-log/csv/route";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
+import { prisma as extendedPrisma } from "@/lib/db";
 
 const SUFFIX = "csv" + Date.now().toString(36) + Math.floor(Math.random() * 9999);
 
@@ -247,7 +248,7 @@ describe("audit-log CSV: writes a DATA_EXPORT audit row on download", () => {
     });
     expect(after).toBe(before + 1);
 
-    const row = await prisma.auditLog.findFirst({
+    const row = await extendedPrisma.auditLog.findFirst({
       where: {
         eventType: "DATA_EXPORT",
         actorUserId: admin.id,
