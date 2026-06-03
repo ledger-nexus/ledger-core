@@ -41,6 +41,13 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # SOC 2 CC8 — schema-drift detection. The committed fingerprint
+      # MUST match prisma/schema.prisma; any schema change must update
+      # the fingerprint in the same PR.
+      - name: Schema fingerprint check
+        run: ./scripts/check-schema-fingerprint.sh
+
       - run: npx prisma generate
       # Schema-only sync. We deliberately use `db push` not `migrate
       # deploy` here: migration 0001_constraints references old table
