@@ -120,7 +120,17 @@ Stored exclusively in:
 | Vercel function logs | 7 days (free) / 30 days (Pro) | Auto-rotate by Vercel |
 
 **Gaps to close:**
-- [ ] **Automated retention enforcement.** Today retention is policy-only; no cron job purges old data. A SOC 2 auditor will ask "show me the eviction job" and we'll have to admit we don't have one.
+- [x] **Automated retention enforcement** (2026-06-02). Declarative
+  policy table in `src/lib/retention/policies.ts` walked once per day
+  by `src/app/api/cron/retention/route.ts` (Vercel Cron, `0 3 * * *`,
+  gated by `CRON_SECRET` via `constantTimeEqual`). Every run writes a
+  `CONFIG_CHANGE` row to `audit_log` with per-policy counts + errors
+  — the SOC 2 auditor's "show me the eviction job" evidence is that
+  audit row. Current policies: `notification.seen` (365d),
+  `notification.unseen_stale` (730d), `tenant_invite.terminal` (30d
+  past accepted/revoked/expired), `email_delivery.transient` (90d).
+  Add new policies to the registry, not new endpoints. Test:
+  `tests/retention.test.ts`.
 - [ ] **Soft-delete enforcement.** `User.deactivatedAt` exists but other models lack it. Add `deletedAt` to `JournalEntry`, etc., for non-financial-record models that should be subject to deletion.
 - [ ] **GDPR / CCPA data subject requests.** When a customer asks "what do you have on me?", we need a procedure to answer (data export) and to delete (right-to-be-forgotten). Today no procedure exists.
 
