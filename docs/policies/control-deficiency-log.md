@@ -65,6 +65,7 @@ the file or process that's weak. Include enough detail that a stranger
 | 19 | 2026-06-03 | Medium | No SBOM generated | CC9 supply-chain visibility gap (related to #4) | Even with version pinning, we'd want a Software Bill of Materials checked into the repo so the auditor can verify what's deployed matches what we claim. | Add `cyclonedx-bom` (or equivalent) to CI; publish to `docs/sbom-{YYYY-MM-DD}.json` per merge to main. Trigger: pinning lands first (#4). | **Open** | — |
 | 20 | 2026-06-03 | Low | Encryption-key 1Password emergency kit not yet physically verified | Discovered during BC v2.0 review | `business-continuity.md` v2.0 (PR #18) claims a sealed-envelope emergency kit with the named delegate. The procedure is documented; the physical artifact doesn't exist yet. | Create the physical envelope + verify named delegate. Quarterly verification thereafter per BC policy. | **Open** | — |
 | 21 | 2026-06-03 | Medium | Schema-drift detection not yet wired in CI | Discovered during change-management v2.0 audit | `schemaFingerprint` helper is shipped (`src/lib/soc2/index.ts`) and surfaced via `/api/health`; not yet checked in CI on each PR. A schema-mismatched deploy would only be caught at runtime. | Add a CI step that POSTs to `/api/health` on the preview deployment + asserts the fingerprint matches the migration commit's expected value. | **Open** | — |
+| 22 | 2026-06-03 | High | `main` vitest suite has 25 failed test files / 24 failed tests | End-of-sprint full-suite verification | Ran `vitest run` against ledger-core `main` (current HEAD). Result: 25 failed test files / 24 failed tests / 334 passed / 91 skipped (449 total). All 4 companion-repo stub tests pass on their PR branches; all sprint-shipped tests pass on their branches. **The failures are pre-existing on main, not caused by session work.** Most likely root cause: tests depend on `DATABASE_URL` + a live Postgres + schema-pushed DB that wasn't available in the verification run. Cannot rule out that some are genuine regressions until reproduced with full setup. | Reproduce with full setup (`pnpm db:push && pnpm db:seed && pnpm test`); for failures that survive, file specific deficiencies per test file with root cause. Until reproduced: treat as "test infrastructure not portable" — every contributor needs the full setup to run the suite, which is a known operational cost of testing against real Postgres (per CLAUDE.md "Tests run against a real Postgres"). | **Open** | — |
 
 ## Score-band summary — 2026-06-03
 
@@ -73,7 +74,7 @@ the file or process that's weak. Include enough detail that a stranger
 | **Closed** | 5 (#1 auth, #2 CSP, #7 access review, #10 acknowledgement, #11 tenantId) |
 | **Remediated** | 2 (#5 Sentry shim, #6 MFA process; both have pending operational follow-up) |
 | **Partial** | 2 (#4 npm pinning, #9 audit-log external replication) |
-| **Open** | 10 (#3 DR drill, #12 RLS, #13-#21) |
+| **Open** | 11 (#3 DR drill, #12 RLS, #13-#22) |
 
 **Trend:** 5 of the original 12 Critical/High deficiencies are now Closed; 2 more are Remediated pending follow-up. The 9 new entries (#13-#21) are weaknesses **surfaced by the policy refresh** — not new gaps in the system, but new gaps we now know about and own.
 
@@ -100,7 +101,7 @@ the file or process that's weak. Include enough detail that a stranger
 - Flipped #1, #2, #7, #10, #11 to **Closed** based on shipped code + open PRs
 - Flipped #5, #6, #8 to **Remediated** (code shipped; operational follow-up tracked)
 - Updated #4, #9 to **Partial** (some mitigation; honest gap documented)
-- Added 9 new deficiencies (#13–#21) surfaced by the SOC 2 hardening sprint:
+- Added 10 new deficiencies (#13–#22) surfaced by the SOC 2 hardening sprint:
   - #13 tsc errors in recon middleware tests
   - #14 retention cron lives only on a branch
   - #15 signed DPAs not in place for Tier 1 vendors
