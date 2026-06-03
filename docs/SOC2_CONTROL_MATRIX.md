@@ -149,8 +149,9 @@ Portfolio handles minimal PII (User.email, User.displayName, Party.displayName).
 
 | Control | Evidence | Status |
 |---|---|---|
-| GDPR Art. 15 (right of access) | `src/lib/privacy/user-data.ts buildUserDataExport`; UI at `/admin/data-subject-requests` (self-export available to any member) | Mitigated |
-| GDPR Art. 17 (right to erasure) | `src/lib/privacy/user-data.ts eraseUserPii`; OWNER-only Server Action; financial records preserved (legal-retention exemption per Art. 17(3)(b/e)); audit-logged as `DATA_ERASURE` | Mitigated |
+| GDPR Art. 15 (right of access) | **Procedure:** `docs/policies/data-subject-requests.md`. **Code:** `src/lib/privacy/user-data.ts buildUserDataExport`; UI at `/admin/data-subject-requests` (self-export available to any member); audit-logged as `DATA_EXPORT` | Mitigated |
+| GDPR Art. 17 (right to erasure) | **Procedure:** `docs/policies/data-subject-requests.md` (OWNER-only gate, OWNER-can't-erase-themselves rule, communication-back script). **Code:** `src/lib/privacy/user-data.ts eraseUserPii`; OWNER-only Server Action; financial records preserved (legal-retention exemption per Art. 17(3)(b/e)); audit-logged as `DATA_ERASURE` | Mitigated |
+| GDPR Art. 16 (rectification) + Art. 20 (portability) + Art. 21 (object) | **Procedure:** `docs/policies/data-subject-requests.md` — self-serve via `/settings` for rectification; export bundle IS the portability format; deactivation IS the object-to-processing surface | Mitigated |
 | Data retention — policy | `docs/policies/data-classification.md` retention table | Mitigated |
 | Data retention — enforcement | `src/lib/retention/policies.ts` declarative policy table walked daily by `src/app/api/cron/retention/route.ts` (Vercel Cron `0 3 * * *`, `CRON_SECRET`-gated). Every run audit-logs `CONFIG_CHANGE/retention.purge` with per-policy counts. Test: `tests/retention.test.ts` (11 cases). Auditor evidence query: `SELECT * FROM audit_log WHERE action='retention.purge' ORDER BY created_at DESC LIMIT 30;` | Mitigated (2026-06-02) |
 
