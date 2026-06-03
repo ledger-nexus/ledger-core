@@ -151,6 +151,18 @@ const PII_FIELD_NAMES = new Set<string>([
   "memo",
   "description",
   "notes",
+  // EmailDelivery body fields (encrypted at rest; never log either).
+  "subject",
+  "bodyText",
+  "bodyHtml",
+  // JournalEntryNote.body — encrypted at rest (2026-05-30).
+  // Already-listed "notes" above catches singular-aliased fields;
+  // "body" catches the actual column name on JournalEntryNote.
+  "body",
+  // Notification.title — encrypted at rest (2026-05-31). Renders the
+  // alert text shown in the notification bell + email templates.
+  // Title often includes a verb + customer name + amount; redact.
+  "title",
 ]);
 
 const REDACTED = "[REDACTED]";
@@ -412,6 +424,25 @@ export {
   auditAccessDenied,
   auditTokenUse,
 } from "@/lib/audit/log";
+
+// Field-level encryption (Confidentiality TSC).
+export {
+  encryptField,
+  decryptField,
+  looksEncrypted,
+  FieldEncryptionError,
+  KeyNotConfiguredError,
+} from "./field-encryption";
+
+// Deterministic search-hash for equality lookups on encrypted columns
+// (the future User.email / TenantInvite.email / Tenant.slug rollout).
+// Phase 1: the helper only — no column registry uses it yet.
+export {
+  searchHash,
+  searchHashEqual,
+  normalize as normalizeForSearchHash,
+} from "./deterministic-encryption";
+export type { Normalizer } from "./deterministic-encryption";
 
 // Re-export Prisma type for ergonomic helper signatures elsewhere.
 export type { PrismaClient };
