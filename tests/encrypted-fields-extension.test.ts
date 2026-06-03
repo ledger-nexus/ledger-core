@@ -28,10 +28,15 @@ beforeAll(async () => {
   // test key so we can verify ciphertext shape. Real production key
   // is provisioned via Vercel env.
   process.env.FIELD_ENCRYPTION_KEY = randomBytes(32).toString("hex");
-  // Reset the cached key inside field-encryption — beforeAll runs
-  // after the extension may have read an unset env once.
+  process.env.FIELD_DETERMINISTIC_KEY = randomBytes(32).toString("hex");
+  // Reset cached keys in both helpers — beforeAll runs after the
+  // extension may have read an unset env once.
   const { _setKeyForTesting } = await import("@/lib/soc2/field-encryption");
   _setKeyForTesting(null);
+  const { _setKeyForTesting: _setDetKey } = await import(
+    "@/lib/soc2/deterministic-encryption"
+  );
+  _setDetKey(null);
 
   // Standard seed: USD, US_GAAP book, the test entity, monthly
   // calendar + Jan 2026 period, full chart of accounts.
@@ -564,18 +569,18 @@ describe("encrypted-fields extension: LegalEntity (Confidentiality TSC)", () => 
   });
 });
 
-describe("encrypted-fields extension: User.displayName (Confidentiality TSC)", () => {
+describe("encrypted-fields extension: User.displayName + User.email (Confidentiality TSC)", () => {
   let userId: string;
+  let plaintextEmail: string;
   const plaintextDisplayName = `Alice Q. Public (encryption test ${SUFFIX})`;
 
   beforeEach(async () => {
     const { prisma } = await import("@/lib/db");
     const perTest = randomBytes(2).toString("hex");
+    plaintextEmail = `enc-user-${SUFFIX}-${perTest}@deleted.local`;
     const created = await prisma.user.create({
       data: {
-        // email stays plaintext (auth-keyed) — only displayName
-        // is in the registry.
-        email: `enc-user-${SUFFIX}-${perTest}@deleted.local`,
+        email: plaintextEmail,
         displayName: plaintextDisplayName,
       },
     });
@@ -585,12 +590,10 @@ describe("encrypted-fields extension: User.displayName (Confidentiality TSC)", (
   it("on-disk User.displayName is encrypted (raw prisma probe)", async () => {
     const raw = await rawPrisma.user.findUnique({
       where: { id: userId },
-      select: { displayName: true, email: true },
+      select: { displayName: true },
     });
     expect(raw?.displayName).not.toBe(plaintextDisplayName);
     expect(looksEncrypted(raw?.displayName)).toBe(true);
-    // email stays plaintext — used as the auth key.
-    expect(raw?.email).toContain(`enc-user-${SUFFIX}`);
   });
 
   it("app surface decrypts User.displayName on read", async () => {
@@ -600,6 +603,82 @@ describe("encrypted-fields extension: User.displayName (Confidentiality TSC)", (
       select: { displayName: true, email: true },
     });
     expect(u?.displayName).toBe(plaintextDisplayName);
+  });
+
+  // ── Phase 2: User.email + searchHash ─────────────────────────────
+  it("on-disk User.email is encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    expect(raw?.email).not.toBe(plaintextEmail);
+    expect(looksEncrypted(raw?.email)).toBe(true);
+  });
+
+  it("on-disk User.emailHash is populated with a 32-byte HMAC", async () => {
+    const raw = await rawPrisma.user.findUnique({
+      where: { id: userId },
+      select: { emailHash: true },
+    });
+    expect(raw?.emailHash).toBeTruthy();
+    // Prisma maps BYTEA → Uint8Array client-side.
+    expect(raw?.emailHash?.length).toBe(32);
+  });
+
+  it("app surface decrypts User.email on read", async () => {
+    const { prisma } = await import("@/lib/db");
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    expect(u?.email).toBe(plaintextEmail);
+  });
+
+  it("findUnique by emailHash returns the user (the login path)", async () => {
+    const { prisma } = await import("@/lib/db");
+    const { emailLookupKeyForUser } = await import("@/lib/soc2");
+    // Case + whitespace differences in the search input still match —
+    // emailLowercase normalizer collapses them.
+    const u = await prisma.user.findUnique({
+      where: { emailHash: emailLookupKeyForUser("  " + plaintextEmail.toUpperCase() + "  ") },
+      select: { id: true, email: true },
+    });
+    expect(u?.id).toBe(userId);
+    expect(u?.email).toBe(plaintextEmail);
+  });
+
+  it("upsert by emailHash hits the existing row on the second call", async () => {
+    const { prisma } = await import("@/lib/db");
+    const { emailLookupKeyForUser } = await import("@/lib/soc2");
+    // Same email, different displayName — should update, not create.
+    const updated = await prisma.user.upsert({
+      where: { emailHash: emailLookupKeyForUser(plaintextEmail) },
+      create: {
+        email: plaintextEmail,
+        displayName: "should not get used",
+      },
+      update: {
+        displayName: `${plaintextDisplayName} — updated`,
+      },
+    });
+    expect(updated.id).toBe(userId);
+    expect(updated.displayName).toBe(`${plaintextDisplayName} — updated`);
+  });
+
+  it("a SECOND user with the same email collides on the emailHash unique constraint", async () => {
+    const { prisma } = await import("@/lib/db");
+    // The application invariant: two different User rows can't share an
+    // email. With email encrypted (random IV — same plaintext → different
+    // ciphertext), the email column's @unique no longer prevents this;
+    // emailHash @unique is what guards the invariant now.
+    await expect(
+      prisma.user.create({
+        data: {
+          email: plaintextEmail, // duplicate
+          displayName: "second user",
+        },
+      })
+    ).rejects.toThrow(/Unique constraint/i);
   });
 });
 

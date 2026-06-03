@@ -20,6 +20,7 @@
 
 import type { CurrentUser } from "./current-user";
 import { prisma } from "@/lib/db";
+import { emailLookupKeyForUser } from "@/lib/soc2";
 
 /**
  * Read the current Clerk session, look up (or JIT-create) the matching
@@ -64,11 +65,14 @@ export async function getCurrentUserFromClerk(): Promise<CurrentUser | null> {
       .join(" ")
       .trim() || email;
 
-  // Upsert by email so existing seed users get linked, and new sign-ups
-  // get an app_user row. The DB User.email column has @unique so this
-  // is naturally idempotent.
+  // Upsert by emailHash so existing seed users get linked, and new
+  // sign-ups get an app_user row. The User.email column is encrypted
+  // at rest (random IV — same plaintext → different ciphertext every
+  // write), so we can't match by email directly. The deterministic
+  // emailHash gives us idempotency. The extension auto-populates the
+  // emailHash on write from the email we pass in `create`/`update`.
   const dbUser = await prisma.user.upsert({
-    where: { email },
+    where: { emailHash: emailLookupKeyForUser(email) },
     create: { email, displayName, isActive: true },
     // On re-sign-in, reactivate (a deactivated user re-signing-in via
     // Clerk shouldn't be silently locked out — but we audit-log this

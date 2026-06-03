@@ -574,8 +574,14 @@ remain and still block a Type 2 audit:
       as Tenant and Party.
     * `User.displayName` (2026-05-31) — human-readable name on the
       user's profile, audit log attributions, and owner-transfer
-      notifications. `email` stays plaintext (auth-keyed) until a
-      deterministic-encryption or HMAC-index workstream lands.
+      notifications.
+    * `User.email` (2026-05-31, Phase 2 of deterministic-encryption
+      workstream) — login-keyed PII. Encrypted with AES-256-GCM (random
+      IV) AND populated alongside an HMAC-SHA256 search hash in
+      `emailHash` so the Clerk login upsert path and the seed code
+      can still find users by email. Lookup pattern:
+      `findUnique({ where: { emailHash: emailLookupKeyForUser(email) } })`.
+      See `docs/design/deterministic-encryption.md` for the design.
   - Encrypted columns (recon, commit `711da29`):
     * `BankStatementLine.description` — via the mirrored
       extension that also handles nested writes
