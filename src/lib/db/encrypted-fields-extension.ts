@@ -45,6 +45,7 @@ import {
   KeyNotConfiguredError,
   FieldEncryptionError,
 } from "@/lib/soc2/field-encryption";
+import { searchHash } from "@/lib/soc2/deterministic-encryption";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Column registry
@@ -69,10 +70,35 @@ import {
  */
 export type EncryptedColumnType = "string" | "json";
 
+/**
+ * Search-hash configuration for a column that needs equality lookups.
+ * When set, the extension writes BOTH the encrypted value to `field`
+ * AND a deterministic HMAC-SHA256 hash to `hashColumn`. Call sites
+ * filter by `hashColumn` using the helper from
+ * `@/lib/soc2/deterministic-encryption`. See
+ * `docs/design/deterministic-encryption.md` for the full design.
+ *
+ * `domain` is the canonical column name used to separate hashes
+ * across columns (so the hash of `"alice@a"` under `"User.email"` is
+ * different from the hash under `"TenantInvite.email"`). MUST stay
+ * stable for the column's lifetime — changing it invalidates every
+ * hash on disk.
+ *
+ * `normalize` is the canonicalization policy. Currently
+ * `"emailLowercase"` (lowercase + trim) and `"exact"` (no transform).
+ */
+export interface SearchHashConfig {
+  hashColumn: string;
+  domain: string;
+  normalize: "emailLowercase" | "exact";
+}
+
 export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   model: string;
   field: string;
   type?: EncryptedColumnType;
+  /** Set ONLY on columns that need equality lookups (email, slug). */
+  searchHash?: SearchHashConfig;
 }> = [
   { model: "JournalEntry", field: "memo" },
   // EmailDelivery body fields contain literal email content sent to
@@ -132,11 +158,32 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   { model: "LegalEntity", field: "name" },
   // User.displayName is the human-readable name shown on the user's
   // profile, audit log attributions, and owner-transfer
-  // notifications. NOT the email (email stays plaintext for the
-  // login flow — deterministic encryption is required for email
-  // and is a separate workstream). Audited 2026-05-31: zero
-  // filter-by-displayName queries; only display reads.
+  // notifications. Audited 2026-05-31: zero filter-by-displayName
+  // queries; only display reads.
   { model: "User", field: "displayName" },
+  // User.email — the login-keyed PII. Encrypted-at-rest with an
+  // HMAC-SHA256 search hash in `emailHash` to preserve the
+  // upsert-by-email + findUnique-by-email paths used by the Clerk
+  // login flow and the seed code. See
+  // `docs/design/deterministic-encryption.md` for the full design.
+  //
+  // Lookup pattern at every call site:
+  //   const hash = emailLookupKeyForUser(email);
+  //   await prisma.user.findUnique({ where: { emailHash: hash } });
+  //
+  // Audited 2026-05-31: 3 lookup-by-email sites in the codebase
+  // (Clerk upsert at src/lib/auth/clerk.ts; 2 seed sites in
+  // src/lib/seed/northwind.ts). All migrated in the same commit
+  // that adds this entry.
+  {
+    model: "User",
+    field: "email",
+    searchHash: {
+      hashColumn: "emailHash",
+      domain: "User.email",
+      normalize: "emailLowercase",
+    },
+  },
   // AuditLog.metadata is the per-event payload for SOC 2 audit
   // records — varies by eventType, examples:
   //   - PRIVILEGED_ACTION → { action, reason, resource, resourceId, ... }
@@ -203,6 +250,22 @@ function columnType(model: string, field: string): EncryptedColumnType {
     (c) => c.model === model && c.field === field
   );
   return entry?.type ?? "string";
+}
+
+/**
+ * Returns the searchHash config for a (model, field), or null if the
+ * column doesn't need a deterministic search hash. When non-null, the
+ * write path also computes `searchHash(domain, plaintext, normalize)`
+ * and writes it to `data[hashColumn]`.
+ */
+function searchHashConfigFor(
+  model: string,
+  field: string
+): SearchHashConfig | null {
+  const entry = ENCRYPTED_COLUMNS.find(
+    (c) => c.model === model && c.field === field
+  );
+  return entry?.searchHash ?? null;
 }
 
 /**
@@ -465,6 +528,40 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
 // Walkers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Compute the search hash for a column, with the same pass-through
+ * safety as safeEncrypt: if the deterministic key isn't set, log a
+ * one-time warning and return null so the write still succeeds (the
+ * hashColumn will be NULL, and that row simply can't be looked up by
+ * the deterministic helper until backfilled). This matches the
+ * rollout-safety-net behavior of the existing encryption path.
+ */
+let warnedAboutMissingDeterministicKey = false;
+function safeSearchHash(
+  config: SearchHashConfig,
+  plaintext: string
+): Buffer | null {
+  try {
+    return searchHash(config.domain, plaintext, config.normalize);
+  } catch (e) {
+    // FieldEncryptionError is thrown when FIELD_DETERMINISTIC_KEY is
+    // missing OR malformed. Treat the same way as missing encryption
+    // key in the rollout window: warn once, pass through.
+    if (e instanceof FieldEncryptionError) {
+      if (!warnedAboutMissingDeterministicKey) {
+        console.warn(
+          "[encrypted-fields] FIELD_DETERMINISTIC_KEY is not set or " +
+            "malformed; search-hash columns will be NULL until the env " +
+            "var is configured."
+        );
+        warnedAboutMissingDeterministicKey = true;
+      }
+      return null;
+    }
+    throw e;
+  }
+}
+
 /** Encrypt fields in the `data` payload of a write operation. */
 function encryptDataObject(model: string, data: unknown): unknown {
   if (!data || typeof data !== "object" || Array.isArray(data)) return data;
@@ -481,15 +578,29 @@ function encryptDataObject(model: string, data: unknown): unknown {
     // AES-GCM; String columns go straight in.
     const type = columnType(model, field);
     const encrypt = type === "json" ? safeEncryptJson : safeEncrypt;
+    const sh = searchHashConfigFor(model, field);
     // Prisma write-operation values can be `{ set: ... }` for nested
     // update inputs. Unwrap before encrypting and re-wrap on the way
     // out so the underlying generator still recognizes the shape.
     if (typeof value === "object" && value !== null && "set" in value) {
       const wrapped = value as { set: unknown };
       out[field] = { set: encrypt(wrapped.set) };
+      if (sh && typeof wrapped.set === "string" && wrapped.set.length > 0) {
+        out[sh.hashColumn] = {
+          set: safeSearchHash(sh, wrapped.set),
+        };
+      }
       continue;
     }
     out[field] = encrypt(value);
+    // Compute the search-hash for the same plaintext if the column
+    // has one declared. Caller can omit the hash column from data —
+    // we'll populate it from the plaintext automatically. If the
+    // caller already passed a hash (e.g., from a backfill script
+    // bypassing the encryption path), don't clobber it.
+    if (sh && typeof value === "string" && value.length > 0 && !(sh.hashColumn in out)) {
+      out[sh.hashColumn] = safeSearchHash(sh, value);
+    }
   }
 
   // Recurse into nested relation writes. Prisma's $extends query
