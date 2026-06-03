@@ -33,11 +33,15 @@ Apply to the 4 DB-having Vercel projects:
 
 Same 64-hex value across all 12 environment slots. **Use the value generated in step 1 — do not regenerate per project.**
 
+`FIELD_DETERMINISTIC_KEY` is a SEPARATE key that ships in the same rollout for Phase 1 of the deterministic-encryption workstream (`docs/design/deterministic-encryption.md`). No column uses it yet, so setting it is **optional in this rollout window**. When you do set it, generate a SECOND independent 64-hex value (do NOT reuse `FIELD_ENCRYPTION_KEY`'s value — they should not share entropy) and apply across the same 12 slots.
+
 Verification (per project, after a deploy):
 
 ```bash
-curl -s https://<project>.vercel.app/api/health | jq '.encryption'
-# Should return { "configured": true } once the rollout PR merges.
+curl -s https://<project>.vercel.app/api/health | jq '.encryption, .deterministicEncryption'
+# Should return:
+#   { "configured": true, "columnCount": <repo-specific> }
+#   { "configured": <true if you set FIELD_DETERMINISTIC_KEY, else false> }
 ```
 
 ### 3. Production schema migrations

@@ -20,6 +20,11 @@
 //     AND well-formed (64 hex chars). columnCount surfaces how many
 //     columns the deployed extension is encrypting. The KEY VALUE
 //     ITSELF and any hash of it is NEVER exposed — only the boolean.
+//   - deterministicEncryption: { configured } — same shape, but for
+//     FIELD_DETERMINISTIC_KEY. Drives the search-hash columns that
+//     enable equality lookups on encrypted fields (User.email,
+//     TenantInvite.email, etc.). Will be `false` until the
+//     deterministic-encryption rollout deploys.
 //   - version: git short SHA if VERCEL_GIT_COMMIT_SHA is set, else
 //     "dev".
 //
@@ -59,6 +64,10 @@ interface HealthResponse {
     /** Number of (model, field) tuples the extension is configured to encrypt. */
     columnCount: number;
   };
+  deterministicEncryption: {
+    /** True iff FIELD_DETERMINISTIC_KEY is set AND a valid 64-char hex string. */
+    configured: boolean;
+  };
   version: string;
   uptimeSeconds: number;
   timestamp: string;
@@ -75,6 +84,18 @@ function isEncryptionKeyConfigured(): boolean {
   const k = process.env.FIELD_ENCRYPTION_KEY;
   if (!k) return false;
   // 64 hex chars (the AES-256-GCM key length).
+  return /^[0-9a-fA-F]{64}$/.test(k);
+}
+
+/**
+ * Inspect FIELD_DETERMINISTIC_KEY without revealing it. Same regex-only
+ * shape check as the encryption key. Never logs, never returns the
+ * value. Used to drive the deterministic-encryption rollout for
+ * filter-keyed columns (User.email, TenantInvite.email, etc.).
+ */
+function isDeterministicKeyConfigured(): boolean {
+  const k = process.env.FIELD_DETERMINISTIC_KEY;
+  if (!k) return false;
   return /^[0-9a-fA-F]{64}$/.test(k);
 }
 
@@ -120,6 +141,9 @@ export async function GET(): Promise<NextResponse> {
     encryption: {
       configured: isEncryptionKeyConfigured(),
       columnCount: ENCRYPTED_COLUMNS.length,
+    },
+    deterministicEncryption: {
+      configured: isDeterministicKeyConfigured(),
     },
     version,
     uptimeSeconds: Math.floor((Date.now() - PROCESS_STARTED_AT_MS) / 1000),

@@ -80,7 +80,51 @@ describe("GET /api/health: encryption block (Confidentiality TSC)", () => {
     expect(body).toHaveProperty("db");
     expect(body).toHaveProperty("monitoring");
     expect(body).toHaveProperty("encryption");
+    expect(body).toHaveProperty("deterministicEncryption");
     expect(body).toHaveProperty("version");
     expect(body).toHaveProperty("timestamp");
+  });
+});
+
+describe("GET /api/health: deterministicEncryption block (Confidentiality TSC)", () => {
+  const savedKey = process.env.FIELD_DETERMINISTIC_KEY;
+
+  beforeEach(() => {
+    delete process.env.FIELD_DETERMINISTIC_KEY;
+  });
+  afterEach(() => {
+    if (savedKey !== undefined) process.env.FIELD_DETERMINISTIC_KEY = savedKey;
+    else delete process.env.FIELD_DETERMINISTIC_KEY;
+  });
+
+  it("reports configured=false when FIELD_DETERMINISTIC_KEY is unset", async () => {
+    const res = await GET();
+    const body = await res.json();
+    expect(body.deterministicEncryption).toBeDefined();
+    expect(body.deterministicEncryption.configured).toBe(false);
+  });
+
+  it("reports configured=false when the key is the wrong length", async () => {
+    process.env.FIELD_DETERMINISTIC_KEY = "abc123";
+    const res = await GET();
+    const body = await res.json();
+    expect(body.deterministicEncryption.configured).toBe(false);
+  });
+
+  it("reports configured=true with a valid 64-hex key", async () => {
+    process.env.FIELD_DETERMINISTIC_KEY = "a".repeat(64);
+    const res = await GET();
+    const body = await res.json();
+    expect(body.deterministicEncryption.configured).toBe(true);
+  });
+
+  it("NEVER exposes the deterministic key value in the response", async () => {
+    const secret = "feedface".repeat(8); // 64 hex chars
+    process.env.FIELD_DETERMINISTIC_KEY = secret;
+    const res = await GET();
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain(secret);
+    expect(bodyText).not.toContain("feedface");
+    expect(bodyText).not.toMatch(/[0-9a-f]{32,}/);
   });
 });

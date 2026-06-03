@@ -434,5 +434,15 @@ export {
   KeyNotConfiguredError,
 } from "./field-encryption";
 
+// Deterministic search-hash for equality lookups on encrypted columns
+// (the future User.email / TenantInvite.email / Tenant.slug rollout).
+// Phase 1: the helper only — no column registry uses it yet.
+export {
+  searchHash,
+  searchHashEqual,
+  normalize as normalizeForSearchHash,
+} from "./deterministic-encryption";
+export type { Normalizer } from "./deterministic-encryption";
+
 // Re-export Prisma type for ergonomic helper signatures elsewhere.
 export type { PrismaClient };
