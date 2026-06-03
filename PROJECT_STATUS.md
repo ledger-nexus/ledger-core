@@ -4,7 +4,111 @@ The single source of truth for "where the portfolio is and what's next."
 Updated end-of-session so the next pickup (human or Claude Code) doesn't
 need to re-derive context.
 
-**Last updated:** 2026-05-29 (post-multi-tenant audit-pass + getScope sweep)
+**Last updated:** 2026-05-31 (SOC 2 hardening rollout — see top section)
+
+---
+
+## Latest: SOC 2 hardening rollout (2026-05-29 → 2026-05-31)
+
+Three days of focused SOC 2 Type 2 conformance work. Shipped as 5
+coordinated PRs (one per repo). Headline outcome: **field-level
+encryption at rest** is live across the portfolio, plus the SOC 2
+helper foundation that future features build on.
+
+### What's now live
+
+- **`src/lib/soc2/` helper module** in every repo — the standing
+  reference for `assertTenantScope`, `constantTimeEqual`, `redactPii`,
+  `sanitizeError`, `auditedMutation`, `schemaFingerprint`, plus the
+  field-encryption primitives. Every new feature imports from here
+  instead of re-implementing.
+- **`/soc2` skill** auto-surfaces the framework on auth/data/audit
+  work. **`/soc2-check`** slash command audits diffs.
+- **Pre-commit hook** scans for secrets + PII in `console.log`.
+- **Boot-time env validation** refuses to start on missing required env.
+- **`/api/health`** returns `{ status, db, monitoring, encryption,
+  schemaFingerprint, version }`. The `encryption: { configured,
+  columnCount }` block is the operator-verification signal that
+  `FIELD_ENCRYPTION_KEY` landed in Vercel env post-deploy.
+- **`audit_log` append-only DB-level enforcement** via Postgres RULEs.
+  Test cleanup goes through `withAuditLogMutable()`.
+- **SOC 2 control matrix** (`docs/SOC2_CONTROL_MATRIX.md`) maps
+  CC1–CC9 to file/line evidence.
+- **CSP with `strict-dynamic` + per-request nonces.**
+- **GDPR right-to-access + right-to-erasure** (`src/lib/privacy/`).
+
+### Field-level encryption — portfolio coverage
+
+AES-256-GCM via a Prisma `$extends` extension with two modes:
+`type: "string"` (default) and `type: "json"` (JSON.stringify before
+AES-GCM, JSON.parse after decrypt; column stays Prisma-typed Json,
+roundtrip is bit-exact).
+
+| Repo | Encrypted columns |
+|---|---|
+| `ledger-core` (11) | `JournalEntry.{memo, sourcePayload}`, `EmailDelivery.{subject, bodyText, bodyHtml}`, `Party.displayName`, `JournalEntryNote.body`, `Tenant.name`, `Notification.{title, body}`, `LegalEntity.name`, `User.displayName`, `AuditLog.metadata` |
+| `recon` (7) | `BankStatementLine.description`, `Party.displayName` (READ), `BankAccount.{displayName, bankName, accountNumberLast4}`, `BankStatement.{filename, rawPayload}`, `AiSuggestion.candidatesJson` |
+| `fa-amort` (3) | `AiAssetSuggestion.{inputText, outputJson}`, `Party.displayName` (READ) |
+| `revenue-rec` (6) | `RevenueContract.{description, sourcePayload}`, `Party.displayName` (READ), `AiExtractionSuggestion.{obligationsJson, allocationJson, variableConsiderationJson}` |
+| `integrations` (0) | no DB |
+
+Backfill scripts per repo, all idempotent via `looksEncrypted`.
+Production rollout procedure in
+`docs/runbooks/encryption-rollout.md`.
+
+### Critical bug caught during rollout
+
+`looksEncrypted` had a portfolio-wide false-positive: plaintext
+starting with `"A[c-z]"` (e.g., `"Acme Corp 3-year SaaS subscription"`)
+base64-decoded to a buffer whose first byte happened to equal the
+version byte. Effect was silent — `safeEncrypt` SKIPPED encryption
+(plaintext to disk); `safeDecrypt` later returned the
+`"[encryption error]"` sentinel because the supposed ciphertext was
+plaintext.
+
+Five-check defense-in-depth fix landed in all 4 helper copies (commit
+`e992eec` master, with mirrors `2d88f54`, `7404265`, the revenue-rec
+fix folded into `3dca38d`). Without the revenue-rec rollout testing
+the helper with realistic customer-name plaintext, this would have
+shipped silently.
+
+### CC6.1 schema-mirror gaps closed
+
+The encryption rollout surfaced missing `tenantId` columns on the
+ledger-core mirror tables in 3 companion repos. Closed:
+
+- `recon`: Party (commit `9fa3d2d`)
+- `fa-amort`: FixedAsset (chip-task → commit `0fd5bf0`)
+- `revenue-rec`: RevenueContract (folded into `3dca38d`)
+
+### Test hygiene
+
+- `withAuditLogMutable` sweep across 13 test cleanups (commit
+  `a0a4752`) — afterAll's were silently no-op'ing under the append-
+  only RULE, leaving FK refs that blocked tenant deletion. Now each
+  unblocks audit_log cleanup through the documented escape hatch.
+- 6 audit-log-asserting tests switched their reads to the extended
+  prisma so `auditLog.metadata.<field>` auto-decrypts.
+
+### What's still on the runway
+
+- **Deterministic encryption / HMAC index** for filter-keyed columns
+  (`User.email`, `TenantInvite.email`, `Tenant.slug`,
+  `JournalEntryNote.authorEmail`). Separate workstream — needs a key
+  rotation strategy and per-column hash index.
+- **Other `sourcePayload` Json columns** on Party, LegalEntity,
+  Account, etc. Each is its own rollout but well-trodden now.
+- **`extensions` Json columns** (Layer 5 user-defined custom fields)
+  — app-specific PII risk; need a customer-by-customer assessment.
+- **Production rollout itself**: follow
+  `docs/runbooks/encryption-rollout.md` after the 5 PRs merge.
+
+### Vendor + risk register
+
+- 21 risks scored in `docs/policies/risk-register.md` (14 Mitigated,
+  5 Partial, 2 Open as of 2026-05-31).
+- Vendor inventory in `docs/policies/vendor-management.md` covers
+  10 production vendors with SOC 2 receipts catalogued.
 
 ---
 
