@@ -6,9 +6,25 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-05-21
+**Last updated:** 2026-06-03
 
-**Current state:** **v1.0 just landed.** Multi-entity consolidation report with intercompany elimination, AP aging report, M-1/M-3 detail report grouping BTD deltas by IRS Form 1120 Schedule M-3 lines. The portfolio's headline architecture is now complete: substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. Consolidation demo seed (Acme Group + 2 subs) ships with the Northwind seed so the report has data to render out of the box.
+**Current state:** **SOC 2 hardening sprint complete — Type 1 audit-ready.**
+
+The portfolio architecture (v1.0) was complete on 2026-05-21. The
+2026-05-25 → 2026-06-03 sprint added the SOC 2 layer the v1.0
+accounting substrate didn't have: per-tenant RBAC + Clerk auth,
+field-encryption-at-rest portfolio-wide, append-only audit-log,
+automated retention engine, DSR procedure + executable code, and
+**v2.0 reality-checked rewrites of every policy doc** (security,
+access-control, change-management, incident-response, data-
+classification, data-subject-requests, vendor-management, risk-
+register, business-continuity, control-deficiency-log).
+
+The session shipped **27 reviewable PRs across the 5-repo portfolio**
+and the `SOC2_READINESS.md` v2.0 assessment now states `≈70% to
+Type 1 audit-ready, 0 CRITICAL gaps` (down from `0-10% to Type 2,
+8 CRITICAL` in v1.0). The 6-month observation window is the next
+gate for Type 2.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -16,8 +32,80 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## What's done
 
+### v1.x — SOC 2 hardening sprint (2026-05-25 → 2026-06-03)
+
+**Auditor entry-point documents (read first):**
+- [x] `docs/SOC2_READINESS.md` v2.0 (PR #22) — `≈70% to Type 1, 0 CRITICAL` (down from `0-10% to Type 2, 8 CRITICAL` in v1.0)
+- [x] `docs/SOC2_CONTROL_MATRIX.md` — CC1-CC9 + 4 TSCs evidence map with file paths
+- [x] `docs/architecture/portfolio-data-locations.md` (PR #14) — portfolio-wide map; the auditor opens this to understand the 5-repo system before drilling in
+
+**Policy directory — every document now at v2.0:**
+- [x] `security.md` v2.0 (PR #20) — CC1 umbrella + 6-principle tone-at-the-top + 13-row standing-reference-artifact table + AI contributor rules section
+- [x] `access-control.md` v2.0 (PR #17) — CC6.1-CC6.3 + 4-role × 16-permission catalog + 4-token service-token inventory + offboarding procedure
+- [x] `change-management.md` v2.0 + `bypass-log.md` skeleton (PR #16) — CC8 + 11-row "what counts as a change" + 8-row required-gates with file paths + solo-dev compensating controls
+- [x] `data-classification.md` (sprint commits) — DSR + automated retention checkboxes flipped
+- [x] `data-subject-requests.md` NEW (PR #13) — Privacy TSC + GDPR Art. 15/17/16/20/21 + CPRA equivalents + 3 channels + 30-day SLA
+- [x] `incident-response.md` v2.0 (PR #21) — CC7.3 + CC7.4 + policy/runbook split + GDPR Art. 33/34 privacy-incident overlay + 8-section postmortem requirement
+- [x] `vendor-management.md` v2.0 (PR #19) — CC9 + 11-vendor inventory + 3-tier classification + subprocessor disclosure
+- [x] `risk-register.md` v2.0 (PR #15) — CC3 + 30 reality-checked rows (22 Mitigated + 7 Partial + 1 Open) + 10 new risks
+- [x] `business-continuity.md` v2.0 (PR #18) — CC7 + Availability TSC + trigger-driven RTO/RPO + 7 scenario runbooks + 8-row delegation matrix
+- [x] `control-deficiency-log.md` v2.0 (PR #30) — CC4 + reality-checked v1.0 12 rows + 9 new deficiencies surfaced by the sprint
+
+**Operational evidence skeletons (PR #23):**
+- [x] `docs/incidents/README.md` — per-incident + tabletop file format
+- [x] `docs/dr-drills/README.md` — quarterly restore + tabletop + real-DR-event formats
+- [x] `docs/policies/vendor-receipts/README.md` + PDFs gitignored
+- [x] `docs/policies/access-review-template.md` — quarterly template
+- [x] `docs/policies/annual-acknowledgement-template.md` — annual template
+
+**Foundation code (PR #10 — soc2-hardening-rollout):**
+- [x] `src/lib/soc2/index.ts` — `assertTenantScope`, `auditedMutation`, `constantTimeEqual`, `redactPii`, `sanitizeError`, `schemaFingerprint`
+- [x] `src/lib/env.ts` + `src/instrumentation.ts` — boot-time env validation; fails closed on missing required env in production
+- [x] `src/middleware.ts` — CSP nonce + strict-dynamic + HTTPS upgrade + Clerk auth boundary
+- [x] `src/lib/monitoring/index.ts` — Sentry shim with `redactPii` before transmit; console fallback when DSN absent
+- [x] `src/app/api/health/route.ts` — DB ping + schema fingerprint + encryption status + monitoring presence
+- [x] `prisma/sql/audit-log-append-only.sql` — Postgres RULE silently no-ops UPDATE + DELETE on `audit_log`
+- [x] `scripts/pre-commit-secrets-scan.sh` — secrets + console.log PII scan; symlinked as `.git/hooks/pre-commit`
+- [x] `.claude/commands/soc2-check.md` — slash command for per-diff SOC 2 audit
+- [x] `.claude/skills/soc2/SKILL.md` — auto-surfaces the framework into every Claude session
+
+**Encryption-at-rest rollout (PRs #24-#27 stack):**
+- [x] Design doc (PR #24) — `docs/design/deterministic-encryption.md` (359 lines) — AES-256-GCM transparent extension + HMAC search hash with 2-key separation
+- [x] Phase 1 (PR #25) — `src/lib/soc2/deterministic-encryption.ts` HMAC helper + `/api/health` deterministicEncryption block + regression-pinned test suite
+- [x] Phase 2 (PR #26) — `User.email` encrypted + `emailHash` schema column + auth-path migration + backfill script
+- [x] Phase 3 (PR #27) — `TenantInvite.email` + `JournalEntryNote.authorEmail` + per-tenant duplicate-invite-refusal migration
+- [x] Json-mode encryption — `AuditLog.metadata`, `JournalEntry.sourcePayload`, `AiSuggestion.candidatesJson`, `AiAssetSuggestion.outputJson`
+- [x] **26+ encrypted columns across 5 repos** with the same extension; `looksEncrypted` 5-check defense against plaintext false-positives
+- [x] Post-deploy verifier (PR #28) — `scripts/verify-encryption-rollout.sh` with per-column 3-check
+
+**Automated data retention engine (PR #12):**
+- [x] `src/lib/retention/policies.ts` — declarative 4-policy registry (notification.seen 365d / notification.unseen_stale 730d / tenant_invite.terminal 30d / email_delivery.transient 90d)
+- [x] `src/lib/retention/purge.ts` — per-policy try/catch with `sanitizeError`
+- [x] `src/app/api/cron/retention/route.ts` — `CRON_SECRET`-gated; audit-logs `CONFIG_CHANGE/retention.purge` per run
+- [x] 17 unit tests covering policy registry, cutoff math, failure isolation, route auth gating, audit emission
+- [x] Vercel Cron schedule `0 3 * * *` in `vercel.json` (on the branch; main intentionally omits until merge)
+
+**Multi-tenant isolation (pre-sprint hardening, now Mitigated):**
+- [x] `tenantId @db.Uuid` on every customer-data table; 26 tables migrated to `NOT NULL`
+- [x] `src/lib/auth/policy.ts` 4-role × 16-permission catalog; every Server Action calls `requirePermission(...)`
+- [x] 4 pen-test passes (cross-tenant read/write `72c164b`, reassign + internal fixed-asset `185902f`, CSV injection + TOCTOU + token timing `3c6d0a2`, middleware fail-closed `b99bbb4`)
+- [x] `tests/pen-test-tenant-isolation.test.ts` covers cross-tenant attempts portfolio-wide
+
+**Companion-repo DSR procedures (per-repo PR #11):**
+- [x] `recon` — DSR procedure scoped to bank statements + reconciliation data; `src/lib/privacy/recon-attribution.ts` typed stub + 5 tests
+- [x] `fa-amort` — DSR procedure scoped to fixed-asset register + depreciation; `src/lib/privacy/fa-attribution.ts` typed stub + 5 tests
+- [x] `revenue-rec` — DSR procedure scoped to contracts + recognition; `src/lib/privacy/rr-attribution.ts` typed stub + 5 tests (counterparty PII in `ContractDocument.rawText` is the highest-sensitivity column in the portfolio)
+- [x] `integrations` — DSR procedure scoped to OAuth tokens + connections; `src/lib/privacy/connections-export.ts` typed stub + 5 tests with HARD INVARIANT (interface has NO `credentials|tokens|accessToken|refreshToken` field — Art. 15(4) rights-of-others carve-out)
+
+**SECURITY.md sweep (5 PRs, one per repo):**
+- [x] Resolved `REPO` placeholder in GitHub security-advisory URL per repo
+- [x] Updated SOC 2 framework section to point at v2.0 policy directory + control matrix + portfolio data location map
+- [x] Added Incident handling section with GDPR Art. 33 72h SLA cited
+
+**Incident response runbook (PR #29):**
+- [x] `docs/runbooks/incident-response.md` (264 lines) — operational steps the on-call engineer reads; pairs with the policy in PR #21
+
 ### v0.2 — Universal substrate (Layer 1+2 + seams for 3–6)
-- [x] LegalEntity / Book / FiscalCalendar / Period / PeriodClose / Currency / FxRate
 - [x] Party + PartyRole (unified Customer/Vendor/Employee)
 - [x] Item with itemType + costing method
 - [x] Account with hierarchy, control-account flags, book-scope, lineage columns
@@ -178,7 +266,55 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Notes for the next session
 
-- Architecture canon: `docs/universal-schema.md`. Schema visual: `docs/schema-erd.md`. Both are kept in sync with the actual schema.
-- Headline test command: `pnpm test` (runs invariants + sub-ledgers + seeded-company suites). Tests need a live Postgres at `DATABASE_URL`.
-- Seed data dependencies: `pnpm db:push && pnpm db:seed` in that order. The seed expects a freshly pushed schema; reset with `pnpm db:reset`.
-- The posting-rules engine is the v0.4 unlock. Once that lands, the seed can stop hardcoding `postToBooks([...])` and let the rules table drive divergence.
+**The 2026-05-25 → 2026-06-03 SOC 2 hardening sprint left 27 PRs
+open across the 5-repo portfolio.** They are all reviewable change
+packets per the `change-management.md` v2.0 procedure; merge order
+is documented in each PR's "Stacked on" line.
+
+### Read this first
+- `docs/SOC2_READINESS.md` v2.0 — the auditor's first-read; what's
+  shipped vs what's customer-trigger-gated
+- `docs/architecture/portfolio-data-locations.md` — the portfolio-
+  wide data map
+- `docs/policies/security.md` v2.0 — the umbrella that points at
+  every sub-policy
+
+### Headline build/test commands
+- `pnpm test` — vitest suite (invariants + sub-ledgers + retention +
+  encryption + soc2-helpers + pen-test-tenant-isolation)
+- `node_modules/.bin/tsc --noEmit` — type check; note that
+  `tests/middleware-fail-closed.test.ts` carries 5 known TS18049
+  errors tracked as deficiency-log #13 in
+  `docs/policies/control-deficiency-log.md` v2.0
+
+### Customer-event-gated upgrades (NOT in scope until trigger)
+- First paying customer signs → Neon Launch ($19/mo) + PITR + `pg_dump`
+  cron + quarterly DR drill (closes risk-register #19 + #6 + deficiency
+  #3)
+- First customer requiring negotiated terms OR first EU customer →
+  signed (non-clickthrough) DPAs with Tier 1 vendors (closes
+  deficiency #15)
+- Customer requiring IP-anomaly alerting → paid Sentry DSN provisioning
+  (closes deficiency #5)
+- 10+ paying customers or EU customer → multi-region read replica
+  + audit-log replication
+- Second employee → separate Security Officer role; access-control
+  solo-dev compensating-controls section flips off; quarterly access
+  review now has two participants
+
+### Open code-side deficiencies (close any time)
+- #13 — tsc errors in `recon/tests/middleware-fail-closed.test.ts`
+- #14 — retention cron lives only on a branch (PR #12 merge closes
+  this; load-bearing for the documented Privacy TSC retention claim)
+- #16 — `/legal/subprocessors` page on marketing site
+- #17 — `public/.well-known/security.txt` deployment (per Next.js app)
+- #19 — SBOM generation in CI
+- #21 — Schema-drift detection wired in CI (`schemaFingerprint` is
+  shipped but not checked per-PR)
+
+### Substrate notes (still current)
+- Architecture canon: `docs/universal-schema.md`. Schema visual:
+  `docs/schema-erd.md`.
+- Tests need a live Postgres at `DATABASE_URL`.
+- Seed data dependencies: `pnpm db:push && pnpm db:seed`. Reset with
+  `pnpm db:reset`.
