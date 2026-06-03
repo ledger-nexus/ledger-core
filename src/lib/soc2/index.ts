@@ -462,5 +462,26 @@ export function emailLookupKeyForUser(email: string): Buffer {
   return _searchHash("User.email", email, "emailLowercase");
 }
 
+/**
+ * Same idea as `emailLookupKeyForUser`, but for the TenantInvite
+ * table. Used at the team.ts duplicate-invite refusal site:
+ *
+ *   const existing = await prisma.tenantInvite.findFirst({
+ *     where: {
+ *       tenantId: tenant.id,
+ *       emailHash: emailLookupKeyForTenantInvite(email),
+ *       status: "PENDING",
+ *     },
+ *     select: { id: true },
+ *   });
+ *
+ * Domain is `"TenantInvite.email"` — distinct from `"User.email"` by
+ * design (cross-column-correlation defense; see
+ * deterministic-encryption.ts header).
+ */
+export function emailLookupKeyForTenantInvite(email: string): Buffer {
+  return _searchHash("TenantInvite.email", email, "emailLowercase");
+}
+
 // Re-export Prisma type for ergonomic helper signatures elsewhere.
 export type { PrismaClient };

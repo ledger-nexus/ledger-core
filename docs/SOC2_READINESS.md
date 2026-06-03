@@ -582,6 +582,16 @@ remain and still block a Type 2 audit:
       can still find users by email. Lookup pattern:
       `findUnique({ where: { emailHash: emailLookupKeyForUser(email) } })`.
       See `docs/design/deterministic-encryption.md` for the design.
+    * `TenantInvite.email` (2026-05-31, Phase 3) — invitee email.
+      Encrypted + searchHash in `emailHash`. The duplicate-invite
+      refusal at `team.ts:114` uses `emailLookupKeyForTenantInvite`
+      to find PENDING invites by the deterministic hash. Composite
+      `@@index([tenantId, emailHash])` for the per-tenant uniqueness
+      semantics.
+    * `JournalEntryNote.authorEmail` (2026-05-31, Phase 3) — author
+      attribution snapshotted at write. Plain AES-GCM string mode
+      (no searchHash — every call site reads for display or audit-
+      log metadata, zero filter queries).
   - Encrypted columns (recon, commit `711da29`):
     * `BankStatementLine.description` — via the mirrored
       extension that also handles nested writes

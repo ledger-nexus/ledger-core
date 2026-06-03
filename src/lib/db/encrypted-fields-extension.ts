@@ -184,6 +184,35 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
       normalize: "emailLowercase",
     },
   },
+  // TenantInvite.email — invitee's email address (the one the invite
+  // was sent to). Phase 3 of the deterministic-encryption workstream.
+  // The accept flow looks up by `token` (no email filter); the
+  // INVITE-CREATE flow does refuse-duplicates by
+  //   findFirst({ where: { tenantId, email, status: PENDING } })
+  // which needs the hash key after migration. team.ts:114 is the only
+  // filter site portfolio-wide; revoke and list are by id / tenantId.
+  //
+  // Uniqueness: enforced by the composite @@index([tenantId,
+  // emailHash]) in the Prisma schema. Many tenants can have invites
+  // to the same email; the same tenant can hold multiple invites to
+  // the same email across time as long as only one is PENDING at
+  // once. The duplicate-PENDING check at team.ts:114 enforces that
+  // explicitly in application code.
+  {
+    model: "TenantInvite",
+    field: "email",
+    searchHash: {
+      hashColumn: "emailHash",
+      domain: "TenantInvite.email",
+      normalize: "emailLowercase",
+    },
+  },
+  // JournalEntryNote.authorEmail — snapshotted at write time so the
+  // attribution survives a User row deletion. Audited 2026-05-31:
+  // ZERO filter queries on this column — every call site reads it
+  // for display (the notes card on the JE detail page) or for audit-
+  // log metadata. No searchHash needed; plain AES-GCM is enough.
+  { model: "JournalEntryNote", field: "authorEmail" },
   // AuditLog.metadata is the per-event payload for SOC 2 audit
   // records — varies by eventType, examples:
   //   - PRIVILEGED_ACTION → { action, reason, resource, resourceId, ... }

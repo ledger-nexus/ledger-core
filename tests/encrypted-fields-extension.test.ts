@@ -158,6 +158,11 @@ afterAll(async () => {
   await rawPrisma.notification.deleteMany({
     where: { tenant: { slug: { contains: SUFFIX } } },
   });
+  // TenantInvite from the Phase 3 test block. Match by the
+  // SUFFIX-stamped token (plaintext) since email is encrypted.
+  await rawPrisma.tenantInvite.deleteMany({
+    where: { token: { contains: `phase3-token-${SUFFIX}` } },
+  });
   await rawPrisma.tenant.deleteMany({
     where: { slug: { contains: SUFFIX } },
   });
@@ -166,6 +171,7 @@ afterAll(async () => {
       OR: [
         { email: { contains: `enc-tenant-owner-${SUFFIX}` } },
         { email: { contains: `enc-notif-owner-${SUFFIX}` } },
+        { email: { contains: `phase3-owner-${SUFFIX}` } },
       ],
     },
   });
@@ -679,6 +685,148 @@ describe("encrypted-fields extension: User.displayName + User.email (Confidentia
         },
       })
     ).rejects.toThrow(/Unique constraint/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 3: TenantInvite.email (searchHash mode) + JournalEntryNote.
+// authorEmail (plain string mode). Two columns added together because
+// they're the natural remainder of the email-keyed PII rollout.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("encrypted-fields extension: Phase 3 — TenantInvite.email + JournalEntryNote.authorEmail", () => {
+  let testTenantId: string;
+  let testInviteId: string;
+  let testNoteId: string;
+  let testEntryId: string;
+  let testOwnerUserId: string;
+  const inviteEmail = `phase3-invite-${SUFFIX}@example.test`;
+  const authorEmail = `phase3-author-${SUFFIX}@example.test`;
+
+  beforeEach(async () => {
+    const { prisma } = await import("@/lib/db");
+    const perTest = randomBytes(2).toString("hex");
+
+    // Throwaway tenant + owner — TenantInvite.tenantId / invitedById
+    // are FKs.
+    const owner = await rawPrisma.user.create({
+      data: {
+        email: `phase3-owner-${SUFFIX}-${perTest}@deleted.local`,
+        displayName: "Phase 3 owner",
+      },
+    });
+    testOwnerUserId = owner.id;
+    const tenant = await rawPrisma.tenant.create({
+      data: {
+        slug: `phase3-tenant-${SUFFIX}-${perTest}`,
+        name: "Phase 3 tenant",
+        ownerUserId: owner.id,
+      },
+    });
+    testTenantId = tenant.id;
+
+    // TenantInvite — write via the extended client so the extension
+    // runs both encrypt + searchHash.
+    const invite = await prisma.tenantInvite.create({
+      data: {
+        tenantId: tenant.id,
+        email: inviteEmail,
+        role: "MEMBER",
+        token: `phase3-token-${SUFFIX}-${perTest}`,
+        invitedById: owner.id,
+        expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      },
+    });
+    testInviteId = invite.id;
+
+    // JournalEntryNote — needs a JE to anchor. Reuse the test entity
+    // from beforeAll (ENC_TEST).
+    const tenantId = await getDefaultTenantId(prisma as PrismaClient);
+    const entry = await postJournalEntry(prisma as PrismaClient, {
+      entityCode: ENTITY,
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-01-15"),
+      memo: `Phase 3 anchor entry ${SUFFIX}`,
+      source: "MANUAL",
+      lines: [
+        { accountCode: "1000", debit: 1 },
+        { accountCode: "4000", credit: 1 },
+      ],
+    });
+    testEntryId = entry.id;
+    const note = await prisma.journalEntryNote.create({
+      data: {
+        tenantId,
+        entryId: testEntryId,
+        body: `Phase 3 note body ${SUFFIX}`,
+        authorEmail,
+      },
+    });
+    testNoteId = note.id;
+  });
+
+  // ── TenantInvite.email ─────────────────────────────────────────────
+  it("on-disk TenantInvite.email is ciphertext", async () => {
+    const raw = await rawPrisma.tenantInvite.findUnique({
+      where: { id: testInviteId },
+      select: { email: true },
+    });
+    expect(raw?.email).not.toBe(inviteEmail);
+    expect(looksEncrypted(raw?.email)).toBe(true);
+  });
+
+  it("on-disk TenantInvite.emailHash is a 32-byte HMAC", async () => {
+    const raw = await rawPrisma.tenantInvite.findUnique({
+      where: { id: testInviteId },
+      select: { emailHash: true },
+    });
+    expect(raw?.emailHash).toBeTruthy();
+    expect(raw?.emailHash?.length).toBe(32);
+  });
+
+  it("app surface decrypts TenantInvite.email on read", async () => {
+    const { prisma } = await import("@/lib/db");
+    const r = await prisma.tenantInvite.findUnique({
+      where: { id: testInviteId },
+      select: { email: true },
+    });
+    expect(r?.email).toBe(inviteEmail);
+  });
+
+  it("the team.ts:114 duplicate-invite check works via emailHash", async () => {
+    const { prisma } = await import("@/lib/db");
+    const { emailLookupKeyForTenantInvite } = await import("@/lib/soc2");
+    // Mixed case + whitespace in the search input — normalizer collapses.
+    const existing = await prisma.tenantInvite.findFirst({
+      where: {
+        tenantId: testTenantId,
+        emailHash: emailLookupKeyForTenantInvite(
+          "  " + inviteEmail.toUpperCase() + "  "
+        ),
+        status: "PENDING",
+      },
+      select: { id: true },
+    });
+    expect(existing?.id).toBe(testInviteId);
+  });
+
+  // ── JournalEntryNote.authorEmail ───────────────────────────────────
+  it("on-disk JournalEntryNote.authorEmail is ciphertext", async () => {
+    const raw = await rawPrisma.journalEntryNote.findUnique({
+      where: { id: testNoteId },
+      select: { authorEmail: true },
+    });
+    expect(raw?.authorEmail).not.toBe(authorEmail);
+    expect(looksEncrypted(raw?.authorEmail)).toBe(true);
+  });
+
+  it("app surface decrypts JournalEntryNote.authorEmail on read", async () => {
+    const { prisma } = await import("@/lib/db");
+    const n = await prisma.journalEntryNote.findUnique({
+      where: { id: testNoteId },
+      select: { authorEmail: true },
+    });
+    expect(n?.authorEmail).toBe(authorEmail);
   });
 });
 

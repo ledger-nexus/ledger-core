@@ -224,6 +224,16 @@ model TenantInvite {
   /// flow refuses if the signed-in user's primary email != this value
   /// (case-insensitively), so the invite can't be hijacked.
   email       String
+  /// SOC 2 CC6 — Confidentiality TSC. HMAC-SHA256 search-hash for the
+  /// encrypted email column. Populated by the encrypted-fields Prisma
+  /// extension on write; queried by `emailLookupKeyForTenantInvite`
+  /// at the team.ts:114 duplicate-invite refusal site. See
+  /// docs/design/deterministic-encryption.md (Phase 3).
+  ///
+  /// Nullable during the rollout window so existing pre-rollout rows
+  /// don't block writes. Composite index with tenantId for the per-
+  /// tenant duplicate check.
+  emailHash   Bytes?
   /// Role assigned on acceptance. OWNER is intentionally not invitable
   /// — there is one OWNER per tenant and it's set at tenant creation.
   role        TenantRole
@@ -242,7 +252,14 @@ model TenantInvite {
   revokedAt   DateTime?
 
   @@index([tenantId, status])
+  // The legacy @@index([email, status]) covered the duplicate-invite
+  // refusal at team.ts:114. With email now encrypted (random IV →
+  // useless for lookup), the equivalent index is on emailHash. Both
+  // are kept during the rollout window so pre-migrated rows are still
+  // findable; the legacy one can be dropped in a cleanup PR after
+  // every row has emailHash populated.
   @@index([email, status])
+  @@index([tenantId, emailHash])
   @@map("tenant_invite")
 }
 

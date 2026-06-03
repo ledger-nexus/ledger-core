@@ -33,6 +33,7 @@ import {
   requirePermission,
 } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import { emailLookupKeyForTenantInvite } from "@/lib/soc2";
 import { sendInviteEmail } from "@/lib/email/templates/invite";
 import {
   assertCanInviteUser,
@@ -111,8 +112,15 @@ export async function inviteMemberAction(
     // If there's an outstanding PENDING invite for this email + tenant,
     // refuse rather than creating a duplicate. The admin can revoke
     // the old one and try again if they want a fresh token.
+    // CC6: TenantInvite.email is encrypted at rest (random IV) — match
+    // by the deterministic emailHash instead. See
+    // docs/design/deterministic-encryption.md (Phase 3).
     const existingInvite = await prisma.tenantInvite.findFirst({
-      where: { tenantId: tenant.id, email, status: "PENDING" },
+      where: {
+        tenantId: tenant.id,
+        emailHash: emailLookupKeyForTenantInvite(email),
+        status: "PENDING",
+      },
       select: { id: true },
     });
     if (existingInvite) {
