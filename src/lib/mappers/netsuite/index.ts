@@ -64,3 +64,12 @@ export {
   type ImportAccountingBooksResult,
   type ImportAccountingPeriodsResult,
 } from "./bootstrap";
+
+// Composition helper: bootstrap + transaction import in one call.
+// Use this for clean-slate NetSuite imports; use importFromNs
+// directly when entities/books/periods already exist.
+export {
+  importFromNsWithBootstrap,
+  type BootstrapAndImportInput,
+  type BootstrapAndImportResult,
+} from "./bootstrap-and-import";
