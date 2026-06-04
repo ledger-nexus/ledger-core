@@ -6,9 +6,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-03 (continuation)
 
-**Current state:** **SOC 2 hardening sprint complete — Type 1 audit-ready.**
+**Current state:** **SOC 2 hardening sprint + validator-to-shipping cycle complete — Type 1 audit-ready.**
 
 The portfolio architecture (v1.0) was complete on 2026-05-21. The
 2026-05-25 → 2026-06-03 sprint added the SOC 2 layer the v1.0
@@ -20,11 +20,23 @@ access-control, change-management, incident-response, data-
 classification, data-subject-requests, vendor-management, risk-
 register, business-continuity, control-deficiency-log).
 
-The session shipped **27 reviewable PRs across the 5-repo portfolio**
-and the `SOC2_READINESS.md` v2.0 assessment now states `≈70% to
-Type 1 audit-ready, 0 CRITICAL gaps` (down from `0-10% to Type 2,
-8 CRITICAL` in v1.0). The 6-month observation window is the next
-gate for Type 2.
+The continuation pass shipped a second batch: trust-surface evidence
+(security.txt, customer-trust questionnaire), CI gates (schema-
+fingerprint drift detection, SBOM generation), MERGE_ORDER guidance,
+the NetSuite Fleet reference doc, and the **validator-to-shipping
+trilogy** — a 4-layer pattern (validator → pure mappers → orchestrator
+→ integration test) applied to revenue-rec, fa-amort, GL substrate,
+and recon. Two of those (fa-amort + GL substrate) shipped downstream
+in the same session: fa-amort PR #14 (5 commits, 63 new tests, 121
+total) and ledger-core PRs #43-#45 (bootstrap mappers + composition
+helper + 11 integration tests vs real Neon).
+
+Cumulative: **46+ reviewable PRs across the 5-repo portfolio** (32 in
+ledger-core: #10-#45, plus per-companion-repo DSR + SECURITY.md +
+security.txt + fa-amort PR #14). `SOC2_READINESS.md` v2.0 stands at
+`≈70% to Type 1 audit-ready, 0 CRITICAL gaps` (down from `0-10% to
+Type 2, 8 CRITICAL` in v1.0). The 6-month observation window is the
+next gate for Type 2.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -104,6 +116,27 @@ gate for Type 2.
 
 **Incident response runbook (PR #29):**
 - [x] `docs/runbooks/incident-response.md` (264 lines) — operational steps the on-call engineer reads; pairs with the policy in PR #21
+
+### v1.x — Post-sprint sweeps + validator → shipping cycle (PRs #33-#45, 2026-06-03 continued)
+
+**Trust-surface evidence + CI gates:**
+- [x] `public/.well-known/security.txt` (PR #33) — RFC 9116 vulnerability disclosure pointer; closes deficiency #17
+- [x] Schema-fingerprint CI gate (PR #34) — `.github/workflows/schema-fingerprint.yml` runs `schemaFingerprint` on every PR; fails closed if Prisma schema drifts without a migration; closes deficiency #21
+- [x] SBOM CI (PR #35) — CycloneDX SBOM generation on every PR + signed release artifact; closes deficiency #19
+- [x] `docs/MERGE_ORDER.md` (PR #36) — explicit merge sequence for the 46 open PRs portfolio-wide; the change-management v2.0 procedure made this load-bearing
+- [x] `docs/sales/customer-trust-questionnaire.md` (PR #37) — CSA CAIQ v4 pre-filled answers + condensed sales sheet; the "send this when prospects ask for SOC 2" artifact
+- [x] `docs/reference/netsuite-fleet-master-data.md` (PR #38) — schema notes + field-by-field translatability map from the 1k-row Fleet NetSuite extract the owner attached for study
+
+**Validator → shipping trilogy (4-layer pattern: validator → pure mappers → orchestrator → integration test):**
+- [x] revenue-rec NetSuite validation (PR #39) — schema-additions needed: `allocatedAmount` + `fairValueMethod` + `quantity` on `PerformanceObligation` to absorb NS revenue-arrangement allocations; ~1-2 weeks of engineering captured as a sequenced backlog
+- [x] fa-amort NetSuite validation (PR #40) — 87/90 Fleet sample assets fully translatable; 3 method gaps (150% DB, SYD, Amortization) map to NONE with `unmappedMethodNote`; downstream shipping landed in fa-amort PR #14 (4-layer + 63 tests)
+- [x] GL substrate NetSuite validation (PR #41) — bootstrap layer (Subsidiary/AccountingBook/AccountingPeriod) was the missing piece; downstream shipping is PRs #43-#45 below
+- [x] recon NetSuite validation (PR #42) — denormalized `matched_transaction` → normalized `ReconciliationMatch` is the model-translation gap; ~1 week of engineering captured as a sequenced backlog
+
+**ledger-core bootstrap-mapper shipping (closes the gap PR #41 surfaced):**
+- [x] Bootstrap mappers (PR #43) — `src/lib/mappers/netsuite/bootstrap.ts` (~530 lines): types + pure mappers + idempotent orchestrators for `Subsidiary` → `LegalEntity`, `AccountingBook` → `Book`, `AccountingPeriod` → `Period`. Code conventions: `NSSUB-{id}`, `NSBOOK-{id}`, `{entityCode}-CAL-{calendarName}`. NetSuite-only fields (`isElimination`, `consolidationMethod`) preserved in `extensions JSONB` per existing pattern.
+- [x] Composition helper (PR #44) — `bootstrap-and-import.ts` (~170 lines): `importFromNsWithBootstrap()` orchestrates subs → books → periods → tx in one call. Resolves `entityCode`/`bookCode`/`fiscalCalendarCode` from `primarySubsidiaryId`/`primaryBookId`. Throws if `primarySubsidiaryId` not in `bootstrap.subsidiaries`.
+- [x] Integration test (PR #45) — 11 tests against real Neon Postgres covering idempotency, namespacing, multi-sub hierarchies, `FiscalCalendar.entityId` per-entity scoping, `BookBasis` enum mapping (unknown → `STATUTORY`), all green in 7s. Uses `getDefaultTenantId(prisma)` helper to satisfy `Tenant.ownerUserId` requirement; cleanup scoped to `NSSUB-ITEST-*` and `NSBOOK-ITESTBOOK-*` prefixes.
 
 ### v0.2 — Universal substrate (Layer 1+2 + seams for 3–6)
 - [x] Party + PartyRole (unified Customer/Vendor/Employee)
@@ -266,10 +299,11 @@ gate for Type 2.
 
 ## Notes for the next session
 
-**The 2026-05-25 → 2026-06-03 SOC 2 hardening sprint left 27 PRs
-open across the 5-repo portfolio.** They are all reviewable change
-packets per the `change-management.md` v2.0 procedure; merge order
-is documented in each PR's "Stacked on" line.
+**The 2026-05-25 → 2026-06-03 SOC 2 sprint + validator-to-shipping
+continuation left 46+ PRs open across the 5-repo portfolio.** They
+are all reviewable change packets per the `change-management.md`
+v2.0 procedure; merge order is documented in `docs/MERGE_ORDER.md`
+(PR #36) and in each PR's "Stacked on" line.
 
 ### Read this first
 - `docs/SOC2_READINESS.md` v2.0 — the auditor's first-read; what's
@@ -307,10 +341,20 @@ is documented in each PR's "Stacked on" line.
 - #14 — retention cron lives only on a branch (PR #12 merge closes
   this; load-bearing for the documented Privacy TSC retention claim)
 - #16 — `/legal/subprocessors` page on marketing site
-- #17 — `public/.well-known/security.txt` deployment (per Next.js app)
-- #19 — SBOM generation in CI
-- #21 — Schema-drift detection wired in CI (`schemaFingerprint` is
-  shipped but not checked per-PR)
+- ~~#17~~ — closed by PR #33 (`public/.well-known/security.txt`)
+- ~~#19~~ — closed by PR #35 (SBOM CI)
+- ~~#21~~ — closed by PR #34 (schema-fingerprint CI gate)
+
+### Substantive engineering deferred to dedicated sprints
+- **revenue-rec NetSuite schema additions** — `allocatedAmount` +
+  `fairValueMethod` + `quantity` on `PerformanceObligation`; PR #39
+  captured the sequenced backlog. ~1-2 weeks of focused engineering.
+- **recon model-translation work** — denormalized `matched_transaction`
+  → normalized `ReconciliationMatch`; PR #42 captured the sequenced
+  backlog. ~1 week of focused engineering.
+- **`connections-export.ts` typed-stub wiring** — companion repos
+  ship the 5-test stubs (per-repo PR #11); turning the stubs into
+  actual functions that walk live tables is the next pass.
 
 ### Substrate notes (still current)
 - Architecture canon: `docs/universal-schema.md`. Schema visual:
