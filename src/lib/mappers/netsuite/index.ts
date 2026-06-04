@@ -37,3 +37,30 @@ export type {
   NsJournalEntry,
   NsTransactionLine,
 } from "./types";
+
+// Bootstrap mappers (Subsidiary + AccountingBook + AccountingPeriod).
+// These must run BEFORE the transaction import — every JE / invoice /
+// bill / payment / FA references an entity + book + period that must
+// already exist. See docs/reference/netsuite-gl-validation.md for the
+// validation pass that surfaced this gap.
+export {
+  mapNsSubsidiary,
+  mapNsAccountingBook,
+  mapNsAccountingPeriod,
+  nsSubsidiaryCode,
+  nsBookCode,
+  nsCalendarCode,
+  nsPeriodCode,
+  importSubsidiaries,
+  importAccountingBooks,
+  importAccountingPeriods,
+  type NsSubsidiaryBootstrap,
+  type NsAccountingBookBootstrap,
+  type NsAccountingPeriodBootstrap,
+  type MappedLegalEntity,
+  type MappedBook,
+  type MappedPeriod,
+  type ImportSubsidiariesResult,
+  type ImportAccountingBooksResult,
+  type ImportAccountingPeriodsResult,
+} from "./bootstrap";
