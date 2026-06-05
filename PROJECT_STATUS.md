@@ -6,9 +6,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-05 (even-later evening — Sentry shim portfolio-wide + #5 closure)
+**Last updated:** 2026-06-05 (night — 14th adversarial pass closure on Sentry shim arc, 80% milestone)
 
-**Current state:** **SOC 2 ≈79% + Sentry shim portfolio-wide (first Medium-severity closure by genuine new code this session) + DSR column-level complete + 13th adversarial pass closed + deficiency #13 closed (first time tsc clean across 5/5 repos) + TWO NetSuite sprints end-to-end with UI.**
+**Current state:** **SOC 2 ≈80% + Sentry shim portfolio-wide (14th pass found + closed HIGH Error.stack PII leak in newly-shipped code) + DSR column-level complete + #13 + #18 + #25 + #26 closed + TWO NetSuite sprints end-to-end with UI.**
 
 The portfolio architecture (v1.0) was complete on 2026-05-21. The
 2026-05-25 → 2026-06-03 sprint added the SOC 2 layer the v1.0
@@ -31,12 +31,12 @@ in the same session: fa-amort PR #14 (5 commits, 63 new tests, 121
 total) and ledger-core PRs #43-#45 (bootstrap mappers + composition
 helper + 11 integration tests vs real Neon).
 
-Cumulative: **100+ reviewable PRs across the 5-repo portfolio**
+Cumulative: **100+ reviewable PRs across the 5-repo portfolio** (each shim PR now has a 2nd commit closing the 14th-pass H1)
 (was 84+ this morning; +16 from the evening: fa-amort PRs #18 / #19 / #20 / #21 +
 revenue-rec PRs #27 / #28 + recon PRs #23 / #24 + integrations PRs #17 / #18 +
 ledger-core PRs #58 / #59 / #60 / #61 / #62 / #63 / #64). `SOC2_READINESS.md` v2.3
-(ledger-core PR #59) stands at `≈79% to Type 1 audit-ready, 0 CRITICAL gaps`.
-The remaining 21% is dominated by **customer-trigger gates** + the **Type 2
+(ledger-core PR #59) stands at `≈80% to Type 1 audit-ready, 0 CRITICAL gaps` (the 14th-pass closure pushed the assessment past the 79% line on audit-quality evidence quality).
+The remaining 20% is dominated by **customer-trigger gates** + the **Type 2
 6-month observation window** — both explicitly called out in the v2.3 readiness
 assessment.
 
