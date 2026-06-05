@@ -361,6 +361,8 @@ All 4 PRs are independent (each based on its repo's `main`). Can merge in any or
 
 After all 4 merge: `captureError()` + `captureMessage()` exist in every companion repo with PII redaction running before every emit, console fallback when DSN absent. This is the **first Medium-severity deficiency closed by genuine new code this session.**
 
+**14th adversarial pass closure (2nd commits on each Group S PR):** Pass found 1 HIGH (Error.stack PII leak via V8 preamble) + 3 MEDIUMs (err.code cap + revenue-rec + integrations allowlist gaps). All 4 closed in-session via 2nd commits on each of the 4 shim PRs. Tests delta: +28 (each PR went 14 → 21 tests). New helpers `stripStackPreamble()` + `sanitizeErrorForCapture()`. The shim arc is now mechanically defended at every layer: `.message`, `.stack`, `.code`, `extra`.
+
 ---
 
 ## Group R — #13 portfolio-wide sweep (2026-06-05 late evening, 2 PRs)
