@@ -8,6 +8,8 @@ import {
   eraseUserPii,
 } from "../src/lib/privacy/user-data";
 
+const COMPANION_TOKEN = "test-internal-api-token-min-32-chars-long";
+
 const USER_ID = "00000000-0000-0000-0000-0000000000aa";
 const USER_EMAIL = "alice@example.com";
 
@@ -165,5 +167,110 @@ describe("eraseUserPii (GDPR Art. 17 — right to erasure)", () => {
     expect(summary.emailDeliveriesRedacted).toBe(0);
     // $transaction was NOT called (idempotent shortcut).
     expect((prisma as unknown as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// schemaVersion 2 — bundle with companion attribution
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("buildUserDataExport — schemaVersion 2 (companion attribution)", () => {
+  function baseUser() {
+    return {
+      id: USER_ID,
+      email: USER_EMAIL,
+      displayName: "Alice Example",
+      isActive: true,
+      deactivatedAt: null,
+      createdAt: new Date("2026-01-01"),
+    };
+  }
+
+  it("stays at schemaVersion 1 when no internalApiToken supplied", async () => {
+    const prisma = mockPrismaWith({ user: baseUser() });
+    const bundle = await buildUserDataExport(prisma as never, USER_ID);
+    expect(bundle.schemaVersion).toBe(1);
+    expect(bundle.companionAttribution).toBeUndefined();
+  });
+
+  it("bumps to schemaVersion 2 + populates companionAttribution when token supplied", async () => {
+    const prisma = mockPrismaWith({ user: baseUser() });
+
+    // Stub fetch to return all four companions OK with distinct shapes.
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes(":3003")) {
+        return new Response(
+          JSON.stringify({
+            connectionsCreated: 1,
+            connectionsByStatus: { ACTIVE: 1, PAUSED: 0, REVOKED: 0, ERROR: 0 },
+            syncRunsInitiated: 0,
+            connectionsBySystem: { plaid: 1 },
+            snapshotAt: "2026-06-04T00:00:00.000Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes(":3001")) {
+        return new Response(
+          JSON.stringify({
+            bankStatementsUploaded: 2,
+            reconciliationMatchesApproved: 0,
+            aiSuggestionsAccepted: 0,
+            aiSuggestionsRejected: 0,
+            snapshotAt: "2026-06-04T00:00:00.000Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      // fa-amort and revenue-rec: empty-but-valid
+      return new Response(
+        JSON.stringify({ snapshotAt: "2026-06-04T00:00:00.000Z" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const bundle = await buildUserDataExport(prisma as never, USER_ID, {
+      internalApiToken: COMPANION_TOKEN,
+      fetchImpl,
+    });
+
+    expect(bundle.schemaVersion).toBe(2);
+    expect(bundle.companionAttribution).toBeDefined();
+    expect(bundle.companionAttribution!.integrations.reachable).toBe(true);
+    if (bundle.companionAttribution!.integrations.reachable) {
+      expect(bundle.companionAttribution!.integrations.data.connectionsCreated).toBe(1);
+    }
+    expect(bundle.companionAttribution!.recon.reachable).toBe(true);
+    expect(bundle.companionAttribution!.faAmort.reachable).toBe(true);
+    expect(bundle.companionAttribution!.revenueRec.reachable).toBe(true);
+  });
+
+  it("still assembles the bundle when a companion is down (graceful degradation)", async () => {
+    const prisma = mockPrismaWith({ user: baseUser() });
+
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes(":3001")) {
+        // recon is down
+        throw new Error("ECONNREFUSED");
+      }
+      return new Response(
+        JSON.stringify({ snapshotAt: "2026-06-04T00:00:00.000Z" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const bundle = await buildUserDataExport(prisma as never, USER_ID, {
+      internalApiToken: COMPANION_TOKEN,
+      fetchImpl,
+    });
+
+    expect(bundle.schemaVersion).toBe(2);
+    expect(bundle.companionAttribution!.recon.reachable).toBe(false);
+    expect(bundle.companionAttribution!.integrations.reachable).toBe(true);
+    // The substrate attribution still works.
+    expect(bundle.attributionCounts).toBeDefined();
+    expect(bundle.subject.email).toBe(USER_EMAIL);
   });
 });

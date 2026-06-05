@@ -39,6 +39,10 @@
 //   - erasure: OWNER of the user's tenant (irreversible, highest bar)
 
 import type { PrismaClient } from "@prisma/client";
+import {
+  fetchCompanionAttribution,
+  type CompanionAttribution,
+} from "./companion-attribution";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Export bundle shape
@@ -49,7 +53,17 @@ import type { PrismaClient } from "@prisma/client";
 // version is a breaking change.
 
 export interface DataExportBundle {
-  schemaVersion: 1;
+  /**
+   * Bundle schema version.
+   *
+   * Version 1: substrate-only attribution (ledger-core's own tables).
+   * Version 2: adds `companionAttribution` — fetched from the four
+   * companion repos via /api/internal/dsr/attribution.
+   *
+   * Old consumers that pin to v1 still parse v2 bundles (the
+   * companion section is additive); new consumers should target v2.
+   */
+  schemaVersion: 1 | 2;
   exportedAt: string; // ISO timestamp
   subject: {
     userId: string;
@@ -103,6 +117,38 @@ export interface DataExportBundle {
     recordEventsCreated: number;
     journalEntryNotesAuthored: number;
   };
+  /**
+   * Attribution counts from the four companion repos
+   * (integrations / recon / fa-amort / revenue-rec).
+   *
+   * Each section is wrapped in `{ reachable, data?, error? }` — if a
+   * companion was unreachable at export time, the bundle preserves
+   * which one and why. A regulator can verify that partial-attribution
+   * exports were the result of a transient outage, not data hiding.
+   *
+   * Present when schemaVersion >= 2. Optional for back-compat with
+   * v1 callers that didn't pass an internalApiToken.
+   */
+  companionAttribution?: CompanionAttribution;
+}
+
+/**
+ * Optional opts for `buildUserDataExport`. When `internalApiToken` is
+ * supplied, the bundle is built as schemaVersion 2 with the
+ * `companionAttribution` section populated (or marked unreachable).
+ * When omitted, the bundle stays at schemaVersion 1 — substrate
+ * attribution only.
+ */
+export interface BuildExportOptions {
+  /**
+   * INTERNAL_API_TOKEN for calling companion-repo
+   * /api/internal/dsr/attribution. When unset, companion attribution
+   * is SKIPPED (bundle stays at schemaVersion 1). Pass from the
+   * Server Action layer where the env is validated.
+   */
+  internalApiToken?: string;
+  /** Optional fetch override for tests. */
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -113,10 +159,17 @@ export interface DataExportBundle {
  * No tenant scoping inside this function — a single user can belong
  * to multiple tenants, and the export covers the whole user. The
  * Server Action verifies actor authority before invoking.
+ *
+ * When `opts.internalApiToken` is supplied, also fetches attribution
+ * counts from the four companion repos via /api/internal/dsr/attribution
+ * and bumps the bundle to schemaVersion 2. Failures are tolerated —
+ * an unreachable companion contributes a `reachable: false` entry
+ * rather than crashing the export.
  */
 export async function buildUserDataExport(
   prisma: PrismaClient,
-  userId: string
+  userId: string,
+  opts: BuildExportOptions = {}
 ): Promise<DataExportBundle> {
   const user = await prisma.user.findUniqueOrThrow({
     where: { id: userId },
@@ -196,8 +249,20 @@ export async function buildUserDataExport(
     prisma.journalEntryNote.count({ where: { authorUserId: userId } }),
   ]);
 
+  // When a token is supplied, fetch companion attribution. Runs in
+  // parallel with the in-progress Promise.all above isn't possible
+  // here (the substrate query is already awaited). The companion
+  // fetch is short-lived (~1-2s for healthy companions); the bundle
+  // assembly stays under 5s total.
+  const companionAttribution = opts.internalApiToken
+    ? await fetchCompanionAttribution(userId, {
+        internalApiToken: opts.internalApiToken,
+        fetchImpl: opts.fetchImpl,
+      })
+    : undefined;
+
   return {
-    schemaVersion: 1,
+    schemaVersion: companionAttribution ? 2 : 1,
     exportedAt: new Date().toISOString(),
     subject: {
       userId: user.id,
@@ -238,6 +303,7 @@ export async function buildUserDataExport(
       recordEventsCreated: recordEventsCount,
       journalEntryNotesAuthored: notesCount,
     },
+    ...(companionAttribution ? { companionAttribution } : {}),
   };
 }
 
