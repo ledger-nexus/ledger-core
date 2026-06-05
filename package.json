@@ -20,7 +20,8 @@
     "test:watch": "vitest",
     "test:invariants": "vitest run tests/invariants.test.ts",
     "test:seeded": "vitest run tests/seeded-company.test.ts",
-    "test:property": "vitest run tests/property-based.test.ts"
+    "test:property": "vitest run tests/property-based.test.ts",
+    "verify:deficiency-log": "tsx scripts/verify-deficiency-log.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.39.4",

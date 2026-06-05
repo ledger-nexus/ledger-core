@@ -1,0 +1,72 @@
+# CC4 Monitoring Activities — verify every Closed/Remediated row in
+# control-deficiency-log.md cites at least one MERGED PR.
+#
+# Closes the remediation plan of deficiency #27 ("Task-completion
+# attestations diverge from main"). When this workflow runs green,
+# #27 can flip from Open → Remediated.
+#
+# Schedule: nightly at 04:00 UTC + on every push that touches the
+# deficiency log itself.
+#
+# Failure mode: the workflow FAILS LOUDLY if any cited PR is OPEN,
+# DRAFT, or CLOSED-unmerged. Auditors love loud failure modes.
+
+name: Deficiency log verify
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  push:
+    paths:
+      - "docs/policies/control-deficiency-log.md"
+      - "scripts/verify-deficiency-log.ts"
+      - ".github/workflows/deficiency-log-verify.yml"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      # Need pull-requests:read to call `gh pr view` against
+      # cross-repo PRs in the ledger-nexus org.
+      contents: read
+      pull-requests: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies (tsx only — no full install needed)
+        run: npm install --no-save tsx
+
+      - name: Run verifier
+        env:
+          # GITHUB_TOKEN is auto-provided. For cross-repo reads,
+          # the token needs broader scope — for now we run against
+          # the same org and accept that a private companion repo
+          # might 404. The script reports ERROR for those and the
+          # workflow continues (doesn't hard-fail on permission).
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx tsx scripts/verify-deficiency-log.ts
+
+      - name: Generate evidence artifact (JSON)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p docs/operational-evidence/deficiency-log-verify
+          STAMP=$(date -u +%Y-%m-%d)
+          npx tsx scripts/verify-deficiency-log.ts --json \
+            > "docs/operational-evidence/deficiency-log-verify/${STAMP}.json" \
+            || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deficiency-log-verify-evidence
+          path: docs/operational-evidence/deficiency-log-verify/
+          retention-days: 90
