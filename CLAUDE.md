@@ -22,6 +22,22 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 
 4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test.
 
+5. **All error emission goes through the monitoring shim.** `src/lib/monitoring/index.ts` (shipped via PR #10) is the canonical path — `captureError(err, context)` / `captureMessage(msg, level, context)`. Every emit runs `redactPii()` from `src/lib/soc2/` before the error reaches Sentry or the console fallback. **Never call Sentry directly + never console.error a Prisma error's `.message`** — Prisma errors echo column values verbatim in their messages, which on this substrate include party names, account codes, amounts (Confidentiality TSC leak class). The shim's `sanitizeErrorForCapture()` also strips the V8 stack preamble so `.message` PII can't leak via `.stack` (14th adversarial pass closure 2026-06-05). Add new field names to `src/lib/soc2/index.ts` `redactPii` allowlist when new sensitive columns ship — over-redaction is acceptable; under-redaction is a SOC 2 finding.
+
+## SOC 2 + adversarial-pass cadence
+
+This repo is the substrate of the ledger-nexus portfolio's SOC 2 Type 2 readiness program. Current state (`docs/SOC2_READINESS.md` v2.3): **≈80% to Type 1 audit-ready**.
+
+**Adversarial-pass discipline:** every substantive code shipment (new posting flow, new internal HTTP endpoint, encryption work, audit-log change, monitoring code, anything cross-tenant-touching) should be followed by an adversarial-pass audit before merge. The portfolio has run **14 adversarial passes** to date. Recent passes found real HIGHs in newly-shipped code from across the portfolio (not just ledger-core):
+
+- **12th pass:** found bearer-token leak class in upstream-body error embedding (asc606 repo) — closed via `scrubUpstreamBody()` helper applied to 35+ sites
+- **13th pass:** found silent `catch {}` in fa-amort + unbacked audit_log delegation claim in revenue-rec
+- **14th pass:** found Error.stack PII leak via V8 preamble across the 4-PR Sentry shim arc
+
+Standing rule: when a substantive change ships, run an adversarial pass before declaring done. **The cadence IS the SOC 2 CC4 evidence** — auditors grade "this team finds + closes their own weaknesses without external intervention." A self-discovered HIGH closed in-session with tests pinning the attack scenario is the highest-confidence CC4 evidence form the framework recognizes.
+
+**See `docs/policies/control-deficiency-log.md` v2.3 + `docs/SOC2_READINESS.md` v2.3 for the full session evidence trail** (6 amendments captured 5 closures + 1 new meta-control).
+
 ## What's wired now (v1.0)
 
 - ✅ Layer 1 — `Account`, `JournalEntry`, `JournalLine` with three currency amounts, lineage columns, multi-book scope, GIN-indexed extensions
