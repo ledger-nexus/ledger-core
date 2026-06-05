@@ -1,8 +1,10 @@
-# Merge order — 2026-05-25 → 2026-06-03 SOC 2 hardening sprint
+# Merge order — 2026-05-25 → 2026-06-04 SOC 2 hardening sprint + continuation
 
-The sprint left **35 open PRs** across the 5-repo portfolio. This
-file documents the dependency order so the founder can land them
-efficiently when ready.
+**Updated 2026-06-04.** The sprint (2026-05-25 → 2026-06-03) left 35
+open PRs; the continuation arc (2026-06-04, this same docs/SOC2_
+hardening session) added **15 more**, for **50+ total** across the
+5-repo portfolio. This file documents the dependency order so the
+founder can land them efficiently when ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
@@ -15,16 +17,30 @@ Merge these 5 to get the auditor-entry-point surface live on `main`:
 
 1. **ledger-core PR #14** — portfolio data locations (the auditor's
    first read)
-2. **ledger-core PR #22** — SOC2_READINESS v2.0 (`0 CRITICAL`)
-3. **ledger-core PR #15** — risk register v2.0 (30 rows, reality-checked)
+2. **ledger-core PR #22** — SOC2_READINESS v2.0 → then **#49** for v2.1 delta (`≈75%`)
+3. **ledger-core PR #15** — risk register v2.0 → then **#50** for v2.1 delta
 4. **ledger-core PR #20** — security policy v2.0 (CC1 umbrella TOC)
 5. **ledger-core PR #32** — PROJECT_STATUS sprint capture
 
 All 5 are doc-only, off `main`, independent. Each takes < 1 minute
-to merge.
+to merge. The v2.1 delta PRs (#49, #50, plus deficiency-log **#48**)
+should land after their v2.0 bases on the same branch.
 
 After those land, the public face of the SOC 2 framework is current
 and an auditor can walk the directory from the top.
+
+### TL;DR — if you have an additional 30 minutes (the DSR end-to-end loop)
+
+The 2026-06-04 continuation arc closes the Privacy TSC commitment.
+Merge the **10 DSR-loop PRs** in this order:
+
+1. **4 producer helpers** (Group I.1): integrations #14, recon #15, fa-amort #15, revenue-rec #14
+2. **ledger-core consumer**: PR #46 (Group I.2)
+3. **4 HTTP endpoints** (Group I.3): integrations #15, recon #16, fa-amort #16, revenue-rec #15
+4. **e2e smoke + runbook**: PR #47 (Group I.4)
+
+Then the three docs PRs (Group J: **#48, #49, #50**) to reflect closure
+in the SOC 2 evidence chain.
 
 ---
 
@@ -139,6 +155,83 @@ each repo.** Order doesn't matter.
 
 ---
 
+## Group H — Validator → shipping trilogy (2026-06-04 continuation, ledger-core PRs #39-#45)
+
+Shipped 2026-06-04 morning. Validator outputs across 4 domains + downstream shipping of the GL-substrate + fa-amort findings.
+
+| PR | What | Base | Notes |
+|---|---|---|---|
+| **#39** | revenue-rec NetSuite validation — `PerformanceObligation` schema additions (allocatedAmount + fairValueMethod + quantity) captured as a sequenced backlog | `main` | Doc PR — sequenced backlog only; no code shipped |
+| **#40** | fa-amort NetSuite validation — 87/90 Fleet sample assets translatable; 3 method gaps documented | `main` | Doc PR — downstream shipping is **fa-amort PR #14** |
+| **#41** | GL substrate NetSuite validation — bootstrap layer was the missing piece | `main` | Doc PR — downstream is ledger-core PRs #43-#45 |
+| **#42** | recon NetSuite validation — denormalized → normalized ReconciliationMatch captured as backlog | `main` | Doc PR — model-translation work deferred |
+
+### Group H stack — ledger-core bootstrap shipping (depends on Group H above)
+
+| PR | Branch | Base |
+|---|---|---|
+| **#43** | `netsuite-bootstrap-mapper` — types/mappers/orchestrators for Subsidiary → LegalEntity, AccountingBook → Book, AccountingPeriod → Period (~530 lines) | `main` |
+| **#44** | `netsuite-bootstrap-wire-into-importFromNs` — composition helper `importFromNsWithBootstrap()` (~170 lines) | #43 |
+| **#45** | `netsuite-bootstrap-integration-test` — 11 tests vs real Neon | #44 |
+
+Merge in order #43 → #44 → #45.
+
+---
+
+## Group I — DSR companion-attribution arc (2026-06-04 continuation, 10 PRs)
+
+The Privacy TSC procedure (Group C, PR #13) committed to companion-attribution counts in DSR exports. Today shipped the entire wire-up: producer helpers → consumer → HTTP endpoints → e2e smoke + runbook.
+
+### Group I.1 — Producer helpers (4 companion repos)
+**All independent. Branch off each repo's `dsr-procedure` branch (PR #11).** Order doesn't matter within this row.
+
+| Repo | PR | Branch | Wiring |
+|---|---|---|---|
+| `integrations` | #14 | `connections-export-wired` | Full wire — `Connection.createdBy` |
+| `recon` | #15 | `recon-attribution-wired` | Full wire — `BankStatement.uploadedBy` + `ReconciliationMatch.approved/rejectedBy` |
+| `fa-amort` | #15 | `fa-attribution-wired` | Honest-zero — schema gap delegated to ledger-core audit_log |
+| `revenue-rec` | #14 | `rr-attribution-wired` | Hybrid 2/5 — `ContractDocument.uploadedBy` + `RecognitionEvent.postedBy` |
+
+### Group I.2 — Consumer in ledger-core
+**Depends on Group I.1 being merged (cite references).**
+
+| PR | Branch | Base |
+|---|---|---|
+| **#46** | `companion-attribution-wire` | `dsr-procedure` |
+
+### Group I.3 — HTTP endpoints (4 companion repos)
+**Each stacks on its repo's Group I.1 branch.** Order: within each repo, I.1 → I.3.
+
+| Repo | PR | Base | What |
+|---|---|---|---|
+| `integrations` | #15 | `connections-export-wired` (I.1) | `POST /api/internal/dsr/attribution` |
+| `recon` | #16 | `recon-attribution-wired` (I.1) | Same endpoint |
+| `fa-amort` | #16 | `fa-attribution-wired` (I.1) | Same endpoint |
+| `revenue-rec` | #15 | `rr-attribution-wired` (I.1) | Same endpoint |
+
+### Group I.4 — E2E verification (ledger-core)
+**Stacked on Group I.2.**
+
+| PR | Branch | Base |
+|---|---|---|
+| **#47** | `dsr-e2e-smoke` | `companion-attribution-wire` (I.2) |
+
+Includes `docs/runbooks/dsr-e2e-test.md` operator guide.
+
+---
+
+## Group J — Doc-triangle catch-up (2026-06-04 continuation, 3 PRs)
+
+Captures today's work in the canonical SOC 2 evidence chain. All independent doc-only PRs; merge in any order; **prefer late in the day** so PR citations are stable.
+
+| PR | Doc | Cite source |
+|---|---|---|
+| **#48** | `control-deficiency-log.md` v2.0 → v2.1 — closes #17/#19/#21 + adds DSR arc #24 + new low-severity #25/#26 | All groups |
+| **#49** | `SOC2_READINESS.md` v2.0 → v2.1 — readiness 70 → 75%; Delta section + CC2/CC4/CC8/CC9 row updates | PR #48 + Group H + Group I |
+| **#50** | `risk-register.md` v2.0 → v2.1 — #16 end-to-end + #26 partial close + new #31 token rotation | PR #48 + Group I |
+
+---
+
 ## Suggested batched merge order
 
 **Day 1 (foundation + encryption stack):**
@@ -149,11 +242,19 @@ each repo.** Order doesn't matter.
 3. PR #12 → #13 → #14 (Group C, in order)
 4. Sweep all Group D + Group F in parallel (any order)
 
-**Day 3 (auditor entry-point):**
-5. Group E (#22, #23, #32 — cite-fix them if needed once everything else lands)
+**Day 3 (auditor entry-point + bootstrap):**
+5. Group E (#22, #23, #32 — cite-fix once everything else lands)
+6. Group H bootstrap: PR #43 → #44 → #45 in order
 
-**Day 4 (companion repos):**
-6. All companion repo PRs (Group G) — none have inter-PR dependencies
+**Day 4 (companion repos + DSR producer helpers):**
+7. All companion repo PRs from Group G (no inter-PR deps within each)
+8. Group I.1 — 4 companion-repo attribution helpers (independent — can batch)
+
+**Day 5 (DSR consumer + endpoints + verification):**
+9. Group I.2 — ledger-core PR #46 (consumer)
+10. Group I.3 — 4 companion-repo HTTP endpoints (each stacked on its I.1 base)
+11. Group I.4 — ledger-core PR #47 (e2e smoke + runbook)
+12. Group J — three doc-triangle catch-up PRs (#48, #49, #50)
 
 This sequence keeps each day's review surface manageable + each
 day's deploy risk bounded to one logical group of changes.
