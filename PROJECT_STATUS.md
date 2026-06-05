@@ -6,7 +6,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-05 (night — 14th adversarial pass closure on Sentry shim arc, 80% milestone)
+**Last updated:** 2026-06-05 (night — Sentry shim + 14th pass + CLAUDE.md institutional memory arc; 80% milestone)
 
 **Current state:** **SOC 2 ≈80% + Sentry shim portfolio-wide (14th pass found + closed HIGH Error.stack PII leak in newly-shipped code) + DSR column-level complete + #13 + #18 + #25 + #26 closed + TWO NetSuite sprints end-to-end with UI.**
 
@@ -31,7 +31,7 @@ in the same session: fa-amort PR #14 (5 commits, 63 new tests, 121
 total) and ledger-core PRs #43-#45 (bootstrap mappers + composition
 helper + 11 integration tests vs real Neon).
 
-Cumulative: **100+ reviewable PRs across the 5-repo portfolio** (each shim PR now has a 2nd commit closing the 14th-pass H1)
+Cumulative: **105+ reviewable PRs across the 5-repo portfolio** (each shim PR has a 2nd commit closing the 14th-pass H1; plus the 5-PR CLAUDE.md institutional-memory arc adds session-start patterns to all 5 repos)
 (was 84+ this morning; +16 from the evening: fa-amort PRs #18 / #19 / #20 / #21 +
 revenue-rec PRs #27 / #28 + recon PRs #23 / #24 + integrations PRs #17 / #18 +
 ledger-core PRs #58 / #59 / #60 / #61 / #62 / #63 / #64). `SOC2_READINESS.md` v2.3
