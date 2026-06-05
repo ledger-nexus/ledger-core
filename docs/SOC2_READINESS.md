@@ -1,7 +1,7 @@
 # SOC 2 readiness assessment — ledger-nexus portfolio
 
 **Version:** 2.3 · **Last updated:** 2026-06-05 (evening) · **Owner:** Founder
-**Status:** ≈ 78% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
+**Status:** ≈ 79% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
 **Scope:** Type 1 readiness across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`).
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022) — Security TSC + Common Criteria CC1–CC9; Availability, Processing Integrity, Confidentiality, Privacy TSCs as in scope.
 
@@ -224,6 +224,38 @@ Score-band delta after this entire late-evening sweep:
   - Closed: 11 → 13 (#13 + #18); +18%
   - Open:    9 →  8 (#13/#18 out, #27 in — net -1)
   - Total:  23 → 24 (new #27 added)
+
+**Even-later-evening Sentry shim arc closed #5 portfolio-wide
+(Remediated → Closed pending merge + DSN).** Four companion-repo
+ports of the canonical ledger-core PR #10 monitoring shim:
+[fa-amort PR #21](https://github.com/ledger-nexus/fa-amort/pull/21)
++ [recon PR #24](https://github.com/ledger-nexus/recon/pull/24)
++ [revenue-rec PR #28](https://github.com/ledger-nexus/revenue-rec/pull/28)
++ [integrations PR #18](https://github.com/ledger-nexus/integrations/pull/18).
+Each port: ~500 lines + 14 dedicated tests with repo-specific PII
+allowlists. The integrations port is the highest-stakes — its
+`credentialsJson` + `accessToken` field redaction is the only
+thing standing between a Plaid error message containing the raw
+OAuth token and that token landing in Sentry's searchable index
+(Critical incident if leaked). Tests pin
+`"plk-secret-abcdef-12345"` cannot reach console output.
+
+**This is the FIRST Medium-severity deficiency closed by genuine
+new code this session.** All prior closures today were Low
+severity (#25, #26) or verification-of-pre-existing-state (#13
+TS18049, #18 SECURITY.md). The new code shipped portfolio-wide
+PII redaction in every captureError + captureMessage call —
+real CC7.3 evidence quality, not paper-only.
+
+Final score-band v2.3 (evening, after all 5 amendments to PR #58):
+  - Closed: 13 → 14 (#5 portfolio-wide)
+  - Remediated: 2 → 1 (#5 graduates)
+  - Total: 24 (unchanged — state transition only)
+
+**Readiness ticks 78% → 79%** on the strength of the first
+genuine Medium-severity code-shipping closure of the day. The
+remaining 21% is still dominated by customer-trigger gates +
+Type 2 6-month observation window.
 
 ---
 
