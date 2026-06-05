@@ -158,13 +158,25 @@ for **all 5 fields**. **v2.3 deficiency log
 | integrations | 1/1 wired | Closed (2026-06-04) |
 | recon | 5/5 wired | Closed (2026-06-04) |
 | **fa-amort** | **5/5 wired** | **Closed (2026-06-05 evening — this delta)** |
-| revenue-rec | 4/5 + 1 audit_log | Closed (2026-06-05 morning) |
+| revenue-rec | 4/5 + 1 honest-zero | Closed (2026-06-05 morning, footnoted evening) |
 
 Both DSR attribution schema-gap items (#25 + #26) are now Closed.
 The Privacy TSC commitment that v2.1 marked "mechanically +
-procedurally complete" is now also **column-level complete** —
-the attribution helpers no longer rely on audit_log delegation for
-data that should live on the owned tables.
+procedurally complete" is now also **column-level complete** for
+the data the helpers own — the attribution helpers no longer rely
+on audit_log delegation for data that should live on owned tables.
+
+**Footnote on the revenue-rec 4/5 row:** the morning v2.2 narrative
+called the 5th field "delegated to ledger-core's audit_log." The
+13th adversarial pass (revenue-rec PR #27) confirmed the delegation
+was unbacked — neither `approveExtractionAction` emits a
+`revenue_contract.create` `logAudit` event nor does
+`buildUserDataExport` query audit_log for it. The hardcoded 0 IS
+the truthful answer for revenue-rec's owned data; the field has
+been relabeled "honest-zero (schema gap not yet closed)" in
+`rr-attribution.ts`. The Privacy TSC closure stands — the helper
+returns a truthful answer. What's missing is a `createdBy` column
+OR an actual audit_log emission + ledger-core bundle query.
 
 **Readiness percentage:** ticks from `≈75%` to `≈76%`. Two
 Low-severity Closed in two days; the remaining 24% is still
@@ -172,6 +184,14 @@ dominated by customer-trigger gates (DR drill, signed DPAs, second
 employee) and the Type 2 6-month observation window. The
 attribution-completeness milestone is the last evidence-layer
 substantive move available without operational triggers.
+
+**13th adversarial pass also closed in-session (2026-06-05 evening):**
+fa-amort PR #20 + revenue-rec PR #27. Pass found 2 HIGHs (silent
+catch + unbacked delegation), 4 MEDIUMs (null-userId guards +
+cross-tenant doc), several LOWs. All resolved. CC4.1 (monitoring)
+evidence: the discovery + closure of all 13 pass findings was
+captured in the deficiency log change-log (v2.3 entry) the same
+day as the closure arc landed.
 
 ---
 
