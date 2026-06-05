@@ -6,9 +6,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-04 (full continuation arc)
+**Last updated:** 2026-06-05 (two NetSuite mapper sprints — end-to-end)
 
-**Current state:** **SOC 2 hardening sprint + DSR end-to-end + portfolio tsc-clean — Type 1 audit-ready ≈75%.**
+**Current state:** **SOC 2 ≈75% + DSR end-to-end + portfolio tsc-clean + TWO NetSuite sprints end-to-end with UI.**
 
 The portfolio architecture (v1.0) was complete on 2026-05-21. The
 2026-05-25 → 2026-06-03 sprint added the SOC 2 layer the v1.0
@@ -31,20 +31,25 @@ in the same session: fa-amort PR #14 (5 commits, 63 new tests, 121
 total) and ledger-core PRs #43-#45 (bootstrap mappers + composition
 helper + 11 integration tests vs real Neon).
 
-Cumulative: **63+ reviewable PRs across the 5-repo portfolio**
-(was 46+; +17 from the 2026-06-04 continuation arc: 10-PR DSR loop +
-4 doc deltas + 3 portfolio-wide tsc fixes). `SOC2_READINESS.md` v2.1
-stands at `≈75% to Type 1 audit-ready, 0 CRITICAL gaps`. The
-remaining 25% is dominated by **customer-trigger gates** (first
-paying customer for DR drill, first EU customer for signed DPAs,
-second employee for split Security Officer role) + the **Type 2
-6-month observation window** — both explicitly called out in the
-v2.1 readiness assessment.
+Cumulative: **76+ reviewable PRs across the 5-repo portfolio**
+(was 63+; +13 from the 2026-06-05 NS sprints: revenue-rec PRs #17-#23
+[7 PRs end-to-end] + recon PRs #17-#21 [5 PRs end-to-end] + ledger-core
+PROJECT_STATUS update [this PR]). `SOC2_READINESS.md` v2.1 stands at
+`≈75% to Type 1 audit-ready, 0 CRITICAL gaps`. The remaining 25% is
+dominated by **customer-trigger gates** + the **Type 2 6-month
+observation window** — both explicitly called out in the v2.1
+readiness assessment.
 
 **Portfolio-wide milestones reached 2026-06-04:**
 - `tsc --noEmit` clean across 5/5 repos (closes deficiency #13)
 - DSR attribution loop wired end-to-end (closes deficiency #24)
 - Three CI gates live (schema-fingerprint, SBOM, security.txt deploy)
+
+**Substrate milestones reached 2026-06-05:**
+- **Two NetSuite mapper sprints end-to-end** (revenue-rec + recon)
+- Cross-repo lineage triple mechanically proven against real Postgres
+- ASC 606 ¶77+¶78 schema additions shipped + migrated (revenue-rec)
+- Substrate accepts NetSuite data: 12 new companion PRs, 5 UI surfaces, 98 new tests
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -163,6 +168,32 @@ v2.1 readiness assessment.
 
 **Portfolio-wide tsc-clean (closes deficiency #13):**
 - [x] integrations PR #16, fa-amort PR #17, revenue-rec PR #16 — `expectResponse()` helper mirrors recon PR #14 (the canonical version) across the remaining 3 repos. Narrows `Response | undefined` middleware return type. After merge, **all 5 repos pass `npx tsc --noEmit` cleanly** for the first time.
+
+### v1.x — Two NetSuite mapper sprints (2026-06-05, 12 companion-repo PRs end-to-end)
+
+The substantive engineering arc that the validator trilogy (ledger-core PRs #39-#42) sequenced as ~3 weeks of focused work landed in a single session as two parallel mapper sprints. Both consume NetSuite Fleet sample data via ledger-core's universal NS bootstrap (PR #43-#45) and follow the same 5-layer pattern: pure mappers → orchestrator → integration tests vs real Postgres → Server Action → UI.
+
+**revenue-rec NS revenue arrangements sprint (7 PRs, end-to-end):**
+- [x] revenue-rec PR #17 — Schema additions: `allocatedAmount` + `allocationMethod` (PROPORTIONAL/RESIDUAL/MANUAL) + `fairValueMethod` (ESP/VSOE/TPE/RESIDUAL) + `quantity` on `PerformanceObligation`. ASC 606 ¶77+¶78. All NULL-tolerant or DEFAULT 1 for back-compat. Idempotent SQL migration. **Closes deficiency #26 documented half.**
+- [x] revenue-rec PR #18 — Foundation: `types.ts` (NS revenue-arrangement shapes, snake_case, preserves custom_columns/custom_body) + `mappers.ts` (pure functions: `mapElement`, `mapArrangement`, recognition-template translation, allocation/fair-value method enum translation, `allocatedAmount=null` when SSP-equal for back-compat, $0.01 reconciliation tolerance) + 22 unit tests.
+- [x] revenue-rec PR #19 — Orchestrator `importFromNsRevenue` with lineage-triple idempotency + transactional per-arrangement discipline + resolver-callback pattern (resolveEntityId, resolveCustomerPartyId) + per-arrangement error isolation + warnings propagation. 10 mocked-Prisma unit tests.
+- [x] revenue-rec PR #20 — `schedule.ts` accepts `OVER_TIME_USAGE` + `OVER_TIME_MILESTONE` (returns empty schedule; event-driven recognition). Was throwing ScheduleError; unblocks the mapper's USAGE/MILESTONE patterns. Adds compile-time exhaustiveness check via `const _: never = pattern`. +4 / -2 tests net.
+- [x] revenue-rec PR #21 — Schema-mirror gap closure for `RevenueContract.tenantId` + `Party.tenantId` (DB columns existed since 2026-05-31; mirror was stale, forcing raw-SQL escape hatches). Orchestrator updated to require tenantId at the boundary (CC6.1). Seed updated. **3 integration tests vs real Neon Postgres prove the schema-mirror gap is genuinely closed.**
+- [x] revenue-rec PR #22 — Server Action `importNsRevenueAction` with `requireCurrentTenant()` + `NSSUB-{id}` entity resolver + `NS-CUST-{id}` customer-party upsert resolver. JSON parse/validation + result envelope + actionable auth-error messages. 11 unit tests.
+- [x] revenue-rec PR #23 — UI page at `/import/netsuite`. Server Component chrome with annotated sample JSON + ImportPanel client component with textarea + tone-coded 6-stat result grid + collapsible per-arrangement detail + errors-open-by-default. Sidebar link.
+
+**Sprint output**: ~3000 lines of code, +54 tests (was 42 at sprint start, 96 at end), 5 layers proven, end-to-end from PR #17's schema migration all the way to the rendered Import button. The "1-2 weeks of focused engineering" the validation backlog (PR #39) estimated is done.
+
+**recon NS bank reconciliation sprint (5 PRs, end-to-end):**
+- [x] recon PR #17 — Foundation: `types.ts` (NS bank statement + line + matched_transaction shapes) + `mappers.ts` (pure functions: `mapBankAccount`, `mapStatementLine`, `mapStatement`, `mapForImport`, $0.01 reconciliation tolerance, matched-ratio warning when statement has 3+ lines and <50% matched) + 19 unit tests. **The load-bearing translation rule** per validation doc: NS line WITH `matched_transaction_id` → `ReconciliationMatch { source: MANUAL, status: APPROVED }`. Preserves NS's human-approved match verbatim.
+- [x] recon PR #18 — Orchestrator `importFromNsRecon` with filename-based idempotency + transactional per-statement + the **cross-repo lineage-triple lookup**: `resolveJournalLineId({ matchedTransactionType, matchedTransactionInternalId })` queries the GL substrate by lineage triple to find the JournalLine.id a NS matched_transaction_id resolves to. **Graceful degradation when GL document not yet imported**: bank line still lands, no match created, warning surfaced; recoverable on follow-up reconciliation pass. 10 mocked-Prisma unit tests.
+- [x] recon PR #19 — **Integration tests vs real Postgres prove the cross-repo lineage-triple lookup completes end-to-end**: NS denormalized `matched_transaction_id` → resolver callback queries lineage triple → real seeded JournalLine.id → `ReconciliationMatch { source: MANUAL, status: APPROVED, journalLineId }` created in the DB. Plus filename-based idempotency, graceful-degradation null case, BankAccount upsert correctness. 4 integration tests.
+- [x] recon PR #20 — Server Action `importNsReconAction` with `requireCurrentTenant()` + `NSSUB-{id}` entity resolver + lineage-triple Account resolver + lineage-triple JournalEntry resolver with **"prefer BANK-subtype line" heuristic** (`ReconciliationMatch.journalLineId` should reference the JE line that hits the bank account, not the AR/AP counterparty side; falls back to first-by-lineNo when no BANK subtype found). 11 unit tests.
+- [x] recon PR #21 — UI page at `/import/netsuite`. Same skeleton as revenue-rec but with **distinctive 8-stat grid** including `Matches deferred` (tone-coded amber when >0) — the operator-facing reflection of the graceful-degradation path. Per-statement badge shows full outcome inline: "Created · 5 lines · 3 matches · 2 deferred". Sidebar link.
+
+**Sprint output**: ~2000 lines of code, +44 tests (was 47 at sprint start, 91 at end), same 5-layer pattern proven for the second time. The "~3 days of focused work" the validation backlog (PR #42) estimated is done.
+
+**Why two sprints in one day mattered**: the validator trilogy left two paths into the substrate via NetSuite ingestion blocked. Both are now end-to-end proven from JSON paste → DB writes → UI render. The cross-repo lineage triple — the architectural seam that connects denormalized source-system data (NS bank line's `matched_transaction_id`) to normalized substrate data (recon's `ReconciliationMatch` with FK to ledger-core's JournalLine) — is mechanically proven against real Postgres. **No more validator-only paper findings; the substrate accepts NetSuite data.**
 
 ### v0.2 — Universal substrate (Layer 1+2 + seams for 3–6)
 - [x] Party + PartyRole (unified Customer/Vendor/Employee)
@@ -376,17 +407,15 @@ v2.0 procedure; merge order is documented in `docs/MERGE_ORDER.md`
 - #26 — revenue-rec schema partially lacks attribution columns (NEW, Low; hybrid 2/5 documented)
 
 ### Substantive engineering deferred to dedicated sprints
-- **revenue-rec NetSuite schema additions** — `allocatedAmount` +
-  `fairValueMethod` + `quantity` on `PerformanceObligation`; PR #39
-  captured the sequenced backlog. ~1-2 weeks of focused engineering.
-  **Triggers closure of deficiency #26** in tandem (when the new
-  fields land, add `acceptedBy`/`rejectedBy` to `AiExtractionSuggestion`
-  to flip `aiExtractionsAccepted/Rejected` from honest-zero to real
-  counts).
-- **recon model-translation work** — denormalized `matched_transaction`
-  → normalized `ReconciliationMatch`; PR #42 captured the sequenced
-  backlog. ~1 week of focused engineering.
+- ~~**revenue-rec NetSuite schema additions**~~ — **SHIPPED 2026-06-05** as a 7-PR end-to-end sprint (PRs #17-#23). Schema additions (`allocatedAmount` + `allocationMethod` + `fairValueMethod` + `quantity`) + pure mappers + orchestrator + integration tests + Server Action + UI. Closes the deficiency #26 documented half. The follow-up "`acceptedBy`/`rejectedBy` on `AiExtractionSuggestion` to flip the hybrid attribution helper from 2/5 wired to 5/5" remains the trailing item.
+- ~~**recon model-translation work**~~ — **SHIPPED 2026-06-05** as a 5-PR end-to-end sprint (PRs #17-#21). Denormalized NS `matched_transaction_*` → normalized recon `ReconciliationMatch { source: MANUAL, status: APPROVED }` via cross-repo lineage-triple lookup against ledger-core's JournalLine. Integration tests vs real Postgres prove the lookup completes end-to-end. UI surfaces the distinctive "matches deferred" outcome for the graceful-degradation case (GL document not yet imported).
 - ~~**`connections-export.ts` typed-stub wiring**~~ — **shipped 2026-06-04** in the DSR end-to-end arc (integrations PR #14 + recon PR #15 + fa-amort PR #15 + revenue-rec PR #14 producer helpers; ledger-core PR #46 consumer; 4 HTTP endpoint PRs; ledger-core PR #47 e2e smoke). Helpers now walk live tables with per-companion shape and graceful-degradation flags. Closes the original "typed stub" item end-to-end.
+
+### Remaining substantive backlog (post-2026-06-05)
+- **fa-amort attribution wire-up** — full closure of deficiency #25 requires schema additions (`createdBy` on FixedAsset; `acceptedBy`/`rejectedBy` on AiAssetSuggestion; a DepreciationRun audit table). The honest-zero helper today delegates to ledger-core's audit_log; trigger to close is "fa-amort grows data the audit_log can't capture" (e.g., AI capex-decision audit).
+- **revenue-rec AI-decision schema for AiExtractionSuggestion** — closes deficiency #26 fully. The schema mirror is done (PR #21); just needs `acceptedBy String? @db.Uuid` + `rejectedBy String? @db.Uuid` columns wired through `approveExtractionAction`. ~1 day.
+- **NS reverse exporters** — both revenue-rec and recon have the lineage-triple infrastructure (`sourceSystem`/`sourceRecordType`/`sourceRecordId`/`sourcePayload`) but no reverse exporter that replays it. ~2 days each. Required for the universal-schema "roundtrip proof" thesis (ledger-core's QBO/NS mappers already have this pattern).
+- **OVER_TIME_USAGE + OVER_TIME_MILESTONE recognition implementations** — `schedule.ts` accepts the patterns (PR #20) and returns empty; the actual usage-event-driven + milestone-driven recognition engine is ~2 days each.
 
 ### Substrate notes (still current)
 - Architecture canon: `docs/universal-schema.md`. Schema visual:
