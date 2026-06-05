@@ -1,10 +1,11 @@
 # Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints
 
-**Updated 2026-06-05 evening.** The sprint (2026-05-25 → 2026-06-03) left 35
+**Updated 2026-06-05 late evening.** The sprint (2026-05-25 → 2026-06-03) left 35
 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
-the evening **#25 closure + doc-triangle** added **4 more**,
-for **69+ total** across the 5-repo portfolio. This file documents
+the evening **#25 closure + doc-triangle** added **4 more**; the late
+evening **13th adversarial pass** added **2 more**,
+for **71+ total** across the 5-repo portfolio. This file documents
 the dependency order so the founder can land them efficiently when
 ready.
 
@@ -55,14 +56,15 @@ The 2026-06-05 work landed two full NetSuite ingestion flows + closed deficiency
 
 After all merge: the substrate accepts NetSuite data for revenue arrangements + bank reconciliation, with cross-repo lineage triple architecturally proven against real Postgres; revenue-rec attribution helper is 4/5 wired + 1 documented audit_log delegation.
 
-### TL;DR — evening capstone (4 more PRs, ~15 minutes)
+### TL;DR — evening capstone (6 more PRs, ~20 minutes)
 
-The 2026-06-05 evening session closed deficiency #25 (fa-amort attribution) using the same playbook as the morning #26 closure. Merge the **4 PRs** in this order:
+The 2026-06-05 evening session closed deficiency #25 (fa-amort attribution) + ran the 13th adversarial pass on BOTH same-day closure arcs. Merge the **6 PRs** in this order:
 
 1. **fa-amort #25 closure arc** (Group O): fa-amort #18 → #19 (stack)
-2. **Doc-triangle 2026-06-05 evening** (Group P): **#58, #59** (after Group O lands; #59 stacks on #58 base)
+2. **13th adversarial-pass closures** (Group Q): fa-amort #20 (on top of #19) + revenue-rec #27 (on top of #25 — independent of Group O)
+3. **Doc-triangle 2026-06-05 evening v2.3** (Group P): **#58, #59** (after Groups O + Q land; doc PRs include footnote amendments from the 13th-pass closures)
 
-After all merge: fa-amort attribution helper is 5/5 wired; **both DSR attribution schema-gap items (#25 + #26) are Closed across the portfolio**; readiness ticks 75% → 76%.
+After all merge: fa-amort attribution helper is 5/5 wired + revenue-rec helper is honest at 4/5 + 1 honest-zero; **both DSR attribution schema-gap items (#25 + #26) are Closed across the portfolio**; readiness ticks 75% → 76%; **13th adversarial pass is fully captured in CC4 monitoring evidence**.
 
 ---
 
@@ -329,12 +331,25 @@ After both merge: `faAmortAttribution` returns real counts for all 5 fields; v2.
 
 ## Group P — Doc-triangle evening catch-up (2026-06-05 evening, 2 PRs)
 
-Captures the evening 2026-06-05 closure in the canonical SOC 2 evidence chain. Both independent doc-only PRs; **merge after Group N + Group O lands**.
+Captures the evening 2026-06-05 closure in the canonical SOC 2 evidence chain. Both independent doc-only PRs; **merge after Group N + Group O + Group Q lands** (the v2.3 docs were amended after the 13th-pass closures landed).
 
 | PR | Doc | Cite source |
 |---|---|---|
-| **#58** | `control-deficiency-log.md` v2.2 → v2.3 — closes #25; closed-state goes 10 → 11 | Group O |
-| **#59** | `SOC2_READINESS.md` v2.2 → v2.3 — Delta — 2026-06-05 evening section; readiness 75% → 76% | Group O + PR #58 |
+| **#58** | `control-deficiency-log.md` v2.2 → v2.3 — closes #25; closed-state goes 10 → 11 (amended with H2-rev footnote on #26) | Group O + Group Q |
+| **#59** | `SOC2_READINESS.md` v2.2 → v2.3 — Delta — 2026-06-05 evening section; readiness 75% → 76% (amended with H2-rev footnote on revenue-rec row) | Group O + Group Q + PR #58 |
+
+---
+
+## Group Q — 13th adversarial-pass closures (2026-06-05 late evening, 2 PRs)
+
+Cross-repo 13th adversarial pass run on both same-day closure arcs (fa-amort Group O + revenue-rec Groups K+M). Findings: 2 HIGHs (fa-amort silent `catch {}` CC7.3 + revenue-rec unbacked audit_log delegation claim) + 4 MEDIUMs + several LOWs. All closed in-session.
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| (a) | fa-amort **#20** | `attribution-13th-pass-fixes` | `fa-attribution-wireup` | Closes H1 silent catch (now emits structured `console.error`) + adds null-userId guard + adds tenant-scope DSR-semantics doc + strict-equality test + race comment. +5 tests (74 → 79 vitest). |
+| (b) | revenue-rec **#27** | `rr-attribution-13th-pass-fixes` | `rr-attribution-full-wire` | Closes H2-rev (unbacked audit_log delegation claim — replaced with honest "schema gap not yet closed" framing) + adds null-userId guard + adds tx-bound rollback intent comment + tsc TS18049 fix (task #81's tail). +4 tests (55 → 59 vitest). |
+
+After both merge: the closure arc is **MORE rigorous** than before — the helpers now return truthful counts (not overclaimed coverage), null-userId guards close the silent-inflation class, and CC7.3 monitoring evidence is captured for the silent-catch class. PRs #58 + #59 are amended to footnote the revenue-rec helper-coverage state change (4/5 + 1 audit_log → 4/5 + 1 honest-zero).
 
 ---
 
