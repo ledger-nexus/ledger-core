@@ -6,9 +6,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-05 (two NetSuite mapper sprints — end-to-end)
+**Last updated:** 2026-06-05 (evening — fa-amort #25 closure arc + 13th adversarial pass)
 
-**Current state:** **SOC 2 ≈75% + DSR end-to-end + portfolio tsc-clean + TWO NetSuite sprints end-to-end with UI.**
+**Current state:** **SOC 2 ≈76% + DSR portfolio-wide attribution-completeness + 13th adversarial pass closed + TWO NetSuite sprints end-to-end with UI.**
 
 The portfolio architecture (v1.0) was complete on 2026-05-21. The
 2026-05-25 → 2026-06-03 sprint added the SOC 2 layer the v1.0
@@ -31,13 +31,12 @@ in the same session: fa-amort PR #14 (5 commits, 63 new tests, 121
 total) and ledger-core PRs #43-#45 (bootstrap mappers + composition
 helper + 11 integration tests vs real Neon).
 
-Cumulative: **84+ reviewable PRs across the 5-repo portfolio**
-(was 63+; +13 from the 2026-06-05 NS sprints: revenue-rec PRs #17-#23
-[7 PRs end-to-end] + recon PRs #17-#21 [5 PRs end-to-end] + ledger-core
-PROJECT_STATUS update [this PR]). `SOC2_READINESS.md` v2.1 stands at
-`≈75% to Type 1 audit-ready, 0 CRITICAL gaps`. The remaining 25% is
-dominated by **customer-trigger gates** + the **Type 2 6-month
-observation window** — both explicitly called out in the v2.1
+Cumulative: **90+ reviewable PRs across the 5-repo portfolio**
+(was 84+ this morning; +6 from the evening: fa-amort PRs #18 / #19 / #20 +
+ledger-core PRs #58 / #59 / #60). `SOC2_READINESS.md` v2.3 (ledger-core
+PR #59) stands at `≈76% to Type 1 audit-ready, 0 CRITICAL gaps`. The
+remaining 24% is dominated by **customer-trigger gates** + the **Type 2
+6-month observation window** — both explicitly called out in the v2.3
 readiness assessment.
 
 **Portfolio-wide milestones reached 2026-06-04:**
@@ -52,6 +51,13 @@ readiness assessment.
 - **v2.1 deficiency #26 closed in v2.2** via 3-PR arc (revenue-rec #21+#24+#25) — helper flipped from hybrid (2/5) → full-wire (4/5 + 1 documented audit_log delegation)
 - **Universal-schema "validate by mapping" thesis mechanically demonstrated for both NS domains** — reverse exporters (revenue-rec #26 + recon #22) read frozen `sourcePayload`/`rawPayload` back + `diffNsRevenueExports`/`diffNsReconExports` helpers prove semantic-equality roundtrip
 - Substrate accepts NetSuite data: 17 new companion PRs, 5 UI surfaces, 117 new tests (was 12/5/98 earlier today)
+
+**Privacy TSC + adversarial-pass milestones reached 2026-06-05 EVENING:**
+- **v2.2 deficiency #25 closed in v2.3** via 2-PR arc (fa-amort #18 attribution-schema + #19 helper wire-up) — helper flipped from honest-zero → 5/5 wired. Same playbook as the morning #26 closure, applied to fa-amort.
+- **`FixedAsset.tenantId` Prisma-mirror gap silently closed inside fa-amort PR #18** — parallel to revenue-rec PR #21's `RevenueContract.tenantId` closure. Both mirror gaps are sub-issues of deficiency #11 (already Closed).
+- **Both DSR attribution schema-gap items (#25 + #26) are now Closed** — Privacy TSC attribution-completeness thesis is closed at the **column-level** layer across all 4 companion repos (integrations 1/1, recon 5/5, fa-amort 5/5, revenue-rec 4/5+1).
+- **13th adversarial-pass audit landed + fully closed** (fa-amort PR #20) — found 1 HIGH (silent stamp-failure CC7.3 violation in `run-depreciation.ts`) + 2 MEDIUM (tenant-scope ambiguity doc + null-userId guard in `fa-attribution.ts`) + 2 LOW (strict-equality test + race-comment). All 5 closed in a single follow-up PR with +5 tests (79/79 vitest, 0 tsc).
+- Readiness % ticks `≈75%` → `≈76%` (SOC2_READINESS v2.3 in ledger-core PR #59). Closed-state count: 10 → 11. Remaining 24% is dominated by **customer-trigger gates** + **Type 2 6-month observation window** — both unmovable without operational triggers.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
