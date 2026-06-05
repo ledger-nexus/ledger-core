@@ -1,14 +1,15 @@
 # Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints
 
-**Updated 2026-06-05 late evening.** The sprint (2026-05-25 → 2026-06-03) left 35
-open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
+**Updated 2026-06-05 late evening (v4).** The sprint (2026-05-25 → 2026-06-03)
+left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
 evening **13th adversarial pass** added **2 more**; the **#13 portfolio-wide
-sweep** added **2 more**,
-for **73+ total** across the 5-repo portfolio. This file documents
-the dependency order so the founder can land them efficiently when
-ready.
+sweep** added **2 more**; the late-evening **#18 verification close + new
+#27 meta-deficiency** added **0 code PRs** (entirely doc-only inside the
+existing v2.3 evidence chain), for **73+ total** across the 5-repo portfolio.
+This file documents the dependency order so the founder can land them
+efficiently when ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
