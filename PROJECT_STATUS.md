@@ -31,7 +31,7 @@ in the same session: fa-amort PR #14 (5 commits, 63 new tests, 121
 total) and ledger-core PRs #43-#45 (bootstrap mappers + composition
 helper + 11 integration tests vs real Neon).
 
-Cumulative: **76+ reviewable PRs across the 5-repo portfolio**
+Cumulative: **84+ reviewable PRs across the 5-repo portfolio**
 (was 63+; +13 from the 2026-06-05 NS sprints: revenue-rec PRs #17-#23
 [7 PRs end-to-end] + recon PRs #17-#21 [5 PRs end-to-end] + ledger-core
 PROJECT_STATUS update [this PR]). `SOC2_READINESS.md` v2.1 stands at
@@ -49,7 +49,9 @@ readiness assessment.
 - **Two NetSuite mapper sprints end-to-end** (revenue-rec + recon)
 - Cross-repo lineage triple mechanically proven against real Postgres
 - ASC 606 ¶77+¶78 schema additions shipped + migrated (revenue-rec)
-- Substrate accepts NetSuite data: 12 new companion PRs, 5 UI surfaces, 98 new tests
+- **v2.1 deficiency #26 closed in v2.2** via 3-PR arc (revenue-rec #21+#24+#25) — helper flipped from hybrid (2/5) → full-wire (4/5 + 1 documented audit_log delegation)
+- **Universal-schema "validate by mapping" thesis mechanically demonstrated for both NS domains** — reverse exporters (revenue-rec #26 + recon #22) read frozen `sourcePayload`/`rawPayload` back + `diffNsRevenueExports`/`diffNsReconExports` helpers prove semantic-equality roundtrip
+- Substrate accepts NetSuite data: 17 new companion PRs, 5 UI surfaces, 117 new tests (was 12/5/98 earlier today)
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -413,8 +415,8 @@ v2.0 procedure; merge order is documented in `docs/MERGE_ORDER.md`
 
 ### Remaining substantive backlog (post-2026-06-05)
 - **fa-amort attribution wire-up** — full closure of deficiency #25 requires schema additions (`createdBy` on FixedAsset; `acceptedBy`/`rejectedBy` on AiAssetSuggestion; a DepreciationRun audit table). The honest-zero helper today delegates to ledger-core's audit_log; trigger to close is "fa-amort grows data the audit_log can't capture" (e.g., AI capex-decision audit).
-- **revenue-rec AI-decision schema for AiExtractionSuggestion** — closes deficiency #26 fully. The schema mirror is done (PR #21); just needs `acceptedBy String? @db.Uuid` + `rejectedBy String? @db.Uuid` columns wired through `approveExtractionAction`. ~1 day.
-- **NS reverse exporters** — both revenue-rec and recon have the lineage-triple infrastructure (`sourceSystem`/`sourceRecordType`/`sourceRecordId`/`sourcePayload`) but no reverse exporter that replays it. ~2 days each. Required for the universal-schema "roundtrip proof" thesis (ledger-core's QBO/NS mappers already have this pattern).
+- ~~**revenue-rec AI-decision schema for AiExtractionSuggestion**~~ — **SHIPPED 2026-06-05 evening** as a 3-PR closure arc (revenue-rec #21 + #24 + #25). v2.1 deficiency #26 marked **Closed** in v2.2 deficiency log (ledger-core PR #54). Helper flipped from hybrid (2/5 wired) → full-wire (4/5 wired + 1 documented audit_log delegation). The remaining 1 (`revenueContractsCreated`) is genuinely delegated to ledger-core's audit_log; AI-extraction-approved contracts surface via `approveExtractionAction`'s audit emission.
+- ~~**NS reverse exporters**~~ — **SHIPPED 2026-06-05 evening** for BOTH NS domains: revenue-rec #26 + recon #22. Reads `sourcePayload`/`rawPayload` back + reconstructs the original NS bundle; `diffNsRevenueExports` / `diffNsReconExports` helpers prove semantic-equality roundtrip. **The universal-schema "validate by mapping" thesis is now mechanically demonstrated for both NS domains.** Lineage break safety: 3 explicit failure modes handled gracefully (non-NS filename → skipped, JSON.parse failure → counted, non-`NS-BANK-` prefix → skipped + warned). Documented exemptions: `exported_at` + template `rec_method` not recoverable + `(unresolved)` placeholder when GL Account / Subsidiary weren't bootstrapped via NS.
 - **OVER_TIME_USAGE + OVER_TIME_MILESTONE recognition implementations** — `schedule.ts` accepts the patterns (PR #20) and returns empty; the actual usage-event-driven + milestone-driven recognition engine is ~2 days each.
 
 ### Substrate notes (still current)
