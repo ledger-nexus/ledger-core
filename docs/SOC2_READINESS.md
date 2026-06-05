@@ -1,7 +1,7 @@
 # SOC 2 readiness assessment — ledger-nexus portfolio
 
 **Version:** 2.3 · **Last updated:** 2026-06-05 (evening) · **Owner:** Founder
-**Status:** ≈ 77% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
+**Status:** ≈ 78% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
 **Scope:** Type 1 readiness across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`).
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022) — Security TSC + Common Criteria CC1–CC9; Availability, Processing Integrity, Confidentiality, Privacy TSCs as in scope.
 
@@ -203,6 +203,27 @@ integrations [#17](https://github.com/ledger-nexus/integrations/pull/17) + fa-am
 learning:** task-completion attestations need to be backed by
 merged-to-main verification, not just local "done." Closed-state
 count: 11 → 12 (the only Medium closed today).
+
+**Continuation of the same sweep closed deficiency #18 (SECURITY.md
+at repo root) and opened new #27 (task-attestation drift class).**
+Verification of SECURITY.md presence confirmed the file IS shipped
+on all 5 repos with identical content (Task #60 actually landed —
+only the deficiency-log status was stale). The same sweep surfaced
+the 3rd falsely-completed-task case of the day, which crystallized
+the pattern into a standing meta-control: **new deficiency #27
+(Medium) — "Task-completion attestations diverge from `main`."**
+The new row's mitigation today is process change (every task
+closure cites a merged PR URL); future automation (nightly
+cross-check of task log vs. merged-to-main reality) flips it to
+Closed. **This is the CC4 monitoring loop working as designed** —
+discovery (sweep), classification (3 cases → 1 pattern),
+remediation (process change), evidence trail (new deficiency
+row), follow-through (future automation).
+
+Score-band delta after this entire late-evening sweep:
+  - Closed: 11 → 13 (#13 + #18); +18%
+  - Open:    9 →  8 (#13/#18 out, #27 in — net -1)
+  - Total:  23 → 24 (new #27 added)
 
 ---
 
