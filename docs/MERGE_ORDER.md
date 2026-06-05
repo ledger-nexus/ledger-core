@@ -4,8 +4,9 @@
 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
-evening **13th adversarial pass** added **2 more**,
-for **71+ total** across the 5-repo portfolio. This file documents
+evening **13th adversarial pass** added **2 more**; the **#13 portfolio-wide
+sweep** added **2 more**,
+for **73+ total** across the 5-repo portfolio. This file documents
 the dependency order so the founder can land them efficiently when
 ready.
 
@@ -56,15 +57,16 @@ The 2026-06-05 work landed two full NetSuite ingestion flows + closed deficiency
 
 After all merge: the substrate accepts NetSuite data for revenue arrangements + bank reconciliation, with cross-repo lineage triple architecturally proven against real Postgres; revenue-rec attribution helper is 4/5 wired + 1 documented audit_log delegation.
 
-### TL;DR — evening capstone (6 more PRs, ~20 minutes)
+### TL;DR — evening capstone (8 more PRs, ~25 minutes)
 
-The 2026-06-05 evening session closed deficiency #25 (fa-amort attribution) + ran the 13th adversarial pass on BOTH same-day closure arcs. Merge the **6 PRs** in this order:
+The 2026-06-05 evening session closed deficiency #25 (fa-amort attribution), ran the 13th adversarial pass on BOTH same-day closure arcs, AND closed deficiency #13 portfolio-wide after discovering tasks #63 + #81 had been falsely marked complete. Merge the **8 PRs** in this order:
 
 1. **fa-amort #25 closure arc** (Group O): fa-amort #18 → #19 (stack)
 2. **13th adversarial-pass closures** (Group Q): fa-amort #20 (on top of #19) + revenue-rec #27 (on top of #25 — independent of Group O)
-3. **Doc-triangle 2026-06-05 evening v2.3** (Group P): **#58, #59** (after Groups O + Q land; doc PRs include footnote amendments from the 13th-pass closures)
+3. **#13 portfolio-wide sweep** (Group R): recon #23 + integrations #17 (both independent — can land in parallel with Groups O/Q)
+4. **Doc-triangle 2026-06-05 evening v2.3** (Group P): **#58, #59** (after Groups O + Q + R land; doc PRs include footnote amendments from BOTH the 13th-pass closures AND the #13 portfolio-wide sweep)
 
-After all merge: fa-amort attribution helper is 5/5 wired + revenue-rec helper is honest at 4/5 + 1 honest-zero; **both DSR attribution schema-gap items (#25 + #26) are Closed across the portfolio**; readiness ticks 75% → 76%; **13th adversarial pass is fully captured in CC4 monitoring evidence**.
+After all merge: fa-amort attribution helper is 5/5 wired + revenue-rec helper is honest at 4/5 + 1 honest-zero; **both DSR attribution schema-gap items (#25 + #26) are Closed**; **#13 closed across all 5 repos** (`npx tsc --noEmit` clean portfolio-wide); readiness ticks 75% → 77%; **13th adversarial pass + #13 sweep both fully captured in CC4 monitoring evidence**.
 
 ---
 
@@ -337,6 +339,21 @@ Captures the evening 2026-06-05 closure in the canonical SOC 2 evidence chain. B
 |---|---|---|
 | **#58** | `control-deficiency-log.md` v2.2 → v2.3 — closes #25; closed-state goes 10 → 11 (amended with H2-rev footnote on #26) | Group O + Group Q |
 | **#59** | `SOC2_READINESS.md` v2.2 → v2.3 — Delta — 2026-06-05 evening section; readiness 75% → 76% (amended with H2-rev footnote on revenue-rec row) | Group O + Group Q + PR #58 |
+
+---
+
+## Group R — #13 portfolio-wide sweep (2026-06-05 late evening, 2 PRs)
+
+Closes deficiency **#13** (TS18049 in middleware mock tests) across the 2 remaining companion repos. The fa-amort + revenue-rec halves were bonus cleanup inside Group O (fa-amort #18) and Group Q (revenue-rec #27). These 2 close the recon + integrations halves.
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| (a) | recon **#23** | `tsc-middleware-test-13` | `main` | 5-line `expect(res!.status)` non-null assertion fix. tsc clean after. |
+| (b) | integrations **#17** | `tsc-middleware-test-13` | `main` | Same 5-line fix. tsc clean after. |
+
+After both merge: `npx tsc --noEmit` clean across all 5 repos for the first time. Deficiency #13 fully Closed; closed-state count 11 → 12. **Independent of all other groups** — can merge in any order vs. Groups K-Q.
+
+**CC4 process learning embedded in the closure narrative:** tasks #63 + #81 had been marked completed in the ledger-core task log but never actually landed on `main` in any repo. Going forward, task completion requires merged-to-main verification, not just local "done." Captured in the v2.3 deficiency-log change log (PR #58 third commit).
 
 ---
 
