@@ -1,7 +1,7 @@
 # SOC 2 readiness assessment — ledger-nexus portfolio
 
-**Version:** 2.2 · **Last updated:** 2026-06-05 · **Owner:** Founder
-**Status:** ≈ 75% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
+**Version:** 2.3 · **Last updated:** 2026-06-05 (evening) · **Owner:** Founder
+**Status:** ≈ 76% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
 **Scope:** Type 1 readiness across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`).
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022) — Security TSC + Common Criteria CC1–CC9; Availability, Processing Integrity, Confidentiality, Privacy TSCs as in scope.
 
@@ -131,6 +131,47 @@ trigger gates** (DR drill, signed DPAs, second employee) and the
 **Type 2 6-month observation window**. The substrate strength now
 justifies the % we already claimed; what's missing is operational
 runway and time.
+
+---
+
+## Delta — 2026-06-05 evening (v2.3)
+
+**Deficiency #25 fully closed via 2-PR arc on fa-amort.**
+
+Same playbook as the v2.2 morning closure of #26, applied to the
+remaining hybrid/honest-zero attribution path:
+
+| Step | PR | What |
+|---|---|---|
+| (a) Schema additions + mirror gap | fa-amort [#18](https://github.com/ledger-nexus/fa-amort/pull/18) | `FixedAsset.createdBy` / `.disposedBy`, `FixedAssetBookAttributes.lastRunBy` / `.lastRunAt`, `AiAssetSuggestion.acceptedBy/At` / `.rejectedBy/At`. **Also closes the `FixedAsset.tenantId` Prisma-mirror gap** (parallel to revenue-rec PR #21's `RevenueContract.tenantId` closure). Wires `runDepreciationAction` to stamp `lastRunBy`/`lastRunAt` post-success. Idempotent migration: `2026-06-05-attribution-schema.sql`. +6 tests vs real Postgres. |
+| (b) Helper full-wire | fa-amort [#19](https://github.com/ledger-nexus/fa-amort/pull/19) | `fa-attribution.ts` flips from honest-zero → **5/5 wired**. 5 `COUNT(*)` queries in parallel. +3 integration tests against real Postgres + rewritten stub tests (74/74 total). Pre-migration + NetSuite-imported rows correctly excluded (NULL → no human actor → uncounted). |
+
+Result: fa-amort's DSR attribution helper now returns real counts
+for **all 5 fields**. **v2.3 deficiency log
+(ledger-core PR #58)** marks #25 Closed; closed-state count goes
+10 → 11.
+
+**Privacy TSC attribution-completeness — closed across the portfolio:**
+
+| Repo | Helper coverage | Disposition |
+|---|---|---|
+| integrations | 1/1 wired | Closed (2026-06-04) |
+| recon | 5/5 wired | Closed (2026-06-04) |
+| **fa-amort** | **5/5 wired** | **Closed (2026-06-05 evening — this delta)** |
+| revenue-rec | 4/5 + 1 audit_log | Closed (2026-06-05 morning) |
+
+Both DSR attribution schema-gap items (#25 + #26) are now Closed.
+The Privacy TSC commitment that v2.1 marked "mechanically +
+procedurally complete" is now also **column-level complete** —
+the attribution helpers no longer rely on audit_log delegation for
+data that should live on the owned tables.
+
+**Readiness percentage:** ticks from `≈75%` to `≈76%`. Two
+Low-severity Closed in two days; the remaining 24% is still
+dominated by customer-trigger gates (DR drill, signed DPAs, second
+employee) and the Type 2 6-month observation window. The
+attribution-completeness milestone is the last evidence-layer
+substantive move available without operational triggers.
 
 ---
 
