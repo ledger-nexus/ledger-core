@@ -27,14 +27,24 @@ This is ~20-30 hours of focused work across multiple PRs. The guide makes it shi
 
 Migrate in order of simplicity → complexity. Each PR migrates one Server Action (or a small cluster) so review stays manageable.
 
-### Group A — Trivial (21-50 lines, single query)
+### Group A — Trivial / no-op (re-verified 2026-06-05 night)
 
-1. `set-scope.ts` — sets a cookie; one query
-2. `mark-notifications-read.ts` — one `updateMany`
-3. `set-current-user.ts` — user-membership lookup
-4. `set-tenant.ts` — membership verify + cookie
+**Re-verification: `set-scope.ts` has ZERO prisma calls — it only writes a cookie and calls `revalidatePath`. It should NOT be migrated; no DB work occurs.** Similar audit findings for the others below; the actual "migration-needed" set is smaller than the initial guide enumerated.
 
-**Per-PR effort:** 30 min each. Migrate as a single PR labeled "RLS 2b — Group A trivial Server Actions."
+Per-action prisma-call audit:
+
+| Action | Direct prisma calls | Helper-passed prisma | Migration needed? |
+|---|---|---|---|
+| `set-scope.ts` | 0 | 0 | **No** — cookie + revalidatePath only |
+| `set-current-user.ts` | 0 | 0 (membership read via helper) | Audit helper first |
+| `set-tenant.ts` | 0 | helper call | Audit helper first |
+| `mark-notifications-read.ts` | 0 | `markRead(prisma, ...)` | **Yes** — widen `markRead` helper |
+
+**Lesson:** the "21 callsites" estimate in the original guide is an upper bound. Actual migration scope is smaller because several actions are pure UI state (cookies) with no DB work.
+
+**Pre-migration audit step (NEW, recommended):** run `grep -c "prisma\." src/app/actions/*.ts` to get direct-call counts. Then `grep -c "markRead\|postJournalEntry\|reassignTo\|widening-candidate-helpers" src/app/actions/*.ts` for helper-passed counts. Group A should be the actions with **0 direct + 0 helper** calls — these are pure UI state and need NO migration.
+
+**Per-PR effort:** 30 min each for the genuinely-needs-migration actions in this group.
 
 ### Group B — Single-table mutations (50-100 lines)
 
@@ -261,6 +271,6 @@ After Phase 2b lands, Phase 3 becomes safe to ship:
 | D — Complex | 3 | 7 hours (3 PRs) |
 | Internal HTTP | 3 | 4 hours (3 PRs) |
 | Helper widening (precursor) | — | 2 hours (1 PR) |
-| **Total** | **21 callsites** | **~28 hours / 13-16 PRs** |
+| **Total** | **21 callsites (upper bound; actual smaller per Group A audit)** | **~28 hours / 13-16 PRs (upper bound)** |
 
 This is a planned sprint, not a one-turn migration. Schedule when the operator has continuous focus + time for incremental review.
