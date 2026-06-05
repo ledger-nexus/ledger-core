@@ -190,6 +190,63 @@ export async function helper(
 ) { ... }
 ```
 
+#### Caveat: helpers that open their own `$transaction` cannot be naively widened
+
+A first-wave widening attempt against `src/lib/accounting/sub-ledgers/{ar,ap}.ts`
+and `src/lib/ownership/reassign.ts` (PR #71, reverted same-day) surfaced a
+constraint the guide's original section missed:
+
+`Prisma.TransactionClient` has no `$transaction` method. Any helper that internally
+calls `prisma.$transaction(async (tx) => ...)` cannot accept a `TransactionClient`
+— `tsc` correctly rejects it (`TS2339: Property '$transaction' does not exist`).
+There is no nested-transaction escape hatch in Prisma.
+
+This splits "widenable helpers" into two classes:
+
+- **Class W (trivially widenable)** — single-statement helpers like `markRead`
+  (PR #70's reference). Body is one `updateMany`/`findMany`/etc. Widening is
+  one-line, zero risk. Migrate these first.
+- **Class T (transaction-owning)** — helpers that wrap multi-step writes in
+  `prisma.$transaction` for atomicity (e.g., `applyArPayment`, `applyApPayment`,
+  `reassignRecord`, `bulkReassignFromUser`). These must be **refactored before
+  widening**: split into an outer function that opens the transaction + an
+  inner function that runs inside an existing `tx`, then the caller
+  (`withTenantContext`) provides the tx and calls the inner.
+
+Class-T refactor pattern:
+```ts
+// Before — helper owns the transaction
+export async function applyApPayment(prisma: PrismaClient, input: Input) {
+  return prisma.$transaction(async (tx) => {
+    // ... multi-step writes
+  });
+}
+
+// After — split inner/outer; outer keeps the old export for compatibility
+async function applyApPaymentInTx(tx: Prisma.TransactionClient, input: Input) {
+  // ... multi-step writes (same body, tx instead of prisma)
+}
+export async function applyApPayment(prisma: PrismaClient, input: Input) {
+  return prisma.$transaction((tx) => applyApPaymentInTx(tx, input));
+}
+// Server Action calls applyApPaymentInTx directly from inside withTenantContext.
+```
+
+This is non-trivial: each Class-T helper touches multiple tables under invariant
+constraints (AR/AP balance ties, TOCTOU optimistic-concurrency guards). The
+refactor must preserve atomicity semantics exactly — verify with the existing
+integration tests after each split.
+
+**Class-T migrations should be a dedicated PR per helper, not a bulk sweep.**
+The first wave's bulk approach failed precisely because it tried to widen 3
+Class-T helpers in one shot; each needs its own refactor + test pass.
+
+Identifying Class T in advance:
+```bash
+grep -l "prisma.\$transaction\|prisma\.\$transaction" src/lib/**/*.ts
+```
+Any file in the widening candidate list that matches is Class T.
+
 ### Nested transactions
 
 If an action already uses `prisma.$transaction`, nest it inside `withTenantContext`:
@@ -226,7 +283,8 @@ Existing tenant-scope assertions (`expect(party.tenantId).toBe(tenant.id)`) keep
 
 | Pitfall | Symptom | Fix |
 |---|---|---|
-| Helper function accepts only `PrismaClient` | TypeScript error: `tx` isn't assignable | Widen helper signature to `PrismaClient \| TransactionClient` |
+| Helper function accepts only `PrismaClient` (Class W — single-statement) | TypeScript error: `tx` isn't assignable | Widen helper signature to `PrismaClient \| TransactionClient` |
+| Helper opens its own `prisma.$transaction` internally (Class T) | `tsc TS2339: Property '$transaction' does not exist on TransactionClient` after widening | Refactor first: split into inner-takes-tx + outer-opens-tx (see Class T pattern above). Do NOT widen Class T helpers naively. |
 | Action uses `prisma.$transaction` inside `withTenantContext` | Nested-transaction error | Use the outer `tx` directly; drop the inner `$transaction` |
 | Action does NOT have a tenant (boot scripts, demos) | `withTenantContext` throws on empty `tenantId` | Use raw `prisma` for genuinely-system queries; document why with a comment |
 | Action sends notifications to multiple tenants in one call | Single GUC can't cover multiple tenants | Loop with one `withTenantContext` per tenant |
