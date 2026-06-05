@@ -1,15 +1,18 @@
 # Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints
 
-**Updated 2026-06-05 late evening (v4).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-05 even-later evening (v5).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
 evening **13th adversarial pass** added **2 more**; the **#13 portfolio-wide
 sweep** added **2 more**; the late-evening **#18 verification close + new
-#27 meta-deficiency** added **0 code PRs** (entirely doc-only inside the
-existing v2.3 evidence chain), for **73+ total** across the 5-repo portfolio.
-This file documents the dependency order so the founder can land them
-efficiently when ready.
+#27 meta-deficiency** added **0 code PRs** (doc-only); the **#27 verification
+automation** added **2 more** (PR #62 script + PR #63 URL backfill); the
+**risk register v2.2** added **1 more**; the **even-later-evening Sentry shim
+arc** added **4 more** (companion ports closing #5),
+for **82+ total** across the 5-repo portfolio. This file documents
+the dependency order so the founder can land them efficiently when
+ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
@@ -340,6 +343,23 @@ Captures the evening 2026-06-05 closure in the canonical SOC 2 evidence chain. B
 |---|---|---|
 | **#58** | `control-deficiency-log.md` v2.2 → v2.3 — closes #25; closed-state goes 10 → 11 (amended with H2-rev footnote on #26) | Group O + Group Q |
 | **#59** | `SOC2_READINESS.md` v2.2 → v2.3 — Delta — 2026-06-05 evening section; readiness 75% → 76% (amended with H2-rev footnote on revenue-rec row) | Group O + Group Q + PR #58 |
+
+---
+
+## Group S — Sentry shim portfolio-wide (2026-06-05 even-later evening, 4 PRs)
+
+Closes deficiency **#5** (No Sentry / no error tracking) at the code layer across all 4 companion repos. After all 4 PRs merge + the paid DSN gets provisioned (operational, not code), the v2.3 deficiency-log row flips Remediated → Closed.
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| (a) | fa-amort **#21** | `monitoring-shim` | `main` | Ports the canonical ledger-core PR #10 shim. PII allowlist focused on asset descriptions + AI extraction surfaces. 14 dedicated tests. |
+| (b) | recon **#24** | `monitoring-shim` | `main` | Ports the shim. PII allowlist focused on bank fields (accountNumber, bankName, description, rawPayload). 14 dedicated tests. |
+| (c) | revenue-rec **#28** | `monitoring-shim` | `main` | Ports the shim. PII allowlist focused on `rawText` (load-bearing carve-out per data-classification.md), counterpartyName, signatories. 14 dedicated tests. |
+| (d) | integrations **#18** | `monitoring-shim` | `main` | **Highest-stakes port** — `credentialsJson` + `accessToken` + `publicToken` + `rawRecord` allowlist. A leaked OAuth token here is a Critical incident. 14 dedicated tests pin `"plk-secret-abcdef-12345"` cannot reach console. |
+
+All 4 PRs are independent (each based on its repo's `main`). Can merge in any order.
+
+After all 4 merge: `captureError()` + `captureMessage()` exist in every companion repo with PII redaction running before every emit, console fallback when DSN absent. This is the **first Medium-severity deficiency closed by genuine new code this session.**
 
 ---
 
