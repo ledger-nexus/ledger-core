@@ -1,10 +1,11 @@
-# Merge order — 2026-05-25 → 2026-06-04 SOC 2 hardening sprint + continuation
+# Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints
 
-**Updated 2026-06-04.** The sprint (2026-05-25 → 2026-06-03) left 35
-open PRs; the continuation arc (2026-06-04, this same docs/SOC2_
-hardening session) added **15 more**, for **50+ total** across the
-5-repo portfolio. This file documents the dependency order so the
-founder can land them efficiently when ready.
+**Updated 2026-06-05.** The sprint (2026-05-25 → 2026-06-03) left 35
+open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
+the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**,
+for **65+ total** across the 5-repo portfolio. This file documents
+the dependency order so the founder can land them efficiently when
+ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
@@ -41,6 +42,17 @@ Merge the **10 DSR-loop PRs** in this order:
 
 Then the three docs PRs (Group J: **#48, #49, #50**) to reflect closure
 in the SOC 2 evidence chain.
+
+### TL;DR — if you have another 30 minutes (the substantive engineering arcs)
+
+The 2026-06-05 work landed two full NetSuite ingestion flows + closed deficiency #26 end-to-end. Merge the **15 PRs** in this order:
+
+1. **revenue-rec NS sprint** (Group K): revenue-rec #17 → #18 → #19 → #21 → #22 → #23 (stack). revenue-rec #20 is independent — can interleave.
+2. **recon NS sprint** (Group L): recon #17 → #18 → #19 → #20 → #21 (stack)
+3. **Deficiency #26 closure remainder** (Group M.b, M.c): revenue-rec #24 → #25 (after Group K's #21 lands)
+4. **Doc-triangle 2026-06-05** (Group N): **#53, #54, #55** to reflect closure in the SOC 2 evidence chain
+
+After all merge: the substrate accepts NetSuite data for revenue arrangements + bank reconciliation, with cross-repo lineage triple architecturally proven against real Postgres; revenue-rec attribution helper is 4/5 wired + 1 documented audit_log delegation.
 
 ---
 
@@ -232,6 +244,66 @@ Captures today's work in the canonical SOC 2 evidence chain. All independent doc
 
 ---
 
+## Group K — revenue-rec NetSuite revenue-arrangement sprint (2026-06-05, 7 PRs end-to-end)
+
+Shipped 2026-06-05 as a 5-layer end-to-end sprint per the validator backlog (ledger-core PR #39). **Merge in stack order** — each PR base-branches on the previous.
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| 1 | revenue-rec **#17** | `po-schema-additions` | `main` | ASC 606 ¶77+¶78 schema: `allocatedAmount` + `allocationMethod` + `fairValueMethod` + `quantity` on `PerformanceObligation` |
+| 2 | revenue-rec **#18** | `netsuite-mapper-foundation` | #17 | Types + pure mappers + 22 unit tests |
+| 3 | revenue-rec **#19** | `netsuite-mapper-import` | #18 | Orchestrator + 10 mocked-Prisma tests |
+| 4 | revenue-rec **#20** | `schedule-usage-milestone-accept` | `main` | `schedule.ts` accepts USAGE + MILESTONE (independent of the stack; can merge first) |
+| 5 | revenue-rec **#21** | `schema-mirror-tenantid` | #19 | `RevenueContract.tenantId` + `Party.tenantId` schema-mirror + 3 integration tests vs real Postgres |
+| 6 | revenue-rec **#22** | `ns-revenue-server-action` | #21 | Server Action wrapper + 11 unit tests |
+| 7 | revenue-rec **#23** | `ns-import-ui` | #22 | UI page at `/import/netsuite` + sidebar link |
+
+**Sprint output:** ~3000 lines, +54 tests (42 → 96), cross-repo lineage triple architecturally proven.
+
+---
+
+## Group L — recon NetSuite bank-reconciliation sprint (2026-06-05, 5 PRs end-to-end)
+
+Shipped 2026-06-05 as a 5-layer end-to-end sprint per the validator backlog (ledger-core PR #42). **Merge in stack order.**
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| 1 | recon **#17** | `netsuite-mapper-foundation` | `main` | Types + pure mappers + 19 unit tests. **Load-bearing translation rule** — NS denormalized `matched_transaction_id` → recon `ReconciliationMatch { source: MANUAL, status: APPROVED }` |
+| 2 | recon **#18** | `netsuite-mapper-import` | #17 | Orchestrator + 10 mocked-Prisma tests. **Cross-repo lineage-triple lookup** that resolves `matched_transaction_id` → ledger-core `JournalLine.id` |
+| 3 | recon **#19** | `netsuite-mapper-integration` | #18 | 4 integration tests vs real Postgres proving the lineage-triple lookup completes end-to-end |
+| 4 | recon **#20** | `ns-recon-server-action` | #19 | Server Action with `prefer BANK-subtype line` heuristic + 11 unit tests |
+| 5 | recon **#21** | `ns-import-ui` | #20 | UI page at `/import/netsuite` with distinctive 8-stat grid (incl. `Matches deferred`) |
+
+**Sprint output:** ~2000 lines, +44 tests (47 → 91), graceful-degradation path proven (line lands when GL doc not yet imported; recoverable later).
+
+---
+
+## Group M — Deficiency #26 closure arc (2026-06-05, 3 PRs)
+
+Closes v2.1 control-deficiency-log entry #26 (revenue-rec attribution schema gap). **Merge in stack order; (a) overlaps with Group K's #21.**
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| (a) | revenue-rec **#21** | `schema-mirror-tenantid` | `netsuite-mapper-import` | (same row as Group K #5 — listed here for the closure narrative) |
+| (b) | revenue-rec **#24** | `ai-extraction-decision-schema` | `main` | `acceptedBy`/`rejectedBy` columns on `AiExtractionSuggestion` + `approveExtractionAction` wired (tenant-safe via `updateMany({id, contractId})`) + 4 integration tests |
+| (c) | revenue-rec **#25** | `rr-attribution-full-wire` | #24 | `rr-attribution.ts` flips from hybrid (2/5) → full-wire (4/5 wired + 1 documented audit_log delegation) |
+
+After all three merge: `revenueRecAttribution` returns real counts for 4 of 5 fields; v2.2 deficiency log marks #26 Closed.
+
+---
+
+## Group N — Doc-triangle catch-up (2026-06-05 continuation, 3 PRs)
+
+Captures 2026-06-05 closures in the canonical SOC 2 evidence chain. All independent doc-only PRs; merge in any order; **prefer late in the day**.
+
+| PR | Doc | Cite source |
+|---|---|---|
+| **#53** | `PROJECT_STATUS.md` — captures both NS sprints + #26 closure arc; cumulative PRs 63+ → 76+ | Groups K + L + M |
+| **#54** | `control-deficiency-log.md` v2.1 → v2.2 — closes #26 (+11% closed-state) | Group M + PR #25 |
+| **#55** | `SOC2_READINESS.md` v2.1 → v2.2 — Delta — 2026-06-05 section; readiness stays 75% (explicitly justified) | PR #54 + Groups K + L |
+
+---
+
 ## Suggested batched merge order
 
 **Day 1 (foundation + encryption stack):**
@@ -255,6 +327,16 @@ Captures today's work in the canonical SOC 2 evidence chain. All independent doc
 10. Group I.3 — 4 companion-repo HTTP endpoints (each stacked on its I.1 base)
 11. Group I.4 — ledger-core PR #47 (e2e smoke + runbook)
 12. Group J — three doc-triangle catch-up PRs (#48, #49, #50)
+
+**Day 6 (revenue-rec NS sprint):**
+13. Group K — revenue-rec PRs #17 → #18 → #19 → #21 → #22 → #23 (stack order)
+14. revenue-rec PR #20 (`schedule.ts` USAGE+MILESTONE) — independent; can merge any time
+
+**Day 7 (recon NS sprint + deficiency #26 closure):**
+15. Group L — recon PRs #17 → #18 → #19 → #20 → #21 (stack order)
+16. Group M.b — revenue-rec PR #24 (decision schema)
+17. Group M.c — revenue-rec PR #25 (helper full-wire)
+18. Group N — three doc-triangle catch-up PRs (#53, #54, #55)
 
 This sequence keeps each day's review surface manageable + each
 day's deploy risk bounded to one logical group of changes.
