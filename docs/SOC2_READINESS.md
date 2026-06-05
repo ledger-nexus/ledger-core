@@ -1,7 +1,7 @@
 # SOC 2 readiness assessment — ledger-nexus portfolio
 
-**Version:** 2.0 · **Last updated:** 2026-06-03 · **Owner:** Founder
-**Status:** ≈ 70% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
+**Version:** 2.1 · **Last updated:** 2026-06-04 · **Owner:** Founder
+**Status:** ≈ 75% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
 **Scope:** Type 1 readiness across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`).
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022) — Security TSC + Common Criteria CC1–CC9; Availability, Processing Integrity, Confidentiality, Privacy TSCs as in scope.
 
@@ -23,6 +23,69 @@ auditor sees the real change-management state.
 - Penetration testing within the prior 12 months (done internally — 3 pen-test passes documented in git history)
 - Formal risk assessment + treatment documentation (have it — `risk-register.md` v2.0)
 - HR controls when employees exist (N/A solo today)
+
+---
+
+## Delta — 2026-06-04 (one day after v2.0 publication)
+
+The hardening sprint closed the policy + foundation gaps. The day
+after publishing v2.0 we shipped four follow-on PR arcs that close
+four additional v2.0 line items:
+
+**Privacy TSC — DSR companion-attribution loop now wired end-to-end.**
+v2.0 listed the DSR procedure and `buildUserDataExport`/`eraseUserPii`
+as Mitigated, but the cross-repo attribution helpers were typed
+stubs that threw `NotImplementedError`. A real DSR would have
+crashed the export. **The 10-PR arc shipped 2026-06-04:**
+
+| Layer | PRs |
+|---|---|
+| **Producer helpers** (4 companion repos) | integrations [#14](https://github.com/ledger-nexus/integrations/pull/14), recon [#15](https://github.com/ledger-nexus/recon/pull/15), fa-amort [#15](https://github.com/ledger-nexus/fa-amort/pull/15), revenue-rec [#14](https://github.com/ledger-nexus/revenue-rec/pull/14) |
+| **Consumer** in ledger-core | [#46](https://github.com/ledger-nexus/ledger-core/pull/46) `fetchCompanionAttribution()` + bundle v1→v2 |
+| **HTTP endpoints** (4 companion repos) | integrations [#15](https://github.com/ledger-nexus/integrations/pull/15), recon [#16](https://github.com/ledger-nexus/recon/pull/16), fa-amort [#16](https://github.com/ledger-nexus/fa-amort/pull/16), revenue-rec [#15](https://github.com/ledger-nexus/revenue-rec/pull/15) |
+| **E2E verification** | [#47](https://github.com/ledger-nexus/ledger-core/pull/47) + `docs/runbooks/dsr-e2e-test.md` |
+
+Three test layers (unit + integration vs real Postgres + opt-in
+cross-process smoke). Bundle has per-companion `{ reachable, data? |
+error? }` flags so partial outages produce partial-but-complete
+bundles. **The Privacy TSC commitment is mechanically + procedurally
+complete.**
+
+**CC2.2 external communication — `.well-known/security.txt` deployed.**
+Per Next.js repo (PR #33). Includes responsible-disclosure SLA +
+`security@` contact placeholder. Closes deficiency #17.
+
+**CC8 change management — schema-drift CI gate wired.**
+`.github/workflows/schema-fingerprint.yml` runs on every PR
+(ledger-core PR #34). Fails closed if the Prisma schema fingerprint
+drifts without a corresponding migration commit. Closes deficiency
+#21. The `schemaFingerprint` helper was shipped in the sprint; this
+PR added the per-PR enforcement gate.
+
+**CC9 supply chain — SBOM in CI.**
+CycloneDX SBOM generation on every PR + signed release artifact
+(ledger-core PR #35). The SBOM is a `docs/sbom-{YYYY-MM-DD}.json`
+file the auditor can pull. Complements deficiency #4 (npm pinning)
+— pinning is the prevention layer; the SBOM is the visibility layer.
+Closes deficiency #19.
+
+**Deficiency log v2.0 → v2.1 (PR #48).** Closed-state count went
+from 5 to 9 (+80%). Two new low-severity entries (#25 fa-amort,
+#26 revenue-rec) document the **known** schema gaps in the two
+hybrid/honest-zero attribution paths — both have compensating
+controls (audit_log delegation for fa-amort; documented in-file).
+No new Critical or High deficiencies introduced.
+
+**Readiness percentage:** v2.0 stated `≈70% to Type 1`. With the
+Privacy TSC wiring complete + 3 v2.0 deficiencies closed + 2 new CI
+gates in place, the assessment moves to `≈75%`. The remaining 25%
+to full Type 1 audit-ready is dominated by **customer-trigger gates**:
+- First paying customer signs → Neon Launch + DR drill + audit-log replication (closes deficiencies #3 + #9; risks #19 + #6)
+- First customer needing negotiated terms OR first EU customer → signed DPAs with Tier 1 vendors (closes deficiency #15)
+- Second employee → separate Security Officer role + quarterly access review with 2 participants
+
+**Type 2 (the 6-month observation window) remains the dominant
+remaining gap** — no amount of further code can compress it.
 
 ---
 
@@ -88,15 +151,16 @@ didn't before**. Per-criterion details below.
 - Data classification: `docs/policies/data-classification.md` (per column)
 - Portfolio-wide map: `docs/architecture/portfolio-data-locations.md` (PR #14)
 
-### Privacy TSC — **was not in scope; now Mitigated**.
+### Privacy TSC — **was not in scope; now Mitigated end-to-end** (2026-06-04 update).
 
 - Per-column classification table (CONFIDENTIAL / RESTRICTED tiers)
 - DSR procedure (PR #13) covering GDPR Art. 15/17/16/20/21 + CPRA equivalents
 - Executable code: `src/lib/privacy/user-data.ts` (`buildUserDataExport`, `eraseUserPii`)
+- **Cross-repo attribution wired end-to-end** (2026-06-04, 10-PR arc — see Delta section): producer helpers in 4 companion repos, consumer + bundle schema v2 in ledger-core, token-gated HTTP endpoints, opt-in e2e smoke test + runbook
 - UI: `/admin/data-subject-requests`
 - Automated retention engine (PR #12) — `src/lib/retention/policies.ts` + `/api/cron/retention`
 - 4 companion-repo procedure mirrors (4 separate PRs)
-- Subprocessor disclosure (vendor-management v2.0 — `/legal/subprocessors`)
+- Subprocessor disclosure (vendor-management v2.0 — `/legal/subprocessors`; **note**: deferred to first customer-facing surface — see deficiency #16/#23)
 
 ---
 
@@ -127,7 +191,8 @@ didn't before**. Per-criterion details below.
 | `.claude/skills/soc2/SKILL.md` surfaces the SOC 2 framework into every Claude session — internal communication to the AI contributor | **Mitigated** |
 | `CLAUDE.md` SOC 2 section is the auto-loaded contract for every contributor | **Mitigated** |
 | Per-repo CLAUDE.md mirrors hold the same SOC 2 section | **Mitigated** |
-| External communication: `/legal/subprocessors`, `/legal/privacy`, `/legal/security` on marketing site | **Partial** (`/legal/subprocessors` page action item from PR #19) |
+| External communication: `/legal/subprocessors`, `/legal/privacy`, `/legal/security` on marketing site | **Partial** (`/legal/subprocessors` page action item from PR #19 — deferred per deficiency #23 until ledger-nexus has a customer-facing surface) |
+| RFC 9116 `/.well-known/security.txt` per repo (PR #33) — responsible-disclosure SLA + `security@` contact | **Mitigated** (2026-06-04 — closes deficiency #17) |
 
 ---
 
@@ -154,7 +219,7 @@ rows.
 
 | Evidence | Status |
 |---|---|
-| `docs/policies/control-deficiency-log.md` (v1.0 — operating ledger of identified failures) | **Mitigated** |
+| `docs/policies/control-deficiency-log.md` v2.1 (PR #48) — 23 deficiencies tracked; 9 Closed (+80% from v2.0); no new Critical/High in v2.1 | **Mitigated** |
 | `docs/policies/bypass-log.md` (skeleton, PR #16) | **Mitigated** |
 | `audit_log` append-only Postgres RULE — every privileged action emits a row that the auditor can query | **Mitigated** |
 | Annual review cadence documented per-policy + tabletop cadence in incident-response.md v2.0 | **Mitigated** |
@@ -226,7 +291,7 @@ with file path + bypass policy.
 | `/soc2-check` per diff | `.claude/commands/soc2-check.md` | Partial — soft-gate today |
 | Code Owner approval | `.github/CODEOWNERS` | **Mitigated** (solo-dev compensating controls documented) |
 | Linear history + signed commits | GitHub | **Mitigated** |
-| Schema-fingerprint drift detection | `schemaFingerprint` in `src/lib/soc2/index.ts` surfaced via `/api/health` | **Mitigated** |
+| Schema-fingerprint drift detection | `schemaFingerprint` in `src/lib/soc2/index.ts` + `.github/workflows/schema-fingerprint.yml` per-PR enforcement (PR #34) | **Mitigated** (2026-06-04 — closes deficiency #21) |
 | Bypass log | `docs/policies/bypass-log.md` (PR #16) | **Mitigated** |
 
 ---
@@ -243,6 +308,13 @@ inventory, 3-tier classification, subprocessor disclosure, procurement
 - **Tier 2 (CONFIDENTIAL handlers):** Anthropic, Stripe, Resend
 - **Tier 3 (INTERNAL handlers):** GitHub, Sentry (pending)
 - **Status:** **Mitigated**, with the honest gap that every Tier 1 vendor has a clickthrough DPA today (signed DPA trigger: first customer requiring negotiated terms or first EU customer)
+
+**Supply-chain visibility (2026-06-04 update):** CycloneDX SBOM
+generation wired in CI per ledger-core PR #35 — every PR produces a
+machine-readable inventory of every dep version that ships, and the
+release pipeline signs the SBOM artifact. Complements npm pinning
+(deficiency #4 — Partial): pinning is the prevention layer, the SBOM
+is the visibility layer. **Closes deficiency #19.**
 
 ---
 
