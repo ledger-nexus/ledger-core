@@ -1,7 +1,7 @@
 # SOC 2 readiness assessment — ledger-nexus portfolio
 
 **Version:** 2.3 · **Last updated:** 2026-06-05 (evening) · **Owner:** Founder
-**Status:** ≈ 76% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
+**Status:** ≈ 77% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
 **Scope:** Type 1 readiness across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`).
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022) — Security TSC + Common Criteria CC1–CC9; Availability, Processing Integrity, Confidentiality, Privacy TSCs as in scope.
 
@@ -192,6 +192,17 @@ cross-tenant doc), several LOWs. All resolved. CC4.1 (monitoring)
 evidence: the discovery + closure of all 13 pass findings was
 captured in the deficiency log change-log (v2.3 entry) the same
 day as the closure arc landed.
+
+**Late-evening sweep closed deficiency #13 portfolio-wide
+(TS18049 in all 4 companion middleware tests).** Tasks #63 + #81
+had been marked completed but never actually landed on `main` in
+any companion repo — discovered during a verification sweep and
+closed via 4 trivially-reviewable companion PRs (recon [#23](https://github.com/ledger-nexus/recon/pull/23) +
+integrations [#17](https://github.com/ledger-nexus/integrations/pull/17) + fa-amort #18 bonus + revenue-rec #27 bonus).
+`npx tsc --noEmit` now clean across all 5 repos. **CC4 process
+learning:** task-completion attestations need to be backed by
+merged-to-main verification, not just local "done." Closed-state
+count: 11 → 12 (the only Medium closed today).
 
 ---
 
