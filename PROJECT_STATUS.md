@@ -6,9 +6,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-03 (continuation)
+**Last updated:** 2026-06-04 (full continuation arc)
 
-**Current state:** **SOC 2 hardening sprint + validator-to-shipping cycle complete — Type 1 audit-ready.**
+**Current state:** **SOC 2 hardening sprint + DSR end-to-end + portfolio tsc-clean — Type 1 audit-ready ≈75%.**
 
 The portfolio architecture (v1.0) was complete on 2026-05-21. The
 2026-05-25 → 2026-06-03 sprint added the SOC 2 layer the v1.0
@@ -31,12 +31,20 @@ in the same session: fa-amort PR #14 (5 commits, 63 new tests, 121
 total) and ledger-core PRs #43-#45 (bootstrap mappers + composition
 helper + 11 integration tests vs real Neon).
 
-Cumulative: **46+ reviewable PRs across the 5-repo portfolio** (32 in
-ledger-core: #10-#45, plus per-companion-repo DSR + SECURITY.md +
-security.txt + fa-amort PR #14). `SOC2_READINESS.md` v2.0 stands at
-`≈70% to Type 1 audit-ready, 0 CRITICAL gaps` (down from `0-10% to
-Type 2, 8 CRITICAL` in v1.0). The 6-month observation window is the
-next gate for Type 2.
+Cumulative: **63+ reviewable PRs across the 5-repo portfolio**
+(was 46+; +17 from the 2026-06-04 continuation arc: 10-PR DSR loop +
+4 doc deltas + 3 portfolio-wide tsc fixes). `SOC2_READINESS.md` v2.1
+stands at `≈75% to Type 1 audit-ready, 0 CRITICAL gaps`. The
+remaining 25% is dominated by **customer-trigger gates** (first
+paying customer for DR drill, first EU customer for signed DPAs,
+second employee for split Security Officer role) + the **Type 2
+6-month observation window** — both explicitly called out in the
+v2.1 readiness assessment.
+
+**Portfolio-wide milestones reached 2026-06-04:**
+- `tsc --noEmit` clean across 5/5 repos (closes deficiency #13)
+- DSR attribution loop wired end-to-end (closes deficiency #24)
+- Three CI gates live (schema-fingerprint, SBOM, security.txt deploy)
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -137,6 +145,24 @@ next gate for Type 2.
 - [x] Bootstrap mappers (PR #43) — `src/lib/mappers/netsuite/bootstrap.ts` (~530 lines): types + pure mappers + idempotent orchestrators for `Subsidiary` → `LegalEntity`, `AccountingBook` → `Book`, `AccountingPeriod` → `Period`. Code conventions: `NSSUB-{id}`, `NSBOOK-{id}`, `{entityCode}-CAL-{calendarName}`. NetSuite-only fields (`isElimination`, `consolidationMethod`) preserved in `extensions JSONB` per existing pattern.
 - [x] Composition helper (PR #44) — `bootstrap-and-import.ts` (~170 lines): `importFromNsWithBootstrap()` orchestrates subs → books → periods → tx in one call. Resolves `entityCode`/`bookCode`/`fiscalCalendarCode` from `primarySubsidiaryId`/`primaryBookId`. Throws if `primarySubsidiaryId` not in `bootstrap.subsidiaries`.
 - [x] Integration test (PR #45) — 11 tests against real Neon Postgres covering idempotency, namespacing, multi-sub hierarchies, `FiscalCalendar.entityId` per-entity scoping, `BookBasis` enum mapping (unknown → `STATUTORY`), all green in 7s. Uses `getDefaultTenantId(prisma)` helper to satisfy `Tenant.ownerUserId` requirement; cleanup scoped to `NSSUB-ITEST-*` and `NSBOOK-ITESTBOOK-*` prefixes.
+
+### v1.x — DSR end-to-end + portfolio tsc-clean (PRs #46-#51 + 11 companion-repo PRs, 2026-06-04 continuation)
+
+**DSR companion-attribution arc (10 PRs end-to-end):**
+- [x] **Producer helpers** (4 companion repos): integrations `connectionsAttribution` (PR #14 — full wire via `Connection.createdBy`), recon `reconAttribution` (PR #15 — full wire via `BankStatement.uploadedBy` + `ReconciliationMatch.approved/rejectedBy`), fa-amort `faAmortAttribution` (PR #15 — honest-zero; schema gap delegated to ledger-core audit_log), revenue-rec `revenueRecAttribution` (PR #14 — hybrid 2/5 wired)
+- [x] **Consumer** (ledger-core PR #46) — `fetchCompanionAttribution()` + bundle schema v1 → v2 with per-companion `{ reachable, data? | error? }` wrapper; 5s `AbortController` timeout per companion; failure-tolerant — partial outages produce partial-but-complete bundles
+- [x] **HTTP endpoints** (4 companion repos) — token-gated `POST /api/internal/dsr/attribution` per repo, mirrors recon's `/api/internal/bank-lines` envelope (503 fail-closed / 401 constant-time / 400 / 500 / 405-GET); integrations #15, recon #16, fa-amort #16, revenue-rec #15
+- [x] **E2E verification** (ledger-core PR #47) — opt-in cross-process smoke test gated by `E2E_DSR_TEST=1` + `INTERNAL_API_TOKEN`; asserts schemaVersion 2 + every companion `reachable: true` + HARD INVARIANTS (no `credentials`/`accesstoken`/`rawtext`/`rawpayload` substrings); includes `docs/runbooks/dsr-e2e-test.md` 6-terminal operator guide + failure triage
+- [x] Total: ~60 new tests across three layers (unit + integration vs real Postgres + opt-in smoke). Privacy TSC commitment now mechanically + procedurally complete.
+
+**Doc-triangle catch-up (PRs #48-#51):**
+- [x] `control-deficiency-log.md` v2.0 → v2.1 (PR #48) — closes #17 / #19 / #21 with PR references + adds DSR arc closure #24 + 2 new low-severity entries (#25 fa-amort schema gap, #26 revenue-rec schema gap, both documented compensating controls). Closed-state count: 5 → 9 (+80%). No new Critical or High.
+- [x] `SOC2_READINESS.md` v2.0 → v2.1 (PR #49) — readiness `≈70%` → `≈75%`. Delta section at top with 10-PR DSR table + four closures (Privacy TSC, CC2.2 security.txt, CC8 schema-fingerprint CI, CC9 SBOM). Remaining 25% dominated by **customer-trigger gates** + Type 2 6-month observation window (both explicit).
+- [x] `risk-register.md` v2.0 → v2.1 (PR #50) — #16 (right-to-deletion) upgraded to "Mitigated end-to-end"; #26 (replica drift) downgraded gap (companion endpoints provide verification surface); new #31 cross-repo `INTERNAL_API_TOKEN` rotation drift (L 3 / I 3 / Mitigated operator-attested via runbook).
+- [x] `docs/MERGE_ORDER.md` (PR #51) — Groups H (validator+bootstrap), I (DSR end-to-end), J (doc-triangle catch-up) added; portfolio open PRs count 35 → 50+; second TL;DR paragraph for the 10-PR DSR loop.
+
+**Portfolio-wide tsc-clean (closes deficiency #13):**
+- [x] integrations PR #16, fa-amort PR #17, revenue-rec PR #16 — `expectResponse()` helper mirrors recon PR #14 (the canonical version) across the remaining 3 repos. Narrows `Response | undefined` middleware return type. After merge, **all 5 repos pass `npx tsc --noEmit` cleanly** for the first time.
 
 ### v0.2 — Universal substrate (Layer 1+2 + seams for 3–6)
 - [x] Party + PartyRole (unified Customer/Vendor/Employee)
@@ -315,11 +341,12 @@ v2.0 procedure; merge order is documented in `docs/MERGE_ORDER.md`
 
 ### Headline build/test commands
 - `pnpm test` — vitest suite (invariants + sub-ledgers + retention +
-  encryption + soc2-helpers + pen-test-tenant-isolation)
-- `node_modules/.bin/tsc --noEmit` — type check; note that
-  `tests/middleware-fail-closed.test.ts` carries 5 known TS18049
-  errors tracked as deficiency-log #13 in
-  `docs/policies/control-deficiency-log.md` v2.0
+  encryption + soc2-helpers + pen-test-tenant-isolation + DSR
+  attribution + companion-attribution wire-up)
+- `node_modules/.bin/tsc --noEmit` — type check; **clean across all 5
+  repos as of 2026-06-04** (recon PR #14 + integrations/fa-amort/
+  revenue-rec tsc-middleware-test PRs closed the last TS18049 holdouts;
+  deficiency-log #13 v2.0 → Closed in v2.1)
 
 ### Customer-event-gated upgrades (NOT in scope until trigger)
 - First paying customer signs → Neon Launch ($19/mo) + PITR + `pg_dump`
@@ -337,24 +364,29 @@ v2.0 procedure; merge order is documented in `docs/MERGE_ORDER.md`
   review now has two participants
 
 ### Open code-side deficiencies (close any time)
-- #13 — tsc errors in `recon/tests/middleware-fail-closed.test.ts`
+- ~~#13~~ — closed portfolio-wide via recon PR #14 + integrations PR #16 + fa-amort PR #17 + revenue-rec PR #16 (all on `tsc-middleware-test` branches)
 - #14 — retention cron lives only on a branch (PR #12 merge closes
   this; load-bearing for the documented Privacy TSC retention claim)
 - #16 — `/legal/subprocessors` page on marketing site
 - ~~#17~~ — closed by PR #33 (`public/.well-known/security.txt`)
 - ~~#19~~ — closed by PR #35 (SBOM CI)
 - ~~#21~~ — closed by PR #34 (schema-fingerprint CI gate)
+- ~~#24~~ — closed by 10-PR DSR end-to-end arc (new in v2.1 deficiency log)
+- #25 — fa-amort schema lacks user-attribution columns (NEW, Low; honest-zero delegation documented)
+- #26 — revenue-rec schema partially lacks attribution columns (NEW, Low; hybrid 2/5 documented)
 
 ### Substantive engineering deferred to dedicated sprints
 - **revenue-rec NetSuite schema additions** — `allocatedAmount` +
   `fairValueMethod` + `quantity` on `PerformanceObligation`; PR #39
   captured the sequenced backlog. ~1-2 weeks of focused engineering.
+  **Triggers closure of deficiency #26** in tandem (when the new
+  fields land, add `acceptedBy`/`rejectedBy` to `AiExtractionSuggestion`
+  to flip `aiExtractionsAccepted/Rejected` from honest-zero to real
+  counts).
 - **recon model-translation work** — denormalized `matched_transaction`
   → normalized `ReconciliationMatch`; PR #42 captured the sequenced
   backlog. ~1 week of focused engineering.
-- **`connections-export.ts` typed-stub wiring** — companion repos
-  ship the 5-test stubs (per-repo PR #11); turning the stubs into
-  actual functions that walk live tables is the next pass.
+- ~~**`connections-export.ts` typed-stub wiring**~~ — **shipped 2026-06-04** in the DSR end-to-end arc (integrations PR #14 + recon PR #15 + fa-amort PR #15 + revenue-rec PR #14 producer helpers; ledger-core PR #46 consumer; 4 HTTP endpoint PRs; ledger-core PR #47 e2e smoke). Helpers now walk live tables with per-companion shape and graceful-degradation flags. Closes the original "typed stub" item end-to-end.
 
 ### Substrate notes (still current)
 - Architecture canon: `docs/universal-schema.md`. Schema visual:
