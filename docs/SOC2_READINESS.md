@@ -1,6 +1,6 @@
 # SOC 2 readiness assessment — ledger-nexus portfolio
 
-**Version:** 2.1 · **Last updated:** 2026-06-04 · **Owner:** Founder
+**Version:** 2.2 · **Last updated:** 2026-06-05 · **Owner:** Founder
 **Status:** ≈ 75% of the way to Type 1 audit-ready. Type 2 gated by the 6-month observation window.
 **Scope:** Type 1 readiness across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`).
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022) — Security TSC + Common Criteria CC1–CC9; Availability, Processing Integrity, Confidentiality, Privacy TSCs as in scope.
@@ -86,6 +86,51 @@ to full Type 1 audit-ready is dominated by **customer-trigger gates**:
 
 **Type 2 (the 6-month observation window) remains the dominant
 remaining gap** — no amount of further code can compress it.
+
+---
+
+## Delta — 2026-06-05 (one day after v2.1 publication)
+
+Two substantive engineering sprints + a 3-PR closure arc landed in
+a single session. Neither blocks Type 1 audit-readiness; both
+strengthen the substrate-level evidence the auditor will examine.
+
+**Substantive substrate engineering — both NetSuite mapper sprints
+shipped end-to-end:**
+
+| Sprint | Repo | PRs | Pattern proven |
+|---|---|---|---|
+| Revenue arrangements (ASC 606 ¶77+¶78) | revenue-rec | [#17-#23](https://github.com/ledger-nexus/revenue-rec/pulls) (7 PRs) | Schema additions + pure mappers + orchestrator + integration tests vs real Postgres + Server Action + UI |
+| Bank reconciliation (denormalized → normalized translation) | recon | [#17-#21](https://github.com/ledger-nexus/recon/pulls) (5 PRs) | Same 5-layer pattern + cross-repo lineage triple lookup architecturally proven against real seeded JournalLine |
+
+12 companion-repo PRs total. 98 new tests (54 + 44). The architectural
+seam — denormalized source-system data (NS `matched_transaction_id`)
+→ normalized substrate data (recon `ReconciliationMatch` with FK to
+ledger-core `JournalLine`) — is mechanically proven against real
+Postgres. Neither sprint introduced new deficiencies.
+
+**Deficiency #26 fully closed via 3-PR arc:**
+
+| Step | PR | What |
+|---|---|---|
+| (a) Schema-mirror gap | revenue-rec [#21](https://github.com/ledger-nexus/revenue-rec/pull/21) | `tenantId` on `RevenueContract` + `Party` (DB columns existed since 2026-05-31; mirror was stale) |
+| (b) Decision schema | revenue-rec [#24](https://github.com/ledger-nexus/revenue-rec/pull/24) | `acceptedBy`/`acceptedAt`/`rejectedBy`/`rejectedAt` columns + action wiring; tenant-safe via `updateMany({id, contractId})` |
+| (c) Helper full-wire | revenue-rec [#25](https://github.com/ledger-nexus/revenue-rec/pull/25) | `rr-attribution.ts` flips from hybrid (2/5 wired) → **full-wire (4/5 wired + 1 documented audit_log delegation)** |
+
+Result: revenue-rec's DSR attribution helper now returns real counts
+for 4 of 5 fields. The 5th (`revenueContractsCreated`) is delegated
+to ledger-core's audit_log with documentation. **v2.2 deficiency log
+(ledger-core PR #54)** marks #26 Closed; closed-state count goes
+9 → 10.
+
+**Readiness percentage:** stays at `≈75%`. The two NS sprints add
+substrate-level confidence; the #26 closure removes a Low-severity
+documented gap. None of these moves the Type 1 readiness needle
+materially — the remaining 25% is still dominated by **customer-
+trigger gates** (DR drill, signed DPAs, second employee) and the
+**Type 2 6-month observation window**. The substrate strength now
+justifies the % we already claimed; what's missing is operational
+runway and time.
 
 ---
 
@@ -219,7 +264,7 @@ rows.
 
 | Evidence | Status |
 |---|---|
-| `docs/policies/control-deficiency-log.md` v2.1 (PR #48) — 23 deficiencies tracked; 9 Closed (+80% from v2.0); no new Critical/High in v2.1 | **Mitigated** |
+| `docs/policies/control-deficiency-log.md` v2.2 (PR #54) — 23 deficiencies tracked; 10 Closed (#26 added 2026-06-05); no new Critical/High in v2.1 or v2.2 | **Mitigated** |
 | `docs/policies/bypass-log.md` (skeleton, PR #16) | **Mitigated** |
 | `audit_log` append-only Postgres RULE — every privileged action emits a row that the auditor can query | **Mitigated** |
 | Annual review cadence documented per-policy + tabletop cadence in incident-response.md v2.0 | **Mitigated** |
