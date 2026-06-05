@@ -1,6 +1,6 @@
 # Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints
 
-**Updated 2026-06-05 even-later evening (v5).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-05 night (v6).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -9,8 +9,10 @@ sweep** added **2 more**; the late-evening **#18 verification close + new
 #27 meta-deficiency** added **0 code PRs** (doc-only); the **#27 verification
 automation** added **2 more** (PR #62 script + PR #63 URL backfill); the
 **risk register v2.2** added **1 more**; the **even-later-evening Sentry shim
-arc** added **4 more** (companion ports closing #5),
-for **82+ total** across the 5-repo portfolio. This file documents
+arc** added **4 more** (companion ports closing #5); the **14th adversarial
+pass** added **4 more** (2nd commits on each shim PR); the **CLAUDE.md
+institutional-memory arc** added **5 more** (one per repo),
+for **91+ total** across the 5-repo portfolio. This file documents
 the dependency order so the founder can land them efficiently when
 ready.
 
@@ -362,6 +364,27 @@ All 4 PRs are independent (each based on its repo's `main`). Can merge in any or
 After all 4 merge: `captureError()` + `captureMessage()` exist in every companion repo with PII redaction running before every emit, console fallback when DSN absent. This is the **first Medium-severity deficiency closed by genuine new code this session.**
 
 **14th adversarial pass closure (2nd commits on each Group S PR):** Pass found 1 HIGH (Error.stack PII leak via V8 preamble) + 3 MEDIUMs (err.code cap + revenue-rec + integrations allowlist gaps). All 4 closed in-session via 2nd commits on each of the 4 shim PRs. Tests delta: +28 (each PR went 14 → 21 tests). New helpers `stripStackPreamble()` + `sanitizeErrorForCapture()`. The shim arc is now mechanically defended at every layer: `.message`, `.stack`, `.code`, `extra`.
+
+---
+
+## Group T — CLAUDE.md institutional-memory arc (2026-06-05 night, 5 PRs)
+
+Adds monitoring-shim non-negotiable + SOC 2 adversarial-pass cadence section to each repo's CLAUDE.md. Every future Claude Code session in each repo auto-loads the patterns shipped this evening. **Closes the falsely-completed-task class from a different angle than PR #62 — PR #62 catches drift at workflow-runtime; this arc delivers institutional memory at session-start.**
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| (a) | fa-amort **#22** | `claude-md-monitoring-disc` | `main` | Non-negotiable #9 (monitoring shim canonical) + SOC 2 adversarial-pass cadence with 13th-pass silent-catch + 14th-pass stack-leak citations |
+| (b) | recon **#25** | `claude-md-monitoring-disc` | `main` | Non-negotiable #5 + BankStatementLine.description load-bearing column framing |
+| (c) | revenue-rec **#29** | `claude-md-monitoring-disc` | `main` | Non-negotiable #5 + ContractDocument.rawText carve-out + 13th-pass H2-rev + 14th-pass M3 gap-fills |
+| (d) | integrations **#19** | `claude-md-monitoring-disc` | `main` | Non-negotiable #6 + OAuth-token-leak Critical incident framing + 14th-pass M4 vendor-identifier gaps |
+| (e) | ledger-core **#65** | `claude-md-monitoring-disc` | `main` | Non-negotiable #5 (substrate-tier) + portfolio-wide adversarial-pass finds (12th + 13th + 14th) + pointer to docs/policies/control-deficiency-log.md v2.3 + docs/SOC2_READINESS.md v2.3 |
+
+All 5 PRs are independent — each branches off its repo's `main`, can merge in any order. After all 5 merge, every Claude Code session in every repo of the portfolio auto-loads the same patterns.
+
+This is the final closure mechanism for the falsely-completed-task class. PR #62 + #63 + Group T together:
+- **PR #62** — verification automation (workflow-runtime drift detection)
+- **PR #63** — URL backfill (makes the verifier a real hard gate, not informational-only)
+- **Group T** — institutional memory at session-start (auto-load + session inherits patterns without re-discovery)
 
 ---
 
