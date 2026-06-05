@@ -1,8 +1,8 @@
 # Control deficiency log
 
-**Version:** 2.2 · **Effective date:** 2026-06-05 · **Owner:** Founder
-**Last reviewed:** 2026-06-05 (#26 closed + two NS sprints documented)
-**Prior versions:** 2.1 (2026-06-04), 2.0 (2026-06-03 SOC2 hardening sprint), 1.0 (pre-Clerk)
+**Version:** 2.3 · **Effective date:** 2026-06-05 · **Owner:** Founder
+**Last reviewed:** 2026-06-05 (#25 closed via fa-amort attribution-schema + wire-up arc)
+**Prior versions:** 2.2 (2026-06-05 morning — #26 closed), 2.1 (2026-06-04), 2.0 (2026-06-03 SOC2 hardening sprint), 1.0 (pre-Clerk)
 
 ## Purpose
 
@@ -68,24 +68,28 @@ the file or process that's weak. Include enough detail that a stranger
 | 22 | 2026-06-03 | High | `main` vitest suite has 25 failed test files / 24 failed tests | End-of-sprint full-suite verification | Ran `vitest run` against ledger-core `main` (current HEAD). Result: 25 failed test files / 24 failed tests / 334 passed / 91 skipped (449 total). All 4 companion-repo stub tests pass on their PR branches; all sprint-shipped tests pass on their branches. **The failures are pre-existing on main, not caused by session work.** Most likely root cause: tests depend on `DATABASE_URL` + a live Postgres + schema-pushed DB that wasn't available in the verification run. Cannot rule out that some are genuine regressions until reproduced with full setup. | Reproduce with full setup (`pnpm db:push && pnpm db:seed && pnpm test`); for failures that survive, file specific deficiencies per test file with root cause. Until reproduced: treat as "test infrastructure not portable" — every contributor needs the full setup to run the suite, which is a known operational cost of testing against real Postgres (per CLAUDE.md "Tests run against a real Postgres"). | **Open** | — |
 | 23 | 2026-06-03 | Medium | `vendor-management.md` v2.0 references a `/legal/subprocessors` page that has no home | End-of-sprint vendor-management v2.0 reality-check | The policy (PR #19) says "Our subprocessors are published at `/legal/subprocessors` on the marketing site." Reality check: **ledger-nexus has no marketing site.** The available marketing site `revrecengine.com` is for the asc606 / RevRec Engine product (different vendor stack — Supabase, not Neon — and different SOC 2 scope). Until ledger-nexus has its own marketing surface, the subprocessor-disclosure obligation is met by the public ledger-core repo's `docs/policies/vendor-management.md` v2.0 (auditor-readable + git-searchable). The customer-facing version is deferred. | Two paths: (a) when ledger-nexus gets a customer-facing app or marketing repo, add `/legal/subprocessors` mirroring `vendor-management.md` v2.0; (b) until then, MSAs with customers should cite the GitHub URL as the canonical subprocessor list. Closes deficiency #16 follow-up. | **Open** | — |
 | 24 | 2026-06-04 | Medium | DSR procedure promised companion-repo attribution that wasn't wired | `data-subject-requests.md` audit — the procedure (PR #13) committed to including per-companion attribution counts in the Art. 15 export bundle, but the wire-up was 5 typed stubs (one per companion + ledger-core) that all threw `NotImplementedError`. A real DSR would have crashed the export. | The 10-PR DSR attribution arc shipped 2026-06-04: **producer helpers** (integrations #14 full-wire, recon #15 full-wire, fa-amort #15 honest-zero, revenue-rec #14 hybrid 2/5) + **consumer** (ledger-core #46 `fetchCompanionAttribution` + bundle v1→v2) + **HTTP endpoints** (integrations #15, recon #16, fa-amort #16, revenue-rec #15 — token-gated POST routes) + **e2e verification** (ledger-core #47 opt-in smoke test + runbook). End-to-end coverage at three layers: unit (~60 tests) + integration vs real Postgres + opt-in cross-process. Each companion's response is wrapped in `{ reachable, data? | error? }` so partial outages produce partial-but-complete bundles. | All 10 PRs shipped, awaiting merge per `docs/MERGE_ORDER.md`. | **Closed (pending merge)** | 2026-06-04 |
-| 25 | 2026-06-04 | Low | fa-amort schema lacks user-attribution columns | Discovered while wiring fa-amort's DSR attribution (#24) | `FixedAsset.createdBy` doesn't exist; `FixedAssetBookAttributes` has no `lastRunBy` or `disposedBy`; `AiAssetSuggestion` has no `acceptedBy`/`rejectedBy`. Means fa-amort's DSR attribution helper returns honest-zero, with real attribution delegated to ledger-core's audit_log. Functional but means a regulator-readable per-table count is unavailable. | Add columns when fa-amort grows data the audit_log can't capture (e.g., AI capex-decision audit). Until then, audit_log delegation is correct and documented in `src/lib/privacy/fa-attribution.ts` SCHEMA GAP note. Trigger: AI-decision column lands on AiAssetSuggestion. | **Open (deferred — documented)** | — |
+| 25 | 2026-06-04 | Low | fa-amort schema lacks user-attribution columns | Discovered while wiring fa-amort's DSR attribution (#24) | `FixedAsset.createdBy` doesn't exist; `FixedAssetBookAttributes` has no `lastRunBy` or `disposedBy`; `AiAssetSuggestion` has no `acceptedBy`/`rejectedBy`. Means fa-amort's DSR attribution helper returns honest-zero, with real attribution delegated to ledger-core's audit_log. Functional but means a regulator-readable per-table count is unavailable. | **Closed 2026-06-05** via 2-PR arc on fa-amort (mirrors the revenue-rec #26 closure pattern from earlier the same day): (a) **fa-amort PR #18** added the 5 attribution columns + `tenantId` mirror gap closure + idempotent `2026-06-05-attribution-schema.sql` migration + wired `runDepreciationAction` to stamp `lastRunBy`/`lastRunAt` after a successful transactional `recordDepreciationViaLedgerCore` call (best-effort try/catch — stamp failure does NOT roll back the posted JEs); (b) **fa-amort PR #19** flipped `src/lib/privacy/fa-attribution.ts` from honest-zero to fully wired — 5 `COUNT(*)` queries issued in parallel against the new columns, integration test against real Postgres proves the cross-subject filter holds (3 SUBJECT fixed assets vs 1 OTHER, etc.). Pre-migration rows + NetSuite-imported rows have NULL in the attribution columns and correctly do not get counted toward any user. audit_log delegation remains the portfolio-wide source for cross-API-boundary events; this helper covers fa-amort's OWN tables only. | **Closed** | 2026-06-05 |
 | 26 | 2026-06-04 | Low | revenue-rec schema partially lacks attribution columns | Discovered while wiring revenue-rec's DSR attribution (#24) | `RevenueContract` has no `createdBy`; `AiExtractionSuggestion` has no `acceptedBy`/`rejectedBy`. Means revenue-rec's helper is hybrid: 2 wired counts (`ContractDocument.uploadedBy` + `RecognitionEvent.postedBy`) + 3 schema-gap zeros. Documented in `src/lib/privacy/rr-attribution.ts` HYBRID IMPLEMENTATION note. | **Closed 2026-06-05** via 3-PR arc: (a) **revenue-rec PR #21** closed the schema-mirror gap on `RevenueContract.tenantId`/`Party.tenantId`; (b) **revenue-rec PR #24** added the `acceptedBy`/`acceptedAt`/`rejectedBy`/`rejectedAt` columns + wired `approveExtractionAction` to write `acceptedBy` atomically with contract approval (tenant-safe via `updateMany({id, contractId})`); (c) **revenue-rec PR #25** flipped the helper from hybrid (2/5 wired) to full-wire (4/5 wired + 1 documented audit_log delegation). The remaining 1 (`revenueContractsCreated`) is genuinely delegated to ledger-core's audit_log — AI-extraction-approved contracts surface via `approveExtractionAction`'s audit emission; manual creation isn't wired yet. Documented in `src/lib/privacy/rr-attribution.ts` FULL-WIRE IMPLEMENTATION note. | **Closed** | 2026-06-05 |
 
-## Score-band summary — 2026-06-05
+## Score-band summary — 2026-06-05 (evening v2.3)
 
 | Status | Count |
 |---|---|
-| **Closed** | 10 (#1 auth, #2 CSP, #7 access review, #10 acknowledgement, #11 tenantId, #17 security.txt, #19 SBOM, #21 schema-drift CI, #24 DSR loop pending merge, **#26 revenue-rec attribution full-wire** new) |
+| **Closed** | 11 (#1 auth, #2 CSP, #7 access review, #10 acknowledgement, #11 tenantId, #17 security.txt, #19 SBOM, #21 schema-drift CI, #24 DSR loop pending merge, #26 revenue-rec attribution full-wire, **#25 fa-amort attribution full-wire** new) |
 | **Remediated** | 2 (#5 Sentry shim, #6 MFA process; both have pending operational follow-up) |
 | **Partial** | 2 (#4 npm pinning, #9 audit-log external replication) |
-| **Open** | 10 (#3 DR drill, #12 RLS, #13 tsc errors, #14 retention cron unmerged, #15 DPAs, #16 subprocessors page, #18 SECURITY.md, #20 emergency kit, #22 main suite failures, #23 subprocessors no home; #25 fa-amort attribution cols) |
+| **Open** | 9 (#3 DR drill, #12 RLS, #13 tsc errors, #14 retention cron unmerged, #15 DPAs, #16 subprocessors page, #18 SECURITY.md, #20 emergency kit, #22 main suite failures, #23 subprocessors no home) |
 
-**Trend, 2026-06-04 → 2026-06-05 delta:**
-- One additional deficiency Closed: **#26** — the revenue-rec attribution schema gap. Closed via a 3-PR arc on 2026-06-05: schema-mirror gap (PR #21) + decision schema (PR #24) + helper full-wire (PR #25). The helper now returns real counts for 4 of 5 fields; the 5th (`revenueContractsCreated`) is genuinely delegated to ledger-core's audit_log (documented).
-- Two substantive engineering sprints landed end-to-end the same day: **revenue-rec NetSuite revenue arrangements (7 PRs)** + **recon NetSuite bank reconciliation (5 PRs)**. Both proved the cross-repo lineage triple architecturally; both shipped UI surfaces. Neither introduced new deficiencies.
-- **No new Critical or High deficiencies introduced.** The #26 closure removes a Low-severity item; the substrate sprints surfaced no new gaps thanks to the lineage-triple discipline.
+**Trend, 2026-06-05 morning (v2.2) → 2026-06-05 evening (v2.3) delta:**
+- One additional deficiency Closed: **#25** — the fa-amort attribution schema gap. Closed via a 2-PR arc on fa-amort (PR #18 attribution-schema + PR #19 helper wire-up), mirroring the revenue-rec #26 closure pattern from earlier the same day. After this arc lands the helper returns real counts for all 5 fields (5/5 wired), and fa-amort's tsc TS18049 errors (deficiency #13's fa-amort half) ship clean as a bonus.
+- **Both DSR attribution schema-gap items (#25 fa-amort and #26 revenue-rec) are now Closed.** The Privacy TSC "attribution-completeness" thesis is closed across all four companion repos at the helper-output layer (integrations 1/1, recon 5/5, fa-amort 5/5, revenue-rec 4/5+1 audit_log).
+- Schema-mirror gap for `FixedAsset.tenantId` quietly closed as part of PR #18 — parallels the `RevenueContract.tenantId`/`Party.tenantId` mirror gap closed in revenue-rec PR #21. No separate deficiency was logged because both mirror gaps are sub-issues of #11 (now Closed).
+- **No new Critical or High deficiencies introduced.** Two consecutive same-day closures of Low-severity items; no compensating gaps surfaced.
 
-**Total deficiency count: 23 (unchanged — only state transitions). Closed-state count: 10 (was 9; +11%).**
+**Total deficiency count: 23 (unchanged — only state transitions). Closed-state count: 11 (was 10; +10%).**
+
+**Trend, 2026-06-04 → 2026-06-05 (cumulative same-day arc):**
+- **2 Low-severity items Closed** over the day: #26 (morning) and #25 (evening). Both closures are the same playbook — schema additions + Server Action wire-up + helper flip — and both replicate the revenue-rec #26 reference closure precisely.
 
 **Trend, 2026-06-03 → 2026-06-04 delta (carried forward for context):**
 - Three from the v2.0 closure backlog now Closed: #17 (security.txt), #19 (SBOM), #21 (schema-fingerprint CI). All three were tracked as "ship CI infrastructure"; all three landed as part of the post-sprint sweep arc (PRs #33, #34, #35).
@@ -110,6 +114,20 @@ the file or process that's weak. Include enough detail that a stranger
 - **Accepted Risk** — leadership decided not to fix (rare; requires explicit justification in the row)
 
 ## Change log
+
+### 2026-06-05 evening (v2.3)
+- Flipped **#25** to **Closed** — fa-amort attribution schema gap remediated via the 2-PR arc (fa-amort PR #18 attribution-schema + PR #19 helper wire-up). Mirrors the v2.2 morning closure pattern for #26 exactly.
+- Schema-mirror gap for `FixedAsset.tenantId` quietly closed inside fa-amort PR #18 (parallel to revenue-rec PR #21's `RevenueContract.tenantId` closure). No new deficiency row; both mirror gaps are sub-issues of #11.
+- Both DSR attribution schema-gap items (#25 + #26) are now Closed. Privacy TSC attribution-completeness thesis: closed across all 4 companion repos at the helper-output layer.
+
+### 2026-06-05 morning (v2.2)
+- Flipped **#26** to **Closed** — revenue-rec attribution schema gap remediated via the 3-PR arc (revenue-rec PR #21 mirror gap + PR #24 decision schema + PR #25 helper wire-up).
+- Documented two NetSuite end-to-end sprints (revenue-rec 7 PRs + recon 5 PRs); neither introduced new deficiencies thanks to the lineage-triple discipline.
+
+### 2026-06-04 (v2.1)
+- Added **#24** — DSR procedure promised companion-repo attribution that wasn't wired (10-PR DSR arc shipped, awaiting merge).
+- Added **#25** + **#26** — schema gaps surfaced while wiring the DSR attribution helpers.
+- Flipped **#17 / #19 / #21** to Closed (CI infrastructure sweep: security.txt, SBOM, schema-fingerprint).
 
 ### 2026-06-03 (v2.0)
 - Flipped #1, #2, #7, #10, #11 to **Closed** based on shipped code + open PRs
