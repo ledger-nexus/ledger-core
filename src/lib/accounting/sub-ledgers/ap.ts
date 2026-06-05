@@ -8,7 +8,7 @@
 // Invariant: sum of currentBalance for status IN (OPEN, PARTIAL, REOPENED)
 // per (entity, book) === AP control account balance (Cr).
 
-import { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 
@@ -145,61 +145,89 @@ export interface ApplyApPaymentInput {
   appliedDate: Date;
 }
 
+/**
+ * Inner half of applyApPayment — runs inside an existing transaction.
+ * Used by RLS-aware callers (Server Actions wrapped in withTenantContext)
+ * so the SET LOCAL app.current_tenant_id GUC reaches every read/write.
+ *
+ * Class T migration pattern (see docs/architecture/rls-phase-2b-migration-guide.md):
+ * the outer applyApPayment wrapper preserves the original PrismaClient
+ * signature for legacy callers (seeds, demo flow, internal scripts) while
+ * the inner takes a TransactionClient supplied by withTenantContext.
+ *
+ * The transaction-scoped guarantees are identical — both halves enforce:
+ *   - status-gate (cannot pay APPLIED/WRITTEN_OFF/VOID items)
+ *   - overpayment refusal (applied <= current balance)
+ *   - TOCTOU optimistic-concurrency guard on currentBalance
+ * Atomicity is owned by the OUTER tx (whether withTenantContext or the
+ * legacy wrapper) — the inner never opens its own.
+ */
+export async function applyApPaymentInTx(
+  tx: Prisma.TransactionClient,
+  input: ApplyApPaymentInput
+): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
+  const item = await tx.apOpenItem.findUniqueOrThrow({
+    where: { id: input.openItemId },
+    select: { currentBalance: true, status: true, tenantId: true },
+  });
+  if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
+    throw new Error(`Cannot apply payment to AP item in ${item.status} state`);
+  }
+
+  const applied = toDecimal(input.appliedAmount);
+  const current = toDecimal(item.currentBalance);
+  if (applied.greaterThan(current)) {
+    throw new Error(
+      `Application amount ${applied} exceeds open balance ${current.toFixed(4)}`
+    );
+  }
+
+  const newBalance = current.minus(applied);
+  const nextStatus = newBalance.isZero() ? "APPLIED" : "PARTIAL";
+
+  // SECURITY (TOCTOU race fix): optimistic-concurrency guard on the
+  // currentBalance — see applyArPayment for full rationale.
+  const application = await tx.apApplication.create({
+    data: {
+      tenantId: item.tenantId,
+      openItemId: input.openItemId,
+      appliedByEntryId: input.appliedByEntryId,
+      appliedAmount: applied.toFixed(4),
+      appliedDate: input.appliedDate,
+    },
+    select: { id: true },
+  });
+
+  const updated = await tx.apOpenItem.updateMany({
+    where: {
+      id: input.openItemId,
+      currentBalance: current.toFixed(4),
+    },
+    data: {
+      currentBalance: newBalance.toFixed(4),
+      status: nextStatus,
+    },
+  });
+  if (updated.count === 0) {
+    throw new Error(
+      `Concurrent update on AP item ${input.openItemId} — payment was applied to a stale balance. Retry the request.`
+    );
+  }
+
+  return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
+}
+
+/**
+ * Outer wrapper — opens its own $transaction and delegates to the inner.
+ * Preserved for legacy callers (seeds, demo flow, internal scripts) that
+ * don't run inside withTenantContext. New Server Actions should call
+ * applyApPaymentInTx directly from within their withTenantContext block.
+ */
 export async function applyApPayment(
   prisma: PrismaClient,
   input: ApplyApPaymentInput
 ): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
-  return await prisma.$transaction(async (tx) => {
-    const item = await tx.apOpenItem.findUniqueOrThrow({
-      where: { id: input.openItemId },
-      select: { currentBalance: true, status: true, tenantId: true },
-    });
-    if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
-      throw new Error(`Cannot apply payment to AP item in ${item.status} state`);
-    }
-
-    const applied = toDecimal(input.appliedAmount);
-    const current = toDecimal(item.currentBalance);
-    if (applied.greaterThan(current)) {
-      throw new Error(
-        `Application amount ${applied} exceeds open balance ${current.toFixed(4)}`
-      );
-    }
-
-    const newBalance = current.minus(applied);
-    const nextStatus = newBalance.isZero() ? "APPLIED" : "PARTIAL";
-
-    // SECURITY (TOCTOU race fix): optimistic-concurrency guard on the
-    // currentBalance — see applyArPayment for full rationale.
-    const application = await tx.apApplication.create({
-      data: {
-        tenantId: item.tenantId,
-        openItemId: input.openItemId,
-        appliedByEntryId: input.appliedByEntryId,
-        appliedAmount: applied.toFixed(4),
-        appliedDate: input.appliedDate,
-      },
-      select: { id: true },
-    });
-
-    const updated = await tx.apOpenItem.updateMany({
-      where: {
-        id: input.openItemId,
-        currentBalance: current.toFixed(4),
-      },
-      data: {
-        currentBalance: newBalance.toFixed(4),
-        status: nextStatus,
-      },
-    });
-    if (updated.count === 0) {
-      throw new Error(
-        `Concurrent update on AP item ${input.openItemId} — payment was applied to a stale balance. Retry the request.`
-      );
-    }
-
-    return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
-  });
+  return prisma.$transaction((tx) => applyApPaymentInTx(tx, input));
 }
 
 export async function openApBalance(
