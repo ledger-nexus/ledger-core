@@ -1,9 +1,10 @@
 # Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints
 
-**Updated 2026-06-05.** The sprint (2026-05-25 → 2026-06-03) left 35
+**Updated 2026-06-05 evening.** The sprint (2026-05-25 → 2026-06-03) left 35
 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
-the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**,
-for **65+ total** across the 5-repo portfolio. This file documents
+the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
+the evening **#25 closure + doc-triangle** added **4 more**,
+for **69+ total** across the 5-repo portfolio. This file documents
 the dependency order so the founder can land them efficiently when
 ready.
 
@@ -53,6 +54,15 @@ The 2026-06-05 work landed two full NetSuite ingestion flows + closed deficiency
 4. **Doc-triangle 2026-06-05** (Group N): **#53, #54, #55** to reflect closure in the SOC 2 evidence chain
 
 After all merge: the substrate accepts NetSuite data for revenue arrangements + bank reconciliation, with cross-repo lineage triple architecturally proven against real Postgres; revenue-rec attribution helper is 4/5 wired + 1 documented audit_log delegation.
+
+### TL;DR — evening capstone (4 more PRs, ~15 minutes)
+
+The 2026-06-05 evening session closed deficiency #25 (fa-amort attribution) using the same playbook as the morning #26 closure. Merge the **4 PRs** in this order:
+
+1. **fa-amort #25 closure arc** (Group O): fa-amort #18 → #19 (stack)
+2. **Doc-triangle 2026-06-05 evening** (Group P): **#58, #59** (after Group O lands; #59 stacks on #58 base)
+
+After all merge: fa-amort attribution helper is 5/5 wired; **both DSR attribution schema-gap items (#25 + #26) are Closed across the portfolio**; readiness ticks 75% → 76%.
 
 ---
 
@@ -301,6 +311,30 @@ Captures 2026-06-05 closures in the canonical SOC 2 evidence chain. All independ
 | **#53** | `PROJECT_STATUS.md` — captures both NS sprints + #26 closure arc; cumulative PRs 63+ → 76+ | Groups K + L + M |
 | **#54** | `control-deficiency-log.md` v2.1 → v2.2 — closes #26 (+11% closed-state) | Group M + PR #25 |
 | **#55** | `SOC2_READINESS.md` v2.1 → v2.2 — Delta — 2026-06-05 section; readiness stays 75% (explicitly justified) | PR #54 + Groups K + L |
+
+---
+
+## Group O — Deficiency #25 closure arc (2026-06-05 evening, 2 PRs on fa-amort)
+
+Closes v2.2 control-deficiency-log entry **#25** (fa-amort attribution schema gap). Mirrors Group M's playbook for #26. **Merge in stack order.**
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| (a) | fa-amort **#18** | `attribution-schema` | `main` | Adds `createdBy`/`disposedBy` to `FixedAsset` + `lastRunBy`/`lastRunAt` to `FixedAssetBookAttributes` + `acceptedBy/At`/`rejectedBy/At` to `AiAssetSuggestion`. Closes the `FixedAsset.tenantId` Prisma-mirror gap (parallel to revenue-rec #21). Wires `runDepreciationAction` to stamp `lastRunBy`/`lastRunAt` post-success. Idempotent migration `2026-06-05-attribution-schema.sql`. +6 tests vs real Postgres. |
+| (b) | fa-amort **#19** | `fa-attribution-wireup` | `attribution-schema` | `fa-attribution.ts` flips from honest-zero → **5/5 wired**. 5 `COUNT(*)` queries in parallel against the new columns. +3 integration tests against real Postgres + rewritten stub tests (74/74 total). |
+
+After both merge: `faAmortAttribution` returns real counts for all 5 fields; v2.3 deficiency log (PR #58) marks #25 Closed. Both DSR attribution schema-gap items (#25 + #26) Closed across the portfolio.
+
+---
+
+## Group P — Doc-triangle evening catch-up (2026-06-05 evening, 2 PRs)
+
+Captures the evening 2026-06-05 closure in the canonical SOC 2 evidence chain. Both independent doc-only PRs; **merge after Group N + Group O lands**.
+
+| PR | Doc | Cite source |
+|---|---|---|
+| **#58** | `control-deficiency-log.md` v2.2 → v2.3 — closes #25; closed-state goes 10 → 11 | Group O |
+| **#59** | `SOC2_READINESS.md` v2.2 → v2.3 — Delta — 2026-06-05 evening section; readiness 75% → 76% | Group O + PR #58 |
 
 ---
 
