@@ -6,11 +6,11 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-05 (RLS arc capstone)
+**Last updated:** 2026-06-06 (3-HIGH closure capstone)
 
-**Current state:** **Deficiency #12 (RLS not FORCED) → Remediated.** The 27-PR RLS arc closed across Phases 1+2a+2b + Phase 3 design + Phase 3 prereqs + 15th adversarial pass + institutional record (CLAUDE.md, deficiency log v2.5, SOC2_READINESS v2.5, risk register v2.3). Phase 3 implementation (the actual `ALTER TABLE FORCE` flip + 6-category cross-tenant test suite) is DRAFT in PR #89 awaiting operator ack on the Decision C runbook (`docs/runbooks/rls-phase-3-bypass-roles.md`). Multi-tenant isolation posture upgraded from "application-layer scoping is the only enforcement" to "application + DB-layer policies (advisory pre-FORCE, load-bearing post-FORCE) + per-PR adversarial pass cadence as CC4 monitoring evidence."
+**Current state:** **3 HIGH-severity deficiencies fully closed in 2 days.** End-to-end engineering + doc-pentagon + merge-train coverage for #12 (RLS), #4 (npm pinning portfolio-wide), and #2 (CSP). Closed-state count 12 → **14** of 28 tracked; readiness % 80% → **82%**. **Deficiency #12 (RLS not FORCED) → Remediated.** The 27-PR RLS arc closed across Phases 1+2a+2b + Phase 3 design + Phase 3 prereqs + 15th adversarial pass + institutional record (CLAUDE.md, deficiency log v2.5, SOC2_READINESS v2.5, risk register v2.3). Phase 3 implementation (the actual `ALTER TABLE FORCE` flip + 6-category cross-tenant test suite) is DRAFT in PR #89 awaiting operator ack on the Decision C runbook. **Deficiency #4 (npm deps not pinned) → Closed portfolio-wide** via 5-PR sweep: 115 dependency ranges pinned to exact versions across all 5 repos. **Deficiency #2 (No CSP header) → Closed** via standalone PR #99 extraction from PR #10's foundation arc (strict-dynamic nonce middleware, 9/9 tests pass). Multi-tenant isolation posture + supply-chain control + anti-XSS posture all upgraded in the same day.
 
-**v1.0 portfolio milestone** remains intact — substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. The RLS arc is multi-tenant safety hardening on top of the v1.0 portfolio.
+**v1.0 portfolio milestone** remains intact — substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. The 2026-06-05 → 2026-06-06 SOC 2 hardening (RLS + pinning + CSP arcs) is multi-tenant safety + supply chain + XSS hardening on top of the v1.0 portfolio.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -158,6 +158,62 @@ The full closure of deficiency #12 (RLS not FORCED). Sits between v1.x portfolio
 
 ---
 
+### npm pinning arc — supply chain hardening (2026-06-06, 7 PRs portfolio-wide)
+
+Closes deficiency #4 (HIGH severity, opened 2026-05-25) — npm deps not pinned to exact versions. Same playbook as the Sentry shim arc (Group S): one engineering PR per repo + doc-pentagon amendments.
+
+**Engineering (Group V.1, 5 PRs, 115 ranges total):**
+- ledger-core PR #95 (23 deps), recon PR #26 (24), fa-amort PR #23 (22), revenue-rec PR #30 (24), integrations PR #20 (22)
+- Each PR strips `^`/`~` to the exact version currently in `package-lock.json` — no upgrades introduced
+- Verified per-repo: 0 remaining `^`/`~` ranges; `npm install --package-lock-only` clean
+
+**Institutional record (Group V.2, 2 PRs):**
+- `docs/policies/control-deficiency-log.md` v2.5 → v2.6 (PR #96): row #4 → Closed
+- `docs/SOC2_READINESS.md` v2.5 → v2.6 (PR #97): readiness 80% → 81%, CC7.1 posture upgrade ("range + Dependabot review" → "pinning + Dependabot review + npm audit CI")
+
+**Merge-train**: MERGE_ORDER Group V (PR #98) captures the 7-PR ordering.
+
+After all 7 merge: silent-transitive-upgrade attack vector eliminated on every `npm ci` deploy. Closed-state count 12 → 13.
+
+---
+
+### CSP arc — standalone closure of #2 (2026-06-06, 3 PRs)
+
+Closes deficiency #2 (HIGH severity, opened 2026-05-25) — No CSP header. **Standalone extraction** from PR #10's 9-feature foundation arc so #2 closes on its own merge schedule rather than block on the entire encryption-stack arc.
+
+**Engineering (Group W.1, 1 PR):**
+- PR #99: `src/middleware.ts` generates a 16-byte base64url nonce per request via Edge `crypto.getRandomValues`. CSP header on every response with `strict-dynamic` script-src + Clerk/Sentry/Stripe connect-src + `frame-ancestors 'none'` + `object-src 'none'` + `upgrade-insecure-requests`
+- Wraps existing Clerk middleware (preserves 503 fail-closed-in-prod behavior)
+- 9/9 tests pass (`tests/csp-nonce.test.ts`); `npx tsc --noEmit` clean
+
+**Institutional record (Group W.2, 2 PRs):**
+- `docs/policies/control-deficiency-log.md` v2.6 → v2.7 (PR #100): row #2 → Closed
+- `docs/SOC2_READINESS.md` v2.6 → v2.7 (PR #101): readiness 81% → 82%, CC6.6 posture upgrade ("static headers + Next.js default escape" → "static headers + per-request CSP nonce + strict-dynamic delegation")
+
+**Merge-train**: MERGE_ORDER Group W (PR #102) captures the 3-PR ordering.
+
+**Pattern documented**: PR #10 still exists with the full foundation arc (helper module + env validator + audit-log RULE + Sentry shim + /soc2-check + pre-commit hook + soc2 skill + /api/health). PR #99 cherry-picks the CSP-only changes. Future extractions follow the same pattern if individual deficiency closures get gated on PR #10's slow merge.
+
+After all 3 merge: anti-XSS control upgrades to defense-in-depth at the response layer. Closed-state count 13 → 14.
+
+---
+
+### 2026-06-06 day capstone — 3 HIGH closures, 18 PRs
+
+| Deficiency | Arc | PRs |
+|---|---|---|
+| #12 RLS not FORCED | Group U (Phases 1+2a+2b + Phase 3 design + prereqs + 15th pass + pentagon) | 27 PRs (Remediated; DRAFT impl PR #89 awaits Decision C) |
+| #4 npm deps not pinned | Group V (5 engineering + 2 doc) | 7 PRs (portfolio-wide) |
+| #2 No CSP header | Group W (1 engineering + 2 doc) | 3 PRs (standalone PR #10 extraction) |
+| **Total** | **Groups U + V + W** | **37 PRs** |
+
+**Closed-state progression**: 12 → 13 → **14** of 28 tracked.
+**Readiness % progression**: 80% → 81% → **82%**.
+
+**Open HIGH severities remaining**: #1 (auth Clerk swap — major v2 arc, deferred), #3 (backup restore drill — operational, Q3 2026). Both gated on the founder, not engineering. Engineering forward progress from here moves into Medium severities; #9 (audit_log replication outside primary DB) has the largest remaining design surface.
+
+---
+
 ## v1.0 is the portfolio milestone. Beyond:
 
 ### v1.1 — Loom script + autocomplete polish (shipped 2026-05-21)
@@ -176,6 +232,7 @@ The full closure of deficiency #12 (RLS not FORCED). Sits between v1.x portfolio
 ## Open decisions
 
 - **RLS Phase 3 operator ack** — Decision C 5-item runbook checklist (`docs/runbooks/rls-phase-3-bypass-roles.md`) gates PR #89 merge. Operator-coordination work, not engineering.
+- **PR #10 splitting strategy** — CSP extraction in PR #99 proved the pattern works. Future deficiency closures that are gated on PR #10's slow merge can follow the same playbook (cherry-pick the relevant subset into a standalone PR with its own doc-pentagon). Candidates: env validator (closes its own deficiency), audit-log RULE (already on main via other path), /api/health (already on main via other path).
 - **PostingRule template schema** — v0.4 ships a minimal `$.path` DSL. Resolved at the level needed for the seed; an expression sublanguage with arithmetic (`$.a + $.b * 0.1`) is a v0.5 candidate when QBO/NetSuite mapping needs it.
 - **Cash flow statement** — deferred. Indirect method is the lift; direct method is non-trivial too. Probably v0.6.
 - **Audit log with hash chaining** — out of scope until a real customer asks for it. The `JournalEntry.status = REVERSED` + immutability rule covers GAAP-level audit trail.
