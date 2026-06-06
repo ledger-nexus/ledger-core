@@ -17,7 +17,7 @@
 // each asset via line.extensions so the sub-ledger detail roll up
 // cleanly to GL.
 
-import { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../post-journal";
 
@@ -54,17 +54,28 @@ export interface CreateFixedAssetInput {
   sourcePayload?: unknown;
 }
 
-export async function createFixedAsset(
-  prisma: PrismaClient,
+/**
+ * Inner half of createFixedAsset — runs inside an existing transaction.
+ * RLS Phase 2b Class T pattern (see docs/architecture/rls-phase-2b-
+ * migration-guide.md). Lookups (entity / vendor / books) + the nested-
+ * write fixedAsset.create + bookAttributes.create all run on the
+ * supplied tx so the SET LOCAL app.current_tenant_id GUC reaches every
+ * read/write.
+ *
+ * The outer wrapper preserves the original PrismaClient signature for
+ * legacy callers (companion repos via /api/internal/fixed-asset).
+ */
+export async function createFixedAssetInTx(
+  tx: Prisma.TransactionClient,
   input: CreateFixedAssetInput
 ): Promise<{ id: string }> {
   // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
-  const entity = await prisma.legalEntity.findFirstOrThrow({
+  const entity = await tx.legalEntity.findFirstOrThrow({
     where: { code: input.entityCode },
     select: { id: true, tenantId: true },
   });
   const vendor = input.vendorPartyCode
-    ? await prisma.party.findFirstOrThrow({
+    ? await tx.party.findFirstOrThrow({
         where: {
           // Tenant-scoped party lookup; same rationale as ar.ts/ap.ts.
           tenantId: entity.tenantId,
@@ -74,52 +85,63 @@ export async function createFixedAsset(
         select: { id: true },
       })
     : null;
-  const bookRows = await prisma.book.findMany({
+  const bookRows = await tx.book.findMany({
     where: { code: { in: input.books.map((b) => b.bookCode) } },
     select: { id: true, code: true },
   });
   const bookIdByCode = new Map(bookRows.map((b) => [b.code, b.id]));
 
-  return await prisma.$transaction(async (tx) => {
-    const asset = await tx.fixedAsset.create({
-      data: {
-        tenantId: entity.tenantId,
-        entityId: entity.id,
-        code: input.code,
-        description: input.description,
-        category: input.category,
-        vendorPartyId: vendor?.id,
-        acquisitionDate: input.acquisitionDate,
-        acquisitionCost: toDecimal(input.acquisitionCost).toFixed(4),
-        acquisitionCurrencyId: input.acquisitionCurrencyCode,
-        assetAccountCode: input.assetAccountCode,
-        status: "IN_SERVICE",
-        sourceSystem: input.sourceSystem,
-        sourceRecordType: input.sourceRecordType,
-        sourceRecordId: input.sourceRecordId,
-        sourcePayload: (input.sourcePayload as any) ?? undefined,
-        bookAttributes: {
-          create: input.books.map((b) => {
-            const bookId = bookIdByCode.get(b.bookCode);
-            if (!bookId) {
-              throw new Error(`Book ${b.bookCode} not found`);
-            }
-            return {
-              bookId,
-              usefulLifeMonths: b.usefulLifeMonths,
-              depreciationMethod: b.method,
-              inServiceDate: b.inServiceDate,
-              salvageValue: toDecimal(b.salvageValue ?? 0).toFixed(4),
-              depreciationExpenseAccountCode: b.depreciationExpenseAccountCode,
-              accumDepreciationAccountCode: b.accumDepreciationAccountCode,
-            };
-          }),
-        },
+  return tx.fixedAsset.create({
+    data: {
+      tenantId: entity.tenantId,
+      entityId: entity.id,
+      code: input.code,
+      description: input.description,
+      category: input.category,
+      vendorPartyId: vendor?.id,
+      acquisitionDate: input.acquisitionDate,
+      acquisitionCost: toDecimal(input.acquisitionCost).toFixed(4),
+      acquisitionCurrencyId: input.acquisitionCurrencyCode,
+      assetAccountCode: input.assetAccountCode,
+      status: "IN_SERVICE",
+      sourceSystem: input.sourceSystem,
+      sourceRecordType: input.sourceRecordType,
+      sourceRecordId: input.sourceRecordId,
+      sourcePayload: (input.sourcePayload as any) ?? undefined,
+      bookAttributes: {
+        create: input.books.map((b) => {
+          const bookId = bookIdByCode.get(b.bookCode);
+          if (!bookId) {
+            throw new Error(`Book ${b.bookCode} not found`);
+          }
+          return {
+            bookId,
+            usefulLifeMonths: b.usefulLifeMonths,
+            depreciationMethod: b.method,
+            inServiceDate: b.inServiceDate,
+            salvageValue: toDecimal(b.salvageValue ?? 0).toFixed(4),
+            depreciationExpenseAccountCode: b.depreciationExpenseAccountCode,
+            accumDepreciationAccountCode: b.accumDepreciationAccountCode,
+          };
+        }),
       },
-      select: { id: true },
-    });
-    return asset;
+    },
+    select: { id: true },
   });
+}
+
+/**
+ * Outer wrapper — opens its own $transaction and delegates to the inner.
+ * Preserved for legacy callers (companion repos that don't yet run
+ * inside withTenantContext). New Server Actions / HTTP routes should
+ * call createFixedAssetInTx directly from within their
+ * withTenantContext block.
+ */
+export async function createFixedAsset(
+  prisma: PrismaClient,
+  input: CreateFixedAssetInput
+): Promise<{ id: string }> {
+  return prisma.$transaction((tx) => createFixedAssetInTx(tx, input));
 }
 
 // Count full calendar months between two dates, inclusive of the start

@@ -68,9 +68,22 @@ import { prisma } from "@/lib/db";
  *   return parties;
  * });
  */
+/**
+ * Options forwarded to the underlying $transaction. Same shape Prisma
+ * accepts (maxWait/timeout/isolationLevel). Added so long-running
+ * batch routes (e.g., /api/internal/fixed-asset/record-depreciation)
+ * can extend the default 5s timeout without dropping the GUC guarantee.
+ */
+export interface WithTenantContextOptions {
+  maxWait?: number;
+  timeout?: number;
+  isolationLevel?: Prisma.TransactionIsolationLevel;
+}
+
 export async function withTenantContext<T>(
   tenantId: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  options?: WithTenantContextOptions
 ): Promise<T> {
   if (typeof tenantId !== "string" || tenantId.length === 0) {
     throw new Error(
@@ -86,7 +99,7 @@ export async function withTenantContext<T>(
     // concatenation.
     await tx.$executeRaw`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
     return fn(tx);
-  });
+  }, options);
 }
 
 /**

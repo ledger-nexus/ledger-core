@@ -65,6 +65,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { withTenantContext } from "@/lib/db/tenant-context";
 import {
   UnbalancedEntryError,
   InvalidLineError,
@@ -258,8 +259,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let duplicateCount = 0;
   let freshCount = 0;
 
+  // RLS Phase 2b: replace prisma.$transaction with withTenantContext.
+  // The outer block IS a $transaction with the GUC set; postJournalEntry
+  // is already tx-aware per ledger-core v1.11. Per-period postJournalEntry
+  // calls share ONE tx (this is the substrate-contract — the route's
+  // batch atomicity guarantee is "all-or-none for this request").
+  //
+  // Pre-existing security gap NOT entangled with this migration: the
+  // asset lookup above uses `entity: { code: ... }` without an
+  // identity.tenantId scope. Phase 3 FORCE will block cross-tenant
+  // reads, surfacing this as a proper UNKNOWN_ASSET. Documented as a
+  // separate deficiency to track.
   try {
-    const txResult = await prisma.$transaction(
+    const txResult = await withTenantContext(
+      identity.tenantId,
       async (tx) => {
         for (const p of parsedPeriods) {
           const sourceRecordId = `${asset.id}:${book.code}:${p.periodEnd
@@ -340,6 +353,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           newLast: newLast.toISOString().slice(0, 10),
         };
       },
+      // Extended timeout for large batch posts. Forwarded to $transaction
+      // by withTenantContext's options parameter.
       { timeout: 30_000 }
     );
 
