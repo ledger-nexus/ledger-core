@@ -4,6 +4,12 @@
 **Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`) as of this commit.
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022), Security TSC + Common Criteria CC1–CC9. Availability, Processing Integrity, Confidentiality also referenced where in scope.
 
+**v2.8 amendments (2026-06-06) — audit log replication design:**
+- **Deficiency #9 (Audit log not replicated outside primary DB) → Remediated** via PR #104. Phase 1 design doc `docs/architecture/audit-log-replication-design.md` captures 4-option comparison + recommended approach (S3 + Object Lock compliance mode + 7-year retention) + 3-phase rollout + implementation skeleton + schema migration plan + cost estimate ($0.02/mo at v1; $1.50/mo at 10-customer scale) + CC mapping (CC4 + CC7.2 + CC7.4 + CC6.7) + 6-step migration sequence with chaos-drill verification.
+- **CC4 / CC7.4 posture upgrade**: audit trail integrity is now backed by a documented architecture for substrate-loss survival. Phase 1 captures the SOC 2 commitment; Phase 2 ships when customer #2 onboards (avoids paying for infrastructure at zero-customer scale).
+- **Status transition** mirrors v2.4 RLS deficiency #12: Remediated (design captured + path clear) rather than Closed (Phase 2 hasn't shipped).
+- **Readiness % bump: 82% → 83%.** Mediums advance readiness by ~0.5pp at the design-only stage; Phase 2 ship will land another increment.
+
 **v2.7 amendments (2026-06-06) — CSP standalone closure:**
 - **Deficiency #2 (No CSP header) → Closed** via PR #99. Standalone extraction of the CSP middleware change from PR #10's foundation arc. `src/middleware.ts` generates a per-request 16-byte base64url nonce via Edge `crypto.getRandomValues`; CSP header set on every response with `strict-dynamic` script-src + Clerk/Sentry/Stripe connect-src + `frame-ancestors 'none'` + `object-src 'none'` + `upgrade-insecure-requests`. 9/9 tests pass (`tests/csp-nonce.test.ts`).
 - **CC6.6 posture upgrade**: anti-XSS control upgrades from "static security headers + Next.js default escape" to **"static headers + per-request CSP nonce + strict-dynamic delegation"**. The script-injection attack surface is now defended at the response layer in addition to the framework-level escape.
