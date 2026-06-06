@@ -1,6 +1,6 @@
 # Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design + #1 auth Critical Remediated + PR #10 splits
 
-**Updated 2026-06-06 (v13).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v14).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -32,8 +32,13 @@ extraction, completes the 4-PR splitting trajectory that brings
 substantive PR #10 features to main on their own merge schedule);
 the **CLAUDE.md PR #10 institutionalization** added **1 more** (PR #119
 documents the splitting recipe + deficiency-log re-audit pattern in
-CLAUDE.md so future sessions inherit the playbook),
-for **138+ total** across the 5-repo portfolio. This file documents
+CLAUDE.md so future sessions inherit the playbook); the **process
+tooling extraction** added **1 more** (PR #123 brings the
+`/soc2-check` slash command + `pre-commit-secrets-scan.sh` hook to
+main — the 5th and effectively final substantive PR #10 split,
+decomposing PR #10 from a 9-feature bundle to mostly leaf-level
+encryption-stack and docs work),
+for **139+ total** across the 5-repo portfolio. This file documents
 the dependency order so the founder can land them efficiently when
 ready.
 
@@ -639,15 +644,16 @@ PR #10 (`soc2-hardening-rollout`) is a 9-feature foundation PR that's been open 
 | 2 | **#115** | `src/lib/soc2/index.ts` (10 exports: assertTenantScope, constantTimeEqual, redactPii, sanitizeError, auditedMutation, schemaFingerprint, CrossTenantAccessError) + `src/lib/monitoring/index.ts` (Sentry shim with redactPii + console fallback) + 25 tests | Deficiency #5 (Medium Sentry shim) → completes ledger-core piece for **5/5 portfolio coverage** (Group S covered 4 companions) | `main` |
 | 3 | **#116** | `src/app/api/health/route.ts` — endpoint surfacing schemaFingerprint + DB ping + monitoring presence + uptime + version. 503 on DB-unreachable. | CC7.1 anomaly detection at substrate level | PR #115 |
 | 4 | **#120** | `prisma/sql/audit-log-append-only.sql` (Postgres RULE: no-ops UPDATE+DELETE on audit_log) + `tests/_helpers/audit-log-cleanup.ts` (`withAuditLogMutable` escape hatch) + `tests/audit-log-append-only.test.ts` (3 tests) + **15 test files patched** to wrap audit cleanup in the escape hatch (accounts-actions, audit-log-csv, audit-log-page, internal-tenant-scope, journal-entry-csv-audit, journal-entry-notes, pen-test-tenant-isolation, report-csv-audit, report-csv-hierarchy, reverse-journal-entry, setup-first-entity, tenant-account-resolution, tenant-context, tenant-isolation, tenant-party-resolution) | CC4 (audit trail integrity) + CC7.2 (anomaly detection) — pairs with PR #104 design (Phase 1 RULE protects tampering within live DB; design protects DB loss) | PR #116 |
+| 5 | **#123** | `.claude/commands/soc2-check.md` (slash command to audit pending git diff against SOC 2 control matrix) + `scripts/pre-commit-secrets-scan.sh` (pre-commit hook scanning staged files for API keys, JWT tokens, PII patterns, .env content) | CC4 (monitoring) + CC8 (change management) + CC6.7 (data-in-transit) | `main` (off main, independent) |
 
 ### Group Z.2 — Remaining PR #10 features (NOT extracted this session)
 
 | Feature | Why deferred | Extraction risk |
 |---|---|---|
-| `/soc2-check` slash command | Process tooling, no deficiency closure | Low |
-| pre-commit hook | Process tooling, no deficiency closure | Low |
-| soc2 skill | Process tooling, no deficiency closure | Low |
+| soc2 skill | Not in PR #10 file tree — verified via `git ls-tree -r soc2-hardening-rollout` shows no `.claude/skills/` paths. The "soc2" skill is loaded from user-level `~/.claude/skills/`, not project. | N/A — not in this repo |
 | env validator | Re-audit found this is **already on main** at `src/lib/env.ts` (commits a7ebfe8, 274f033, f18af1f). The deficiency log doesn't track this as a tracked item. | None — already on main |
+| `src/lib/soc2/field-encryption.ts` | Part of the encryption-stack arc (PRs #11-#36 in the deterministic-encryption stack). Lands with that stack, not as a standalone Group Z PR. | Deferred to encryption stack merge |
+| `docs/SOC2_CONTROL_MATRIX.md`, `docs/SOC2_ROADMAP.md` | Already amended via the doc-pentagon arc (v2.4 → v2.9 stack). | Already amended elsewhere |
 
 ### Group Z merge sequence (suggested)
 
@@ -655,13 +661,14 @@ PR #10 (`soc2-hardening-rollout`) is a 9-feature foundation PR that's been open 
 2. **#115** can merge any time (off main, independent)
 3. **#116** after #115 lands (stacked on PR #115)
 4. **#120** after #116 lands (stacked on PR #116). Operator runs `prisma db execute --file prisma/sql/audit-log-append-only.sql` post-merge to apply RULE to existing databases. Fresh databases get the RULE on first apply.
+5. **#123** can merge any time (off main, independent). Operator wires `scripts/pre-commit-secrets-scan.sh` into `.git/hooks/pre-commit` post-merge per setup instructions in the script header.
 
 ### Splitting trajectory
 
 | Pre-session | Post-session |
 |---|---|
-| 0/9 PR #10 features standalone | **4/9** PR #10 features standalone |
-| PR #10 bundled at 9 features | PR #10 bundled at 5 features (remaining: 4 process tooling + helper module which is now extracted via PR #115) |
+| 0/9 PR #10 features standalone | **5/9** PR #10 features standalone |
+| PR #10 bundled at 9 features | PR #10 bundled at **4 leaf items** (encryption-stack `field-encryption.ts` + docs already amended elsewhere + env validator already on main + soc2 skill which isn't actually in PR #10) |
 
 ### Defense-in-depth for audit trail integrity
 
