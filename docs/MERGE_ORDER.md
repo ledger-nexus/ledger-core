@@ -1,6 +1,6 @@
 # Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design + #1 auth Critical Remediated + PR #10 splits
 
-**Updated 2026-06-06 (v14).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v15).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -37,8 +37,14 @@ tooling extraction** added **1 more** (PR #123 brings the
 `/soc2-check` slash command + `pre-commit-secrets-scan.sh` hook to
 main — the 5th and effectively final substantive PR #10 split,
 decomposing PR #10 from a 9-feature bundle to mostly leaf-level
-encryption-stack and docs work),
-for **139+ total** across the 5-repo portfolio. This file documents
+encryption-stack and docs work); the **encryption stack arc**
+(Group AA) added **5 more** (PR #127 field-encryption.ts as 6th
+PR #10 split + PR #129 Prisma encrypted-fields extension as 7th
+PR #10 split + PR #128 Phase 1 rebase + PR #130 Phase 2 rebase
+(User.email encryption) + PR #131 Phase 3 partial rebase
+(JournalEntryNote.authorEmail), bringing the encryption stack from
+fully-blocked on PR #10 to 2.5/3 phases substantively on main),
+for **144+ total** across the 5-repo portfolio. This file documents
 the dependency order so the founder can land them efficiently when
 ready.
 
@@ -681,6 +687,60 @@ After PR #120 + PR #104 merge, audit trail has 3-layer defense:
 | Out-of-band archive | S3 + Object Lock compliance mode + 7-year retention (Phase 2 implementation deferred until customer #2) | PR #104 design captures the architecture; ship when triggered |
 
 The pattern is now well-established for future PR #10 extractions: each remaining feature can be cherry-picked + verified + posted as a standalone PR following the same playbook. After Group Z, PR #10 itself becomes a less critical merge blocker (6 features remaining, most of low marginal value).
+
+---
+
+## Group AA — Encryption stack arc (2026-06-06, 5 PRs)
+
+The encryption stack (originally PRs #24-#28, base-branched on PR #10's `soc2-hardening-rollout`) was fully blocked behind PR #10 landing. Group AA decomposes the dependency chain into 2 more PR #10 splits + 3 stacked rebases that bring the encryption stack substantively onto main.
+
+### Group AA.1 — PR #10 splits (encryption foundation)
+
+| Order | PR | What | Base |
+|---|---|---|---|
+| 1 | **#127** | `src/lib/soc2/field-encryption.ts` (217 lines AES-256-GCM helper) + 15 tests. **6th PR #10 standalone extraction.** | PR #115 |
+| 2 | **#129** | `src/lib/db/encrypted-fields-extension.ts` (552 lines Prisma extension) + `src/lib/db.ts` wiring + `tests/encrypted-fields-extension.test.ts` + `/api/health` gains full `encryption: { configured, columnCount }` block. **7th PR #10 standalone extraction.** | PR #128 |
+
+### Group AA.2 — Encryption stack rebases
+
+| Order | PR | What | Base |
+|---|---|---|---|
+| 3 | **#128** | Phase 1 rebase: `deterministic-encryption.ts` HMAC-SHA256 search-hash helper + `/api/health` gains `deterministicEncryption: { configured }` block. Embedded field-encryption.ts for stack linearization. 57/57 helper tests pass. | PR #116 |
+| 4 | **#130** | Phase 2 rebase: User.email AES-256-GCM encryption + `User.emailHash` column for Clerk lookup. `src/lib/auth/clerk.ts` modified to use emailHash for equality search on encrypted email. Backfill script `scripts/encrypt-user-emails.ts`. | PR #129 |
+| 5 | **#131** | Phase 3 partial rebase: JournalEntryNote.authorEmail encryption + `authorEmailHash` column. **TenantInvite.email half deferred** — depends on `src/app/actions/team.ts` + TenantInvite model not yet on main. | PR #130 |
+
+### Group AA merge sequence (suggested)
+
+1. **#127** can merge any time after PR #115 lands (stacked on PR #115)
+2. **#129** after PR #128 lands (stacked on PR #128)
+3. **#128** after PR #116 lands (stacked on PR #116)
+4. **#130** after PR #129 lands (stacked on PR #129)
+5. **#131** after PR #130 lands (stacked on PR #130)
+
+The natural ordering for the founder: #128 → #127 → #129 → #130 → #131. Each builds on its predecessor; tsc + 57/57 helper tests pass at every stage.
+
+### Operator post-merge actions
+
+After all 5 merge:
+- Wire `FIELD_ENCRYPTION_KEY` in Vercel env (64-char hex string)
+- Wire `FIELD_DETERMINISTIC_KEY` in Vercel env (64-char hex string, distinct from FIELD_ENCRYPTION_KEY for defense-in-depth)
+- Run `scripts/encrypt-user-emails.ts` once to backfill existing User.email rows
+- Run a one-shot `prisma db execute` UPDATE for JournalEntryNote.authorEmail backfill
+- Verify via `curl /api/health | jq '.encryption'` returns `{ configured: true, columnCount: 2 }`
+
+### What this completes
+
+| Layer | Pre-Group-AA | Post-Group-AA |
+|---|---|---|
+| Encryption helpers on main | None | AES-256-GCM (PR #127) + HMAC-SHA256 search-hash (PR #128) |
+| Prisma extension on main | None | PR #129 (auto-encrypt/decrypt + searchHash on write) |
+| Columns encrypted on main | None | User.email + JournalEntryNote.authorEmail (after rollout) |
+| CC6 / Confidentiality TSC posture | DB-default volume encryption only | Field-level AES-256-GCM + deterministic search-hash on critical lookup paths |
+
+### What's deferred
+
+- **TenantInvite.email encryption** — requires TenantInvite model + `src/app/actions/team.ts` on main. Stacks on those features when they land.
+- **Other encrypted columns** (EmailDelivery.body, Notification.body, BankAccount fields, Party.displayName, Tenant.name, LegalEntity.name, BankStatement, JournalEntry.memo, JournalEntry.sourcePayload, AuditLog.metadata) — each is its own PR following the Phase 2/3 pattern: add column → register in ENCRYPTED_COLUMNS → backfill. Mechanical given the established pattern.
 
 ---
 
