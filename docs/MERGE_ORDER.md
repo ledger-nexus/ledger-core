@@ -1,6 +1,6 @@
-# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc
+# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design
 
-**Updated 2026-06-06 (v9).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v10).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -18,9 +18,11 @@ record); the **2026-06-06 pinning arc** (Group V) added **7 more** (5
 engineering PRs closing deficiency #4 portfolio-wide + 2 doc PRs amending
 deficiency log + SOC2_READINESS to v2.6); the **2026-06-06 CSP arc**
 (Group W) added **3 more** (PR #99 standalone CSP extraction from PR #10
-+ deficiency log v2.7 + SOC2_READINESS v2.7), for **128+ total** across
-the 5-repo portfolio. This file documents the dependency order so the
-founder can land them efficiently when ready.
++ deficiency log v2.7 + SOC2_READINESS v2.7); the **2026-06-06 audit log
+replication design arc** (Group X) added **3 more** (PR #104 Phase 1
+design + deficiency log v2.8 + SOC2_READINESS v2.8), for **131+ total**
+across the 5-repo portfolio. This file documents the dependency order so
+the founder can land them efficiently when ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
@@ -535,6 +537,34 @@ Closes deficiency **#2** (HIGH severity, opened 2026-05-25) — No CSP header. *
 After all 3 merge: CC6.6 (anti-XSS) posture upgrades from "static security headers + Next.js default escape" to **"static headers + per-request CSP nonce + strict-dynamic delegation"**. The script-injection attack surface is now defended at the response layer in addition to the framework-level escape. Closed-state count: 13 → 14 of 28 tracked. Readiness % bump: 81% → 82%.
 
 **Relationship to PR #10:** PR #10 still exists with the full foundation arc. PR #99 cherry-picks the CSP-only changes (src/middleware.ts + tests/csp-nonce.test.ts + next.config.js comment). The other 8 features in PR #10 (helper module + env validator + audit-log RULE + Sentry shim + /soc2-check + pre-commit hook + soc2 skill + /api/health) remain bundled. Future extractions follow the same pattern if individual deficiency closures get gated on PR #10's slow merge.
+
+---
+
+## Group X — Audit log replication Phase 1 design, deficiency #9 remediation (2026-06-06, 3 PRs)
+
+Closes deficiency **#9** (Medium severity, opened 2026-05-25) at the design layer — audit_log not replicated outside primary DB. **Same architectural pattern as the RLS arc**: Phase 1 design doc captures the SOC 2 commitment now; Phase 2 implementation defers to customer-onboarding trigger. Avoids paying for infrastructure at zero-customer scale.
+
+### Group X.1 — Engineering / design (1 PR, off main)
+
+| PR | Branch | Base | What |
+|---|---|---|---|
+| **#104** | `deficiency-9-audit-log-replication-design` | `main` | `docs/architecture/audit-log-replication-design.md` — 4 options compared (S3 + Object Lock, secondary Postgres, event stream via SQS/Kinesis, periodic snapshot). Recommends Option A (S3 + Object Lock compliance mode + 7-year retention). 3-phase rollout: Phase 1 (this doc) → Phase 2 (sync inline emit, DEFERRED until customer #2) → Phase 3 (async via SQS, DEFERRED until ~1000 rows/day). Includes implementation skeleton (`src/lib/audit/mirror.ts` + `emit.ts`), schema migration plan (`sha256` + `priorSha256` columns for hash chain), cost estimate ($0.02/mo at v1; $1.50/mo at 10-customer scale), CC mapping (CC4 + CC7.2 + CC7.4 + CC6.7), 6-step migration sequence with chaos-drill verification. |
+
+### Group X.2 — Doc-pentagon amendments (2 PRs, stacked)
+
+| Order | PR | Doc | Cite source | Base |
+|---|---|---|---|---|
+| 1 | **#105** | `control-deficiency-log.md` v2.7 → v2.8 — remediates #9 | PR #104 | PR #100 (`deficiency-log-2026-06-06-v27`) |
+| 2 | **#106** | `SOC2_READINESS.md` v2.7 → v2.8 — readiness 82% → 83%, CC4 / CC7.4 posture upgrade | PR #104 + PR #105 | PR #101 (`soc2-readiness-v27-csp`) |
+
+### Group X merge sequence (suggested)
+
+1. **X.1**: #104 first (design)
+2. **X.2**: #105 (deficiency log) after PR #100 + #104 land, then #106 (readiness) after PR #101 + #105 land
+
+After all 3 merge: CC4 / CC7.4 audit-trail-integrity posture upgrades from "audit trail lives only in primary Neon DB" to **"audit trail backed by documented architecture for substrate-loss survival"**. Status transition mirrors v2.4 RLS deficiency #12 (Remediated, not Closed — Phase 2 ships when customer #2 onboards). Closed-state count unchanged at 14; Remediated-state count 1 → 2. Readiness % bump: 82% → 83%.
+
+**Phase 2 trigger condition:** customer #2 onboarding. Phase 2 implementation requires AWS account + IAM role + bucket provisioning + secrets in Vercel env + schema migration (add sha256 + priorSha256 columns) + replace `prisma.auditLog.create` calls with `emitAuditRow` portfolio-wide + chaos-drill verification. All steps captured in the design doc's "Migration sequence" section.
 
 ---
 
