@@ -1,6 +1,11 @@
 # Risk register
 
-**Version:** 2.4 · **Effective date:** 2026-06-06 · **Owner:** Chris
+**Version:** 2.5 · **Effective date:** 2026-06-06 · **Owner:** Chris
+
+**v2.5 amendments (2026-06-06) — Risk #1 Auth bypass: 20 → 5:**
+- **Risk #1 (Auth bypass via dev cookie stub)** Open → Mitigated, score 20 (4 × 5) → 5 (1 × 5). Layered defense already on main: Clerk integration env-gated, middleware fails closed with 503 in prod when `CLERK_SECRET_KEY` unset (commit b99bbb4), verification test (`tests/middleware-fail-closed.test.ts`). Original attack ("anyone with `AUTH_STUB_SECRET` can impersonate") now requires BOTH prod CLERK env unset AND attacker to obtain stub secret — first condition blocked by 503 gate. Likelihood drops from 4 to 1; impact unchanged at 5.
+- Captures deficiency log v2.9 amendment (PR #110): deficiency #1 Open → Remediated.
+- Score ≥ 12 threshold count: Risks above threshold now: #5 (vendor outage 12), #19 (backup integrity 15), #20 (phishing 12). Risk #1 drops below threshold; Risk #11 already dropped to 6 in v2.4; #8 already dropped to 6 in v2.4.
 
 **v2.4 amendments (2026-06-06) — 2026-06-06 day capstone (4 deficiency closures):**
 - **Risk #11 (Supply chain attack via npm dep)** Partial → Mitigated, score 15 (3 × 5) → 6 (2 × 3). The deficiency #4 portfolio-wide closure (Group V, 5 PRs pinning 115 ranges) eliminates the silent-transitive-upgrade attack vector on every `npm ci` deploy. Remaining likelihood (2) reflects social-engineering risk on a Dependabot PR review (we approve a malicious upgrade thinking it's a benign patch). Remaining impact (3) reflects that any compromised dep would still face encryption-at-rest + RLS + audit-log defense-in-depth.
@@ -23,7 +28,7 @@
 
 | # | Risk | Likelihood | Impact | Score | Mitigation | Owner | Status |
 |---|---|---:|---:|---:|---|---|---|
-| 1 | **Auth bypass via dev cookie stub** | 4 | 5 | 20 | Replace with Clerk/NextAuth (see auth-swap.md). Currently mitigated by "not yet in production with real customers." | {{NAME}} | Open |
+| 1 | **Auth bypass via dev cookie stub** | 1 | 5 | 5 | **Mitigated 2026-06-06 via layered defense already on main** (closes deficiency log row #1, flipped to Remediated in v2.9). Clerk integration env-gated (`src/lib/auth/clerk.ts` + `current-user.ts` dispatch via `isClerkEnabled()`); middleware fails closed with 503 in prod when `CLERK_SECRET_KEY` unset (commit b99bbb4); verification in `tests/middleware-fail-closed.test.ts`. Original attack now requires BOTH prod CLERK env unset AND attacker to obtain `AUTH_STUB_SECRET` — first condition blocked by 503 gate. Dev cookie stub remains in code as a dev/test fallback (intentional for UserSwitcher demo); deferred final removal until first customer onboarding. | Chris | Mitigated |
 | 2 | **Leaked `INTERNAL_API_TOKEN` allows arbitrary JE posting** | 2 | 5 | 10 | Token stored only in Vercel env; rotation procedure in access-control.md; gitleaks CI catches accidental commit. | {{NAME}} | Mitigated |
 | 3 | **Unauthorized period reopen** | 1 | 5 | 5 | requireAdmin gate; AuditLog row captured; access reviews quarterly. | {{NAME}} | Mitigated |
 | 4 | **Customer data leaked via SQL injection** | 1 | 5 | 5 | Prisma parameterizes all queries; no raw SQL paths; CodeQL CI runs weekly. | {{NAME}} | Mitigated |
@@ -49,9 +54,9 @@
 
 ## Open vs mitigated
 
-- **Open** (need work): 7
+- **Open** (need work): 6
 - **Partial** (some mitigation, more needed): 1
-- **Mitigated** (controls in place, periodic review): 15
+- **Mitigated** (controls in place, periodic review): 16
 - **Future** (not in scope yet): 0
 
 ## Annual review
