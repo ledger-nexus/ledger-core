@@ -25,6 +25,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { Decimal } from "decimal.js";
 import type { Cadence } from "@prisma/client";
+import { withTenantContext } from "@/lib/db/tenant-context";
 import {
   requireAdmin,
   NotAuthenticatedError,
@@ -99,20 +100,12 @@ export async function createRecurringEntryAction(
     }
 
     // ── Resolve entity + book + currency in tenant scope ─────────────────
-    const entity = await prisma.legalEntity.findFirst({
-      where: { tenantId: tenant.id, code: input.entityCode },
-      select: { id: true, tenantId: true },
-    });
-    if (!entity) {
-      return { ok: false, message: `Unknown entity: ${input.entityCode}` };
-    }
-    const book = await prisma.book.findUnique({
-      where: { code: input.bookCode },
-      select: { id: true },
-    });
-    if (!book) {
-      return { ok: false, message: `Unknown book: ${input.bookCode}` };
-    }
+    // RLS Phase 2b shape T2: full resolver chain + create runs inside
+    // withTenantContext using the action's requireCurrentTenant() result.
+    // (Unlike shape E in period-close, here the tenant comes from the
+    // auth layer, not from the entity lookup — so the wrap can include
+    // the entity lookup too, and the tenant-scoped predicate is now
+    // defense in depth alongside the GUC.)
     const currencyCode = input.currencyCode ?? "USD";
 
     // ── Validate lines: balanced + non-negative + non-empty ─────────────
@@ -163,32 +156,60 @@ export async function createRecurringEntryAction(
     }
 
     // ── Create ───────────────────────────────────────────────────────────
-    const created = await prisma.recurringEntry.create({
-      data: {
-        tenantId: tenant.id,
-        entityId: entity.id,
-        bookId: book.id,
-        code,
-        memo,
-        currencyId: currencyCode,
-        cadence: input.cadence,
-        startDate,
-        endDate,
-        createdBy: admin.email,
-        lines: {
-          create: input.lines.map((l, idx) => ({
-            lineNo: idx + 1,
-            accountCode: l.accountCode,
-            debit: new Decimal(l.debit ?? 0).toFixed(4),
-            credit: new Decimal(l.credit ?? 0).toFixed(4),
-            description: l.description,
-            partyCode: l.partyCode,
-            itemCode: l.itemCode,
-          })),
+    type CreateOutcome =
+      | { kind: "unknownEntity" }
+      | { kind: "unknownBook" }
+      | { kind: "ok"; id: string };
+
+    const outcome = await withTenantContext(tenant.id, async (tx): Promise<CreateOutcome> => {
+      const entity = await tx.legalEntity.findFirst({
+        where: { tenantId: tenant.id, code: input.entityCode },
+        select: { id: true },
+      });
+      if (!entity) return { kind: "unknownEntity" };
+
+      const book = await tx.book.findUnique({
+        where: { code: input.bookCode },
+        select: { id: true },
+      });
+      if (!book) return { kind: "unknownBook" };
+
+      const created = await tx.recurringEntry.create({
+        data: {
+          tenantId: tenant.id,
+          entityId: entity.id,
+          bookId: book.id,
+          code,
+          memo,
+          currencyId: currencyCode,
+          cadence: input.cadence,
+          startDate,
+          endDate,
+          createdBy: admin.email,
+          lines: {
+            create: input.lines.map((l, idx) => ({
+              lineNo: idx + 1,
+              accountCode: l.accountCode,
+              debit: new Decimal(l.debit ?? 0).toFixed(4),
+              credit: new Decimal(l.credit ?? 0).toFixed(4),
+              description: l.description,
+              partyCode: l.partyCode,
+              itemCode: l.itemCode,
+            })),
+          },
         },
-      },
-      select: { id: true },
+        select: { id: true },
+      });
+      return { kind: "ok", id: created.id };
     });
+
+    if (outcome.kind === "unknownEntity") {
+      return { ok: false, message: `Unknown entity: ${input.entityCode}` };
+    }
+    if (outcome.kind === "unknownBook") {
+      return { ok: false, message: `Unknown book: ${input.bookCode}` };
+    }
+    const created = { id: outcome.id };
 
     await auditPrivilegedAction({
       actor: admin,
@@ -303,11 +324,15 @@ export async function setRecurringActiveAction(
   try {
     const admin = await requireAdmin();
     const tenant = await requireCurrentTenant();
-    // Tenant-scoped: a tenant admin can only toggle their own templates.
-    const updated = await prisma.recurringEntry.updateMany({
-      where: { id: input.id, tenantId: tenant.id },
-      data: { isActive: input.isActive },
-    });
+    // RLS Phase 2b shape W2 (no helper involved): wrap the single
+    // updateMany in withTenantContext. Tenant-scoped predicate retained
+    // as defense in depth.
+    const updated = await withTenantContext(tenant.id, async (tx) =>
+      tx.recurringEntry.updateMany({
+        where: { id: input.id, tenantId: tenant.id },
+        data: { isActive: input.isActive },
+      })
+    );
     if (updated.count === 0) {
       return { ok: false, message: "Template not found in this tenant." };
     }
@@ -345,18 +370,23 @@ export async function deleteRecurringEntryAction(
   try {
     const admin = await requireAdmin();
     const tenant = await requireCurrentTenant();
-    // Verify ownership before delete.
-    const target = await prisma.recurringEntry.findFirst({
-      where: { id: input.id, tenantId: tenant.id },
-      select: { id: true, code: true },
+    // RLS Phase 2b shape T2: findFirst + delete inside one
+    // withTenantContext tx. Tenant-scoped predicate retained.
+    // Cascade deletes lines (FK ON DELETE CASCADE). JEs already posted
+    // stay in place — they carry their own lineage triple recording
+    // which template produced them.
+    const target = await withTenantContext(tenant.id, async (tx) => {
+      const t = await tx.recurringEntry.findFirst({
+        where: { id: input.id, tenantId: tenant.id },
+        select: { id: true, code: true },
+      });
+      if (!t) return null;
+      await tx.recurringEntry.delete({ where: { id: t.id } });
+      return t;
     });
     if (!target) {
       return { ok: false, message: "Template not found in this tenant." };
     }
-    // Cascade deletes lines (FK ON DELETE CASCADE). JEs already posted
-    // stay in place — they carry their own lineage triple recording
-    // which template produced them.
-    await prisma.recurringEntry.delete({ where: { id: target.id } });
     await auditPrivilegedAction({
       actor: admin,
       action: "delete-recurring-entry",
