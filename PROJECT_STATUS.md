@@ -6,7 +6,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-06 (5-deficiency closure + 7 PR #10 splits + encryption stack arc + portfolio-wide CLAUDE.md + operator runbook — Critical-Open=0 milestone, readiness 80% → 87%, 14 columns ready to encrypt on main)
+**Last updated:** 2026-06-06 (5-deficiency closure + 8 PR #10 splits + encryption stack arc + control matrix + portfolio-wide CLAUDE.md + operator runbook — Critical-Open=0 milestone, readiness 80% → 87%, 14 columns ready to encrypt, **PR #10 substantively 100% decomposed**)
 
 **Current state:** **Critical-severity Open count: 1 → 0.** 5 deficiencies closed in 2 days (2 Closed, 3 Remediated) including the session-defining #1 auth Critical Remediation. End-to-end engineering + doc-pentagon + merge-train coverage for #1 (auth), #12 (RLS), #4 (npm pinning portfolio-wide), #2 (CSP), and #9 (audit log replication design). Closed-state count 12 → **14** of 28 tracked; Remediated-state 1 → **3**; readiness % 80% → **85%**.
 
@@ -253,7 +253,7 @@ After all 3 merge: **Critical-severity Open count: 1 → 0** — the session-def
 
 ---
 
-### PR #10 splits — foundation-by-piece (2026-06-06, 5 PRs — fully decomposed)
+### PR #10 splits — foundation-by-piece (2026-06-06, 6 PRs — substantively 100% decomposed)
 
 PR #10 (`soc2-hardening-rollout`) has been open since 2026-06-01 with 9 bundled features. Group Z extracts substantive features as **standalone PRs** so they reach main on their own merge schedule. After Group Z, PR #10 is **substantively decomposed** — the remaining 4 leaf items are either already amended elsewhere or are part of the encryption stack arc.
 
@@ -314,7 +314,7 @@ The encryption stack (originally PRs #24-#28, base-branched on PR #10's `soc2-ha
 
 ---
 
-### 2026-06-06 day capstone — 5 deficiency closures + 7 PR #10 splits + encryption stack + CLAUDE.md, 59 PRs
+### 2026-06-06 day capstone — 5 deficiency closures + 8 PR #10 splits + encryption stack + CLAUDE.md + control matrix, 61 PRs
 
 | Deficiency | Sev | Status | Arc | PRs |
 |---|---|---|---|---|
@@ -327,7 +327,8 @@ The encryption stack (originally PRs #24-#28, base-branched on PR #10's `soc2-ha
 | CLAUDE.md institutionalization | — | Institutional memory | PR #119 (ledger-core) + 4 companion re-audit PRs (fa-amort #24, recon #27, revenue-rec #31, integrations #21) — **portfolio-wide re-audit pattern** | 5 PRs |
 | Encryption stack arc | — | Confidentiality TSC posture | Group AA (5 PRs: #127 + #128 + #129 + #130 + #131) — 14 columns encrypted on main + 2 PR #10 splits + 3 stacked rebases | 5 PRs |
 | Operator runbook | — | Founder handoff | PR #126 — 6-phase merge plan | 1 PR |
-| **Total** | | | **Groups U + V + W + X + Y + Z + AA + CLAUDE.md + runbook** | **59 PRs** |
+| Control matrix extraction | — | CC4 auditor entry point | PR #135 — 8th PR #10 standalone split. Brings `docs/SOC2_CONTROL_MATRIX.md` (CC1-CC9 → file/line evidence map) to main. **PR #10 substantively 100% decomposed.** | 1 PR |
+| **Total** | | | **Groups U + V + W + X + Y + Z + AA + CLAUDE.md + runbook + matrix** | **61 PRs** |
 
 **State progression**:
 - **Critical-severity Open count: 1 → 0** ← session milestone
@@ -336,7 +337,7 @@ The encryption stack (originally PRs #24-#28, base-branched on PR #10's `soc2-ha
 - Readiness %: 80% → 81% → 82% → 83% → 85% → **87%** (v2.10 encryption arc bump)
 - Risk register #1 score: 20 → **5** (biggest single-risk score drop in history)
 - **Encrypted columns on main (post-merge + env wire-up): 0 → 14** (Confidentiality TSC substantial upgrade)
-- PR #10 features extracted: 0 → **7/9** (CSP + soc2 helpers + monitoring + /api/health + audit-log RULE + process tooling + field-encryption + Prisma extension)
+- **PR #10 features extracted: 0 → 8/9** (CSP + soc2 helpers + monitoring + /api/health + audit-log RULE + process tooling + field-encryption + Prisma extension + control matrix). **PR #10 substantively 100% decomposed** — the 1 remaining "feature" (env validator) is already on main; soc2 skill not actually in PR #10. PR #10 itself becomes a no-op cleanup PR.
 - **Encryption stack on extraction stack**: 0/3 phases → **2.5/3 phases**
 
 **Open HIGH severities remaining**: #3 (backup restore drill — operational, Q3 2026). The only remaining HIGH; operator-coordinated, not engineering.
