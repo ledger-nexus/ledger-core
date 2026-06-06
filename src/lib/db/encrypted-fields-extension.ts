@@ -184,6 +184,26 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
       normalize: "emailLowercase",
     },
   },
+  // JournalEntryNote.authorEmail — snapshotted at note write time so
+  // the author identity survives even if the User row is deactivated.
+  // Confidential because notes routinely reference customer-side facts
+  // ("Bob from Acme asked about the rebate") and the author email
+  // identifies the responsible CPA. Search-hash supports the per-tenant
+  // "notes by author" report path without exposing plaintext in WHERE
+  // clauses.
+  //
+  // Phase 3 (Phase 3 from the deterministic-encryption design doc).
+  // TenantInvite.email half deferred — depends on team.ts feature not
+  // yet on main.
+  {
+    model: "JournalEntryNote",
+    field: "authorEmail",
+    searchHash: {
+      hashColumn: "authorEmailHash",
+      domain: "JournalEntryNote.authorEmail",
+      normalize: "emailLowercase",
+    },
+  },
   // AuditLog.metadata is the per-event payload for SOC 2 audit
   // records — varies by eventType, examples:
   //   - PRIVILEGED_ACTION → { action, reason, resource, resourceId, ... }

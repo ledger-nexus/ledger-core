@@ -722,6 +722,13 @@ model JournalEntryNote {
   authorUserId String?      @db.Uuid
   author       User?        @relation(fields: [authorUserId], references: [id])
   authorEmail  String?
+  /// SOC 2 CC6 — Confidentiality TSC. HMAC-SHA256 search-hash for the
+  /// encrypted authorEmail. Populated by the encrypted-fields Prisma
+  /// extension on write when FIELD_DETERMINISTIC_KEY is configured.
+  /// Allows filtering notes by author email without exposing plaintext
+  /// in WHERE clauses (e.g., for the per-tenant "notes by author"
+  /// report). Nullable during the rollout window.
+  authorEmailHash Bytes?
 
   // Plain-text body for v1. No markdown / no rich text — keeps the audit
   // surface clean. CPAs write short prose.
