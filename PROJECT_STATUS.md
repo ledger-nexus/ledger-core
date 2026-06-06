@@ -6,9 +6,11 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-05-21
+**Last updated:** 2026-06-05 (RLS arc capstone)
 
-**Current state:** **v1.0 just landed.** Multi-entity consolidation report with intercompany elimination, AP aging report, M-1/M-3 detail report grouping BTD deltas by IRS Form 1120 Schedule M-3 lines. The portfolio's headline architecture is now complete: substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. Consolidation demo seed (Acme Group + 2 subs) ships with the Northwind seed so the report has data to render out of the box.
+**Current state:** **Deficiency #12 (RLS not FORCED) → Remediated.** The 27-PR RLS arc closed across Phases 1+2a+2b + Phase 3 design + Phase 3 prereqs + 15th adversarial pass + institutional record (CLAUDE.md, deficiency log v2.5, SOC2_READINESS v2.5, risk register v2.3). Phase 3 implementation (the actual `ALTER TABLE FORCE` flip + 6-category cross-tenant test suite) is DRAFT in PR #89 awaiting operator ack on the Decision C runbook (`docs/runbooks/rls-phase-3-bypass-roles.md`). Multi-tenant isolation posture upgraded from "application-layer scoping is the only enforcement" to "application + DB-layer policies (advisory pre-FORCE, load-bearing post-FORCE) + per-PR adversarial pass cadence as CC4 monitoring evidence."
+
+**v1.0 portfolio milestone** remains intact — substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. The RLS arc is multi-tenant safety hardening on top of the v1.0 portfolio.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -124,6 +126,38 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ---
 
+### RLS arc — multi-tenant safety hardening (2026-06-05, 27 PRs)
+
+The full closure of deficiency #12 (RLS not FORCED). Sits between v1.x portfolio milestones and Phase 3 implementation.
+
+**Engineering:**
+- **Phase 1** (PR #66): 39 per-table RLS policies + `app_current_tenant_id()` SQL function
+- **Phase 2a** (PR #67): `withTenantContext` helper — opens a Postgres transaction + sets the GUC via parameterized `set_config` (injection-safe)
+- **Phase 2b** (PRs #69-#83, 14 PRs): 23 Server Actions + 3 HTTP routes + 1 batch helper migrated to `withTenantContext`. Full 7-shape catalog (W1/W2/T1/T2/E/M/P) institutionalized in `docs/architecture/rls-phase-2b-migration-guide.md` with reference PRs per shape.
+- **Phase 3 design** (PR #84): full design + bypass-role runbook (`docs/runbooks/rls-phase-3-bypass-roles.md`) + decisions A/B/D resolved with recommendations
+- **Phase 3 prereqs** (PRs #85, #86): Decision B entity scoping + Decision A drop-probes (+ 15th-pass HIGH/M2/M3 fixes embedded)
+- **Phase 3 implementation DRAFT** (PR #89): 37 ALTER TABLE FORCE statements + 6-category cross-tenant test suite (env-gated via `RLS_FORCE_ENABLED=1` for CI matrix per Decision E). Awaits operator ack on Decision C 5-item checklist.
+
+**15th adversarial pass** found 1 HIGH (audit-bypass on Decision A drop) + 3 MEDIUMs + 1 historical finding (deficiency #28: createFixedAsset tenant-blind lookup). All closed in-session before any upstream PR merged:
+- HIGH (audit-bypass) → embedded in PR #86
+- M2 (uncaught tenant errors) + M3 (multi-tenant-admin contract regression) → embedded in PR #85
+- Deficiency #28 → standalone PR #88
+
+**Institutional record** (PRs #87, #90, #91, #92):
+- `docs/policies/control-deficiency-log.md` v2.5 — #12 Remediated, #28 Closed
+- `CLAUDE.md` — 7-shape catalog + adversarial-pass cadence baked into the repo's auto-loaded rulebook
+- `docs/SOC2_READINESS.md` v2.5 — CC6.1 / CC7.4 posture upgrade narrative
+- `docs/policies/risk-register.md` v2.3 — Risk #17 → Mitigated (1×5=5, down from latent 4×5=20); new Risk #21 (Phase 3 FORCE flip data-disappearance) captured at 2×4=8 with mitigations
+
+**Ready-to-flip checklist** (PR #89 gating):
+1. Phase 2b PRs (#69-#83) merged to main
+2. Phase 3 prereq PRs (#85, #86) merged
+3. Operator acks Decision C 5-item runbook checklist
+4. Migration applied to dev → test suite green under `RLS_FORCE_ENABLED=1`
+5. Production cutover per 3-stage rollout in `docs/architecture/rls-phase-3-design.md`
+
+---
+
 ## v1.0 is the portfolio milestone. Beyond:
 
 ### v1.1 — Loom script + autocomplete polish (shipped 2026-05-21)
@@ -141,6 +175,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Open decisions
 
+- **RLS Phase 3 operator ack** — Decision C 5-item runbook checklist (`docs/runbooks/rls-phase-3-bypass-roles.md`) gates PR #89 merge. Operator-coordination work, not engineering.
 - **PostingRule template schema** — v0.4 ships a minimal `$.path` DSL. Resolved at the level needed for the seed; an expression sublanguage with arithmetic (`$.a + $.b * 0.1`) is a v0.5 candidate when QBO/NetSuite mapping needs it.
 - **Cash flow statement** — deferred. Indirect method is the lift; direct method is non-trivial too. Probably v0.6.
 - **Audit log with hash chaining** — out of scope until a real customer asks for it. The `JournalEntry.status = REVERSED` + immutability rule covers GAAP-level audit trail.
