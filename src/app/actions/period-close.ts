@@ -43,7 +43,11 @@ import {
   NotAuthenticatedError,
   NotAuthorizedError,
 } from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+import {
+  requireCurrentTenant,
+  NoTenantSelectedError,
+  NoTenantMembershipError,
+} from "@/lib/auth/tenant";
 import {
   auditPrivilegedAction,
   auditAccessDenied,
@@ -78,6 +82,13 @@ export async function closePeriodAction(
     // tenant-B's period). Phase 3 FORCE will mitigate naturally (RLS
     // blocks the cross-tenant read), but explicit scoping gives a more
     // informative error than the post-FORCE "unknown entity".
+    //
+    // CONTRACT REGRESSION (15th adversarial-pass M3, accepted): the
+    // pre-PR-#85 code accepted an entity belonging to ANY tenant the
+    // admin had access to. A multi-tenant admin can no longer close
+    // periods in tenants other than the one in the lc-tenant cookie —
+    // they must switch workspaces first. This is the intended SOC 2
+    // posture: per-request tenant context is authoritative.
     const tenant = await requireCurrentTenant();
 
     if (!input.entityCode || !input.bookCode || !input.periodCode) {
@@ -185,6 +196,27 @@ export async function closePeriodAction(
         resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
       });
       return { ok: false, message: "You must be signed in." };
+    }
+    // 15th adversarial-pass M2 fix: requireCurrentTenant() throws these.
+    // Without explicit catches, they fell through to the generic catch
+    // with NO auditAccessDenied row — a privileged-action audit gap.
+    if (e instanceof NoTenantSelectedError) {
+      await auditAccessDenied({
+        attemptedAction: "close-period",
+        reason: "No tenant selected",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
+      return { ok: false, message: "Select a workspace first." };
+    }
+    if (e instanceof NoTenantMembershipError) {
+      await auditAccessDenied({
+        attemptedAction: "close-period",
+        reason: "No tenant membership",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
+      return { ok: false, message: "You are not a member of any workspace." };
     }
     if (e instanceof NotAuthorizedError) {
       await auditAccessDenied({
@@ -299,6 +331,25 @@ export async function reopenPeriodAction(
         resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
       });
       return { ok: false, message: "You must be signed in." };
+    }
+    // 15th adversarial-pass M2 fix: requireCurrentTenant() throws these.
+    if (e instanceof NoTenantSelectedError) {
+      await auditAccessDenied({
+        attemptedAction: "reopen-period",
+        reason: "No tenant selected",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
+      return { ok: false, message: "Select a workspace first." };
+    }
+    if (e instanceof NoTenantMembershipError) {
+      await auditAccessDenied({
+        attemptedAction: "reopen-period",
+        reason: "No tenant membership",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+      });
+      return { ok: false, message: "You are not a member of any workspace." };
     }
     if (e instanceof NotAuthorizedError) {
       await auditAccessDenied({
