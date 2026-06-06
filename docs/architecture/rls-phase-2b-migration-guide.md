@@ -262,6 +262,46 @@ return withTenantContext(tenant.id, async (tx) => {
 
 The outer `withTenantContext` is itself a `$transaction` — don't nest a second one inside it. Just use `tx` directly.
 
+## Shape catalog (discovered during the sweep)
+
+After landing 9 migrations across PRs #70-#75, the original Class W / Class T binary turned out to undercount the shapes. Five distinct shapes have surfaced. Match your target to one of these before starting and you'll know within 2 minutes what the diff will look like:
+
+| Shape | Helper status | Action body pattern | Reference PR | Touched files |
+|---|---|---|---|---|
+| **W1 — pure widening** | Single-statement helper takes `PrismaClient` | Just wrap the call in `withTenantContext`; widen helper signature to `Db = PrismaClient \| Prisma.TransactionClient` | #70 (`mark-notifications-read`) | helper.ts + action.ts + test |
+| **W2 — helper already tx-aware** | Helper already accepts `TransactionClient` (e.g. `postJournalEntry` per v1.11) | One-line semantic change — wrap + swap. No helper file touched. | #73 (`create-journal-entry`), #74 (`paste-journal-entry`) | action.ts + test |
+| **T1 — single-helper Class T** | Helper opens its own `prisma.$transaction(async tx => ...)` | Split helper into inner-takes-tx + outer-wraps. Action calls inner from inside `withTenantContext`. | #71 (`apply-ap-payment`), #72 (`apply-ar-payment`) | helper.ts (inner/outer split) + action.ts + test |
+| **T2 — multi-step in-action** | Action ITSELF uses `prisma.$transaction(...)` for atomicity (no helper to split) | Replace `prisma.$transaction(async tx => ...)` with `withTenantContext(tenant.id, async tx => ...)`. The outer block IS a `$transaction` with the GUC set. Drops any legacy `tx as typeof prisma` casts on now-tx-aware helpers. | #73 (`reverse-journal-entry`), #74 (`journal-entry-notes`) | action.ts + test |
+| **E — tenant-id-from-entity-lookup** | Action receives entity code; tenantId discriminator IS the entity's tenantId | First DB hit (entity lookup by code) runs OUTSIDE `withTenantContext` — we need its result to know the GUC value. Everything else (book/period/PeriodClose resolvers + the mutation) goes inside `withTenantContext(entity.tenantId, async tx => ...)`. | #75 (`period-close`, `period-reopen`) | action.ts + test |
+
+### Outcome-variant return discipline (T2 + E shapes)
+
+When the tx body has multiple early-exit branches (not-found / already-X / wrong-status), return a tagged union from inside the tx, then map to user-facing messages outside:
+
+```ts
+type Outcome =
+  | { kind: "notFound" }
+  | { kind: "alreadyResolved"; entryNumber: string }
+  | { kind: "ok"; result: T };
+
+const outcome = await withTenantContext(tenant.id, async (tx): Promise<Outcome> => {
+  const x = await tx.foo.findFirst({ ... });
+  if (!x) return { kind: "notFound" };
+  // ... etc
+  return { kind: "ok", result: ... };
+});
+
+if (outcome.kind === "notFound") return { ok: false, error: "Not found." };
+// ... etc
+// Side effects (audit log, revalidatePath, redirect) AFTER the tx returns.
+```
+
+This keeps the tx narrow + makes the early-exits explicit + keeps the audit-emit + path-revalidate outside the tx where they belong (audit-log helpers open their own connections; if you ran them inside `tx` and the tx then rolled back, you'd lose audit rows).
+
+### Open known-gap class (surfaced in shape E)
+
+The period-close migration revealed a pre-existing security gap orthogonal to RLS: when a Server Action takes `entityCode` (or any code-keyed lookup) and resolves the entity globally rather than via `requireCurrentTenant() + tenantId-scoped lookup`, a multi-tenant-admin holding an entity-code collision could mutate the wrong tenant's data. Phase 3 FORCE mitigates this naturally (RLS blocks the cross-tenant read), but the proper layered fix is to scope the entity lookup. **Audit all shape-E migrations for this gap and track them as separate deficiencies — don't entangle them with the RLS migration PR.**
+
 ## Test updates
 
 For each migrated action, add ONE test that verifies the GUC is correctly set:
