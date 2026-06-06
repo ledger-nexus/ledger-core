@@ -15,6 +15,12 @@
 //     the Postgres connection is alive.
 //   - monitoring: { sentryDsnPresent } — SOC 2 CC7 evidence that the
 //     error monitor is wired (the actual DSN value is NEVER exposed).
+//   - deterministicEncryption: { configured } — SOC 2 CC6 (Confidentiality
+//     TSC). True iff FIELD_DETERMINISTIC_KEY is set AND a valid 64-char
+//     hex string. Drives the search-hash columns that enable equality
+//     lookups on encrypted fields. Will be `false` until the
+//     deterministic-encryption rollout deploys. The KEY VALUE ITSELF
+//     is NEVER exposed — only the boolean.
 //   - version: git short SHA if VERCEL_GIT_COMMIT_SHA is set, else
 //     "dev".
 //
@@ -47,9 +53,25 @@ interface HealthResponse {
   monitoring: {
     sentryDsnPresent: boolean;
   };
+  deterministicEncryption: {
+    /** True iff FIELD_DETERMINISTIC_KEY is set AND a valid 64-char hex string. */
+    configured: boolean;
+  };
   version: string;
   uptimeSeconds: number;
   timestamp: string;
+}
+
+/**
+ * Inspect FIELD_DETERMINISTIC_KEY without revealing it. Regex-only
+ * shape check. Never logs, never returns the value. Used to drive the
+ * deterministic-encryption rollout for filter-keyed columns
+ * (User.email, TenantInvite.email, etc.).
+ */
+function isDeterministicKeyConfigured(): boolean {
+  const k = process.env.FIELD_DETERMINISTIC_KEY;
+  if (!k) return false;
+  return /^[0-9a-fA-F]{64}$/.test(k);
 }
 
 const PROCESS_STARTED_AT_MS = Date.now();
@@ -93,6 +115,7 @@ export async function GET(): Promise<NextResponse> {
       ? { reachable: true, latencyMs: dbLatencyMs }
       : { reachable: false, error: dbError ?? "unknown" },
     monitoring: { sentryDsnPresent },
+    deterministicEncryption: { configured: isDeterministicKeyConfigured() },
     version,
     uptimeSeconds: Math.floor((Date.now() - PROCESS_STARTED_AT_MS) / 1000),
     timestamp: new Date().toISOString(),
