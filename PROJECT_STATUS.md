@@ -6,11 +6,15 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-06 (4-deficiency closure capstone — 3 HIGH + 1 Medium)
+**Last updated:** 2026-06-06 (5-deficiency closure capstone — 1 Critical + 3 HIGH + 1 Medium)
 
-**Current state:** **3 HIGH-severity + 1 Medium-severity deficiencies closed in 2 days** (3 fully Closed, 2 Remediated). End-to-end engineering + doc-pentagon + merge-train coverage for #12 (RLS), #4 (npm pinning portfolio-wide), #2 (CSP), and #9 (audit log replication design). Closed-state count 12 → **14** of 28 tracked; Remediated-state 1 → **2**; readiness % 80% → **83%**. **Deficiency #12 (RLS not FORCED) → Remediated.** The 27-PR RLS arc closed across Phases 1+2a+2b + Phase 3 design + Phase 3 prereqs + 15th adversarial pass + institutional record. Phase 3 implementation (the actual `ALTER TABLE FORCE` flip + 6-category cross-tenant test suite) is DRAFT in PR #89 awaiting operator ack on the Decision C runbook. **Deficiency #4 (npm deps not pinned) → Closed portfolio-wide** via 5-PR sweep: 115 dependency ranges pinned to exact versions across all 5 repos. **Deficiency #2 (No CSP header) → Closed** via standalone PR #99 extraction from PR #10's foundation arc (strict-dynamic nonce middleware, 9/9 tests pass). **Deficiency #9 (audit log replication) → Remediated** via PR #104 Phase 1 design doc; Phase 2 (sync inline emit) deferred until customer #2 onboarding. Multi-tenant isolation + supply-chain control + anti-XSS + audit-trail-integrity postures all upgraded in the same day.
+**Current state:** **Critical-severity Open count: 1 → 0.** 5 deficiencies closed in 2 days (2 Closed, 3 Remediated) including the session-defining #1 auth Critical Remediation. End-to-end engineering + doc-pentagon + merge-train coverage for #1 (auth), #12 (RLS), #4 (npm pinning portfolio-wide), #2 (CSP), and #9 (audit log replication design). Closed-state count 12 → **14** of 28 tracked; Remediated-state 1 → **3**; readiness % 80% → **85%**.
 
-**v1.0 portfolio milestone** remains intact — substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. The 2026-06-05 → 2026-06-06 SOC 2 hardening (RLS + pinning + CSP arcs) is multi-tenant safety + supply chain + XSS hardening on top of the v1.0 portfolio.
+**Deficiency #1 (Auth uses dev cookie stub) → Remediated** via re-audit of code already on main: Clerk integration env-gated + middleware fails closed with 503 in prod when CLERK env unset (commit b99bbb4) + verification test (tests/middleware-fail-closed.test.ts). Original attack now requires BOTH prod CLERK env unset AND attacker to obtain AUTH_STUB_SECRET — first condition blocked by the 503 gate. Risk register #1 score drops from 20 (4×5) to 5 (1×5) — biggest single-risk score drop in register history. **Deficiency #12 (RLS not FORCED) → Remediated.** The 27-PR RLS arc closed across Phases 1+2a+2b + Phase 3 design + Phase 3 prereqs + 15th adversarial pass + institutional record. Phase 3 implementation (the actual `ALTER TABLE FORCE` flip + 6-category cross-tenant test suite) is DRAFT in PR #89 awaiting operator ack on the Decision C runbook. **Deficiency #4 (npm deps not pinned) → Closed portfolio-wide** via 5-PR sweep: 115 dependency ranges pinned to exact versions across all 5 repos. **Deficiency #2 (No CSP header) → Closed** via standalone PR #99 extraction from PR #10's foundation arc (strict-dynamic nonce middleware, 9/9 tests pass). **Deficiency #9 (audit log replication) → Remediated** via PR #104 Phase 1 design doc; Phase 2 (sync inline emit) deferred until customer #2 onboarding.
+
+Auth + multi-tenant isolation + supply-chain control + anti-XSS + audit-trail-integrity postures all upgraded in the same day. **Engineering parity reached on tracked deficiencies** — all remaining Open severities (#3 HIGH backup drill; #6/#7/#8 Medium; #10 Low) are operator/founder-coordinated.
+
+**v1.0 portfolio milestone** remains intact — substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. The 2026-06-05 → 2026-06-06 SOC 2 hardening (Groups U + V + W + X + Y arcs) is multi-tenant safety + supply chain + XSS + audit-trail + auth hardening on top of the v1.0 portfolio.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -222,26 +226,59 @@ After all 3 merge: CC4 / CC7.4 audit-trail-integrity posture upgrades to "docume
 
 ---
 
-### 2026-06-06 day capstone — 4 deficiency closures, 21 PRs
+### #1 auth Critical Remediated arc — re-audit closure (2026-06-06, 3 PRs)
+
+**The most significant single-deficiency closure of the session.** Flips deficiency #1 (the ONLY Critical-severity Open) from Open → Remediated based on a re-audit of code already on `main`. **No engineering required** — the layered defense was already shipped weeks ago; only the auditor-facing log hadn't been updated.
+
+**Re-audit findings (Y.0, all already on main):**
+- `src/lib/auth/clerk.ts` — Clerk-backed implementation with JIT user provisioning
+- `src/lib/auth/current-user.ts` — env-gated dispatch via `isClerkEnabled()`
+- `src/middleware.ts` (commit b99bbb4) — 503 fail-closed-in-prod when `CLERK_SECRET_KEY` unset
+- `tests/middleware-fail-closed.test.ts` — verification of the 503 behavior
+
+**Original attack vs current state:**
+- **Original** (deficiency #1 row): "Anyone with `AUTH_STUB_SECRET` can impersonate any user."
+- **Current**: Attack now requires BOTH (a) prod `CLERK_SECRET_KEY` unset (blocked by 503 gate) AND (b) attacker to obtain `AUTH_STUB_SECRET`. Combo unreachable in production.
+
+**Institutional record (Group Y.1, 3 PRs stacked on v2.8 bases):**
+- `docs/policies/control-deficiency-log.md` v2.8 → v2.9 (PR #110): row #1 → Remediated
+- `docs/SOC2_READINESS.md` v2.8 → v2.9 (PR #111): readiness 83% → 85%, Critical-Open=0 milestone
+- `docs/policies/risk-register.md` v2.4 → v2.5 (PR #112): Risk #1 score 20 (4×5) → 5 (1×5), Open → Mitigated. **Biggest single-risk score drop in register history.**
+
+**Merge-train**: MERGE_ORDER Group Y (PR #113) captures the 3-PR ordering.
+
+**Why Remediated, not Closed**: dev cookie stub remains in code as a dev/test fallback (intentional for UserSwitcher demo). Path to Closed: remove `src/lib/auth/session.ts` HMAC path + remove `AUTH_STUB_SECRET` from `src/lib/env.ts`. Deferred until first customer onboarding.
+
+After all 3 merge: **Critical-severity Open count: 1 → 0** — the session-defining audit-readiness milestone. CC6.1 / CC6.6 auth posture upgraded to "Clerk + env-gated dispatch + 503 fail-closed in prod + verification test".
+
+---
+
+### 2026-06-06 day capstone — 5 deficiency closures, 43 PRs
 
 | Deficiency | Sev | Status | Arc | PRs |
 |---|---|---|---|---|
+| **#1 Auth uses dev cookie stub** | **Critical** | **Remediated (NEW today)** | **Group Y (doc-only re-audit)** | **3 PRs** |
 | #12 RLS not FORCED | HIGH | Remediated | Group U (Phases 1+2a+2b + Phase 3 design + prereqs + 15th pass + pentagon) | 27 PRs (DRAFT impl PR #89 awaits Decision C) |
 | #4 npm deps not pinned | HIGH | Closed | Group V (5 engineering + 2 doc) | 7 PRs (portfolio-wide) |
 | #2 No CSP header | HIGH | Closed | Group W (1 engineering + 2 doc) | 3 PRs (standalone PR #10 extraction) |
 | #9 audit log replication | Medium | Remediated | Group X (1 design + 2 doc) | 3 PRs (Phase 1; Phase 2 awaits customer #2) |
-| **Total** | | | **Groups U + V + W + X** | **40 PRs** |
+| **Total** | | | **Groups U + V + W + X + Y** | **43 PRs** |
 
 **State progression**:
+- **Critical-severity Open count: 1 → 0** ← session milestone
 - Closed-state count: 12 → 13 → **14** of 28 tracked
-- Remediated-state count: 1 → **2** (#12 + #9)
-- Readiness % progression: 80% → 81% → 82% → **83%**
+- Remediated-state count: 1 → **3** (#1 + #12 + #9)
+- Readiness %: 80% → 81% → 82% → 83% → **85%**
+- Risk register #1 score: 20 → **5** (biggest single-risk score drop in history)
 
-**Open HIGH severities remaining**: #1 (auth Clerk swap — major v2 arc, deferred), #3 (backup restore drill — operational, Q3 2026). Both gated on the founder, not engineering.
+**Open HIGH severities remaining**: #3 (backup restore drill — operational, Q3 2026). The only remaining HIGH; operator-coordinated, not engineering.
 
 **Open Medium severities remaining**: #6 (MFA), #7 (access review), #8 (vendor SOC 2 receipts), #10 (training records). All operational/founder-coordinated.
 
-**Forward engineering progress** from here moves into PR #10 splitting opportunities (env validator, audit-log RULE, /api/health, helper module) — each potentially extractable as standalone closures following the CSP arc playbook.
+**Engineering parity reached** on tracked deficiencies. Forward engineering progress from here:
+- **PR #10 splitting opportunities** (env validator, audit-log RULE, /api/health, helper module) — each potentially extractable as standalone closures following the CSP arc playbook. Lower marginal value now that the headline closures are done, but useful infrastructure on main.
+- **Phase 2 implementations** of the Remediated items (#12 RLS Phase 3 FORCE pending operator Decision C ack; #9 audit log replication Phase 2 pending customer #2 onboarding).
+- **Re-audit other deficiencies for hidden Remediated state** (the #1 finding pattern — deficiency log lagging architectural reality).
 
 ---
 
