@@ -43,6 +43,7 @@ import {
   NotAuthenticatedError,
   NotAuthorizedError,
 } from "@/lib/auth/current-user";
+import { requireCurrentTenant } from "@/lib/auth/tenant";
 import {
   auditPrivilegedAction,
   auditAccessDenied,
@@ -70,17 +71,24 @@ export async function closePeriodAction(
 ): Promise<ClosePeriodState> {
   try {
     const admin = await requireAdmin();
+    // SECURITY (RLS Phase 3 decision B): scope entity lookup by tenantId.
+    // Without this, a multi-tenant admin holding an entity-code collision
+    // could close the wrong tenant's period (a tenant-A admin invoking
+    // with entityCode that exists in tenant-B's data would close
+    // tenant-B's period). Phase 3 FORCE will mitigate naturally (RLS
+    // blocks the cross-tenant read), but explicit scoping gives a more
+    // informative error than the post-FORCE "unknown entity".
+    const tenant = await requireCurrentTenant();
 
     if (!input.entityCode || !input.bookCode || !input.periodCode) {
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
     }
 
-    // Phase 4b: legalEntity.code is unique per [tenantId, code]. Use
-    // findFirst — admin auth check already ensures the caller has a
-    // tenant, but we accept the entity belonging to any tenant the
-    // admin has access to (rare cross-tenant admin scenarios).
+    // Phase 4b: legalEntity.code is unique per [tenantId, code]. Scope
+    // by tenant.id so cross-tenant code collisions return UNKNOWN_ENTITY
+    // instead of mutating the wrong tenant.
     const entity = await prisma.legalEntity.findFirst({
-      where: { code: input.entityCode },
+      where: { code: input.entityCode, tenantId: tenant.id },
       // tenantId pulled so the PeriodClose row is tenant-tagged.
       select: { id: true, code: true, tenantId: true },
     });
@@ -208,14 +216,16 @@ export async function reopenPeriodAction(
 ): Promise<ReopenPeriodState> {
   try {
     const admin = await requireAdmin();
+    const tenant = await requireCurrentTenant();
 
     if (!input.entityCode || !input.bookCode || !input.periodCode) {
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
     }
 
-    // Phase 4b: see closePeriodAction above; findFirst by code.
+    // RLS Phase 3 decision B: scope entity lookup by tenantId — same
+    // rationale as closePeriodAction above.
     const entity = await prisma.legalEntity.findFirst({
-      where: { code: input.entityCode },
+      where: { code: input.entityCode, tenantId: tenant.id },
       select: { id: true, tenantId: true },
     });
     if (!entity) return { ok: false, message: `Unknown entity: ${input.entityCode}` };

@@ -177,8 +177,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Resolve asset + book + attrs.
+  // RLS Phase 3 decision B: scope asset lookup by the authenticated
+  // token's tenant. Without this, a token tagged tenant-A could fetch
+  // tenant-B's asset if both had matching assetCode + entityCode pairs.
+  // (Tenant-scoped here AT THE ASSET LEVEL since the asset row carries
+  // its own tenantId — defense in depth alongside the entity scope.)
   const asset = await prisma.fixedAsset.findFirst({
-    where: { code: body.assetCode, entity: { code: body.entityCode } },
+    where: {
+      tenantId: identity.tenantId,
+      code: body.assetCode,
+      entity: { tenantId: identity.tenantId, code: body.entityCode },
+    },
     select: {
       id: true,
       code: true,
