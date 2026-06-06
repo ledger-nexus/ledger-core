@@ -4,6 +4,13 @@
 **Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`) as of this commit.
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022), Security TSC + Common Criteria CC1–CC9. Availability, Processing Integrity, Confidentiality also referenced where in scope.
 
+**v2.9 amendments (2026-06-06) — #1 auth Critical → Remediated:**
+- **Deficiency #1 (Auth uses dev cookie stub) → Remediated.** 2026-06-06 re-audit of code already on main found the layered defense already shipped: Clerk integration (`src/lib/auth/clerk.ts`) + env-gated dispatch (`src/lib/auth/current-user.ts` via `isClerkEnabled()`) + middleware fails closed in production with 503 when `CLERK_SECRET_KEY` unset (commit b99bbb4 in `src/middleware.ts`) + verification test (`tests/middleware-fail-closed.test.ts`).
+- **CC6.1 / CC6.6 posture upgrade**: original "anyone with `AUTH_STUB_SECRET` can impersonate any user" attack now requires BOTH prod `CLERK_SECRET_KEY` unset AND attacker to obtain `AUTH_STUB_SECRET`. First condition blocked by 503 fail-closed gate. Combo realistically unreachable in production.
+- **Not yet Closed** because dev cookie stub remains in codebase as a fallback for dev/test (intentional for UserSwitcher demo). Path to Closed: remove `src/lib/auth/session.ts` HMAC path + remove `AUTH_STUB_SECRET` from `src/lib/env.ts`. Deferred until first customer onboarding.
+- **Critical-severity Open: 1 → 0**. The only Critical deficiency in the log is now Remediated. **Engineering forward progress on tracked deficiencies is at parity** until customer onboarding or operator-coordination work happens.
+- **Readiness % bump: 83% → 85%**. Closing the only Critical is a 2pp bump (vs. ~1pp for typical High closures); Critical-Open=0 is a meaningful audit-readiness milestone.
+
 **v2.8 amendments (2026-06-06) — audit log replication design:**
 - **Deficiency #9 (Audit log not replicated outside primary DB) → Remediated** via PR #104. Phase 1 design doc `docs/architecture/audit-log-replication-design.md` captures 4-option comparison + recommended approach (S3 + Object Lock compliance mode + 7-year retention) + 3-phase rollout + implementation skeleton + schema migration plan + cost estimate ($0.02/mo at v1; $1.50/mo at 10-customer scale) + CC mapping (CC4 + CC7.2 + CC7.4 + CC6.7) + 6-step migration sequence with chaos-drill verification.
 - **CC4 / CC7.4 posture upgrade**: audit trail integrity is now backed by a documented architecture for substrate-loss survival. Phase 1 captures the SOC 2 commitment; Phase 2 ships when customer #2 onboards (avoids paying for infrastructure at zero-customer scale).
