@@ -246,37 +246,40 @@ describe("/api/internal/journal-entries: tenant-scoped token enforcement", () =>
     expect(meta.tenantId).toBe(tenantA.id);
   });
 
-  it("Cross-tenant attempts do NOT emit a 'tenant scope mismatch' audit (Decision A — probe dropped)", async () => {
+  it("Cross-tenant attempts emit TOKEN_REJECTED 'Unknown entity' audit (Decision A + 15th-pass HIGH fix)", async () => {
     // RLS Phase 3 decision A (PR #84 design, landed PR #86):
-    // The previous version emitted a TOKEN_REJECTED audit row with
-    // reason "tenant scope mismatch" by doing a GLOBAL legalEntity
-    // findFirst probe in the UnknownEntityError handler. The probe was
-    // dropped because:
-    //   1. Phase 3 FORCE would block the probe read anyway (RLS).
-    //   2. The audit-on-token-use chain at the top of the route already
-    //      captures the failure event with the entity code attempted.
+    // The original cross-tenant probe was dropped because Phase 3 FORCE
+    // would block it anyway.
     //
-    // This test pins the new behavior: cross-tenant attempts surface
-    // as UNKNOWN_ENTITY (verified in the earlier test) but DO NOT
-    // emit a "tenant scope mismatch"-labeled rejection audit. The
-    // success TOKEN_USED audit still fires from the resolveBearerToken
-    // step at the top of the route.
-    const probeLog = await prisma.auditLog.findFirst({
+    // 15th adversarial-pass HIGH finding closed in-PR: the original
+    // Decision A drop accidentally also dropped the audit signal for
+    // cross-tenant token-misuse attempts. The success-path
+    // auditTokenUse{success:true} only fires AFTER postJournalEntry
+    // succeeds; for UNKNOWN_ENTITY no audit fired at all. The fix
+    // restores the audit emit with a different (probe-free) reason:
+    // "Unknown entity (code does not exist in token's tenant)".
+    //
+    // This test pins both halves: (1) NO "tenant scope mismatch" row
+    // fires (probe is dropped), AND (2) a TOKEN_REJECTED row with the
+    // new "Unknown entity" reason DOES fire.
+    const log = await prisma.auditLog.findFirst({
       where: {
         eventType: "TOKEN_REJECTED",
         action: "POST /api/internal/journal-entries",
         tenantId: tenantA.id,
-        // Reason MUST not be the probe-specific text.
-        // (Token-resolution-failure rejections from other tests still
-        // exist but have tenantId=null, not tenantA.id.)
       },
       orderBy: { occurredAt: "desc" },
       select: { metadata: true, outcome: true },
     });
-    // Either no row, or if present its reason is NOT the probe text.
-    if (probeLog) {
-      const meta = probeLog.metadata as Record<string, unknown>;
-      expect(meta.reason).not.toMatch(/tenant scope mismatch/i);
-    }
+    expect(log).not.toBeNull();
+    const meta = log!.metadata as Record<string, unknown>;
+    // (1) probe-era reason is gone
+    expect(meta.reason).not.toMatch(/tenant scope mismatch/i);
+    // (2) new (probe-free) reason is present
+    expect(meta.reason).toMatch(/unknown entity/i);
+    // Metadata still carries the entity code attempted (load-bearing
+    // for the audit-trail to identify which tenant the probe targeted).
+    expect(meta.entityCode).toBe(entityCodeB);
+    expect(meta.tokenLabel).toBe(`scope-A-${SUFFIX}`);
   });
 });

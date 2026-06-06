@@ -287,11 +287,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // this branch did a GLOBAL legalEntity.findFirst probe to detect
       // cross-tenant token misuse and emit a "wrong-tenant token" audit
       // event. After Phase 3 FORCE, that probe will return null even for
-      // entities that exist in other tenants — RLS blocks the read. The
-      // audit-on-token-use already captures the failure event with the
-      // entity code attempted (success=false above), so dropping the
-      // probe loses NO load-bearing audit coverage. See
-      // docs/architecture/rls-phase-3-design.md → Decision A.
+      // entities that exist in other tenants — RLS blocks the read.
+      //
+      // 15th adversarial-pass finding (HIGH): the original Decision A
+      // comment claimed auditTokenUse{success:true} at top of route
+      // captures the event, but that only fires AFTER postJournalEntry
+      // succeeds. For a cross-tenant probe (or any UNKNOWN_ENTITY), no
+      // audit row fires unless we emit one HERE. The audit row is the
+      // load-bearing signal for "credential targeted entity not in
+      // this token's tenant" — a SEV-2 control under SOC 2 CC6.
+      await auditTokenUse({
+        success: false,
+        endpoint: "POST /api/internal/journal-entries",
+        reason: "Unknown entity (code does not exist in token's tenant)",
+        tenantId: identity.tenantId,
+        metadata: {
+          tokenLabel: identity.label,
+          tokenTenantId: identity.tenantId,
+          entityCode: body.entityCode,
+        },
+        requestHeaders: reqHeaders,
+      });
       return err("UNKNOWN_ENTITY", e.message, 422);
     }
     if (e instanceof UnknownBookError) return err("UNKNOWN_BOOK", e.message, 422);

@@ -178,9 +178,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // RLS Phase 3 decision A (PR #84 design): the previous version of
     // this branch did a GLOBAL legalEntity.findFirst probe to detect
     // cross-tenant token misuse. Dropped — Phase 3 FORCE would block
-    // the probe anyway, and the audit-on-token-use chain already
-    // captures the failure with the entity code attempted. See
-    // docs/architecture/rls-phase-3-design.md → Decision A.
+    // the probe anyway.
+    //
+    // 15th adversarial-pass finding (HIGH): the success-path
+    // auditTokenUse{success:true} only fires AFTER the create succeeds.
+    // For UNKNOWN_ENTITY (including the cross-tenant-collision case
+    // post-Decision-A), no audit row fires unless we emit one here.
+    // This preserves the SOC 2 CC6 audit signal for "credential
+    // targeted entity not in this token's tenant" without re-doing
+    // the probe.
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/fixed-asset",
+      reason: "Unknown entity (code does not exist in token's tenant)",
+      tenantId: identity.tenantId,
+      metadata: {
+        tokenLabel: identity.label,
+        tokenTenantId: identity.tenantId,
+        entityCode: body.entityCode,
+      },
+      requestHeaders: reqHeaders,
+    });
     return err(
       "UNKNOWN_ENTITY",
       `No entity with code "${body.entityCode}"`,
