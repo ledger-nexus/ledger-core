@@ -57,11 +57,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import {
-  createFixedAsset,
+  createFixedAssetInTx,
   type FixedAssetBookSpec,
 } from "@/lib/accounting/sub-ledgers/fixed-assets";
 import { resolveBearerToken } from "@/lib/auth/token";
 import { auditTokenUse } from "@/lib/audit/log";
+import { withTenantContext } from "@/lib/db/tenant-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -170,10 +171,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Resolve entity SCOPED TO THE AUTHENTICATED TENANT. Cross-tenant
   // entity codes are invisible — caller sees UNKNOWN_ENTITY, not
   // "wait, you found someone else's entity."
-  const entity = await prisma.legalEntity.findFirst({
-    where: { tenantId: identity.tenantId, code: body.entityCode },
-    select: { id: true, code: true },
-  });
+  //
+  // RLS Phase 2b: tenant-scoped read runs inside withTenantContext.
+  // The cross-tenant probe in the !entity branch below stays OUTSIDE
+  // (intentional global lookup; same security-feature pattern as
+  // /api/internal/journal-entries — needs rethinking at Phase 3 FORCE).
+  const entity = await withTenantContext(identity.tenantId, async (tx) =>
+    tx.legalEntity.findFirst({
+      where: { tenantId: identity.tenantId, code: body.entityCode },
+      select: { id: true, code: true },
+    })
+  );
   if (!entity) {
     // Audit cross-tenant probe attempts: if the entity exists in
     // SOME OTHER tenant, log it as a privacy event (same pattern as
@@ -207,10 +215,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Idempotency: if a FixedAsset already exists at (entityId, code),
   // return it. The caller's accept flow is safe to retry; we don't
   // want two assets for one AiAssetSuggestion.
-  const existing = await prisma.fixedAsset.findUnique({
-    where: { entityId_code: { entityId: entity.id, code: body.code } },
-    select: { id: true, code: true },
-  });
+  //
+  // RLS Phase 2b: lookup runs inside withTenantContext.
+  const existing = await withTenantContext(identity.tenantId, async (tx) =>
+    tx.fixedAsset.findUnique({
+      where: { entityId_code: { entityId: entity.id, code: body.code } },
+      select: { id: true, code: true },
+    })
+  );
   if (existing) {
     return NextResponse.json({
       ok: true,
@@ -221,31 +233,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const result = await createFixedAsset(prisma, {
-      entityCode: body.entityCode,
-      code: body.code,
-      description: body.description,
-      category: body.category,
-      vendorPartyCode: body.vendorPartyCode,
-      acquisitionDate: new Date(body.acquisitionDate),
-      acquisitionCost: new Decimal(body.acquisitionCost),
-      acquisitionCurrencyCode: body.acquisitionCurrencyCode,
-      assetAccountCode: body.assetAccountCode,
-      books: body.books.map((b) => ({
-        bookCode: b.bookCode,
-        usefulLifeMonths: b.usefulLifeMonths,
-        method: b.method,
-        inServiceDate: new Date(b.inServiceDate),
-        salvageValue:
-          b.salvageValue != null ? new Decimal(b.salvageValue) : undefined,
-        depreciationExpenseAccountCode: b.depreciationExpenseAccountCode,
-        accumDepreciationAccountCode: b.accumDepreciationAccountCode,
-      })),
-      sourceSystem: body.sourceSystem,
-      sourceRecordType: body.sourceRecordType,
-      sourceRecordId: body.sourceRecordId,
-      sourcePayload: body.sourcePayload,
-    });
+    // RLS Phase 2b Class T: call createFixedAssetInTx from inside
+    // withTenantContext so the GUC reaches all reads (entity lookup,
+    // vendor lookup, book lookups) + the nested-create write.
+    const result = await withTenantContext(identity.tenantId, async (tx) =>
+      createFixedAssetInTx(tx, {
+        entityCode: body.entityCode,
+        code: body.code,
+        description: body.description,
+        category: body.category,
+        vendorPartyCode: body.vendorPartyCode,
+        acquisitionDate: new Date(body.acquisitionDate),
+        acquisitionCost: new Decimal(body.acquisitionCost),
+        acquisitionCurrencyCode: body.acquisitionCurrencyCode,
+        assetAccountCode: body.assetAccountCode,
+        books: body.books.map((b) => ({
+          bookCode: b.bookCode,
+          usefulLifeMonths: b.usefulLifeMonths,
+          method: b.method,
+          inServiceDate: new Date(b.inServiceDate),
+          salvageValue:
+            b.salvageValue != null ? new Decimal(b.salvageValue) : undefined,
+          depreciationExpenseAccountCode: b.depreciationExpenseAccountCode,
+          accumDepreciationAccountCode: b.accumDepreciationAccountCode,
+        })),
+        sourceSystem: body.sourceSystem,
+        sourceRecordType: body.sourceRecordType,
+        sourceRecordId: body.sourceRecordId,
+        sourcePayload: body.sourcePayload,
+      })
+    );
 
     return NextResponse.json({
       ok: true,
