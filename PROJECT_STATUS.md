@@ -6,7 +6,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-06 (5-deficiency closure capstone + 5 PR #10 splits + CLAUDE.md institutionalization — Critical-Open=0 milestone + PR #10 substantively decomposed)
+**Last updated:** 2026-06-06 (5-deficiency closure + 7 PR #10 splits + encryption stack arc + portfolio-wide CLAUDE.md + operator runbook — Critical-Open=0 milestone, readiness 80% → 87%, 14 columns ready to encrypt on main)
 
 **Current state:** **Critical-severity Open count: 1 → 0.** 5 deficiencies closed in 2 days (2 Closed, 3 Remediated) including the session-defining #1 auth Critical Remediation. End-to-end engineering + doc-pentagon + merge-train coverage for #1 (auth), #12 (RLS), #4 (npm pinning portfolio-wide), #2 (CSP), and #9 (audit log replication design). Closed-state count 12 → **14** of 28 tracked; Remediated-state 1 → **3**; readiness % 80% → **85%**.
 
@@ -287,7 +287,34 @@ After all 5 merge + PR #119: PR #10 itself becomes a leaf cleanup PR for the enc
 
 ---
 
-### 2026-06-06 day capstone — 5 deficiency closures + 5 PR #10 splits + CLAUDE.md, 53 PRs
+### Encryption stack arc (Group AA, 2026-06-06, 5 PRs) — Confidentiality TSC posture upgrade
+
+The encryption stack (originally PRs #24-#28, base-branched on PR #10's `soc2-hardening-rollout`) was fully blocked behind PR #10 landing. Group AA decomposes the dependency chain into 2 more PR #10 splits + 3 stacked rebases that bring AES-256-GCM column-level encryption substantively onto main.
+
+**AA.1 — PR #10 splits (encryption foundation, 2 PRs):**
+- **PR #127** — `field-encryption.ts` (217 lines AES-256-GCM helper) + 15 tests. **6th PR #10 standalone extraction.**
+- **PR #129** — Prisma `encrypted-fields-extension.ts` (552 lines) + `db.ts` wiring + `/api/health` gains full `encryption: { configured, columnCount }` block. **7th PR #10 standalone extraction.** Brings the ENCRYPTED_COLUMNS registry with **14 columns** to main.
+
+**AA.2 — Encryption stack rebases (3 PRs):**
+- **PR #128** — Phase 1 rebase: `deterministic-encryption.ts` HMAC-SHA256 search-hash helper + `/api/health` deterministicEncryption block.
+- **PR #130** — Phase 2 rebase: User.email AES-256-GCM + `User.emailHash` for Clerk lookup. Backfill script.
+- **PR #131** — Phase 3 partial rebase: JournalEntryNote.authorEmail encryption. TenantInvite half deferred (depends on team feature merge).
+
+**14 encrypted columns on main after wire-up:** JournalEntry.{memo, sourcePayload} + JournalEntryNote.{body, authorEmail} + EmailDelivery.{subject, bodyText, bodyHtml} + Party.displayName + Tenant.name + Notification.{title, body} + LegalEntity.name + User.{email, displayName} + AuditLog.metadata.
+
+**CC6.1 posture upgrade**: "DB-default volume encryption only" → "Field-level AES-256-GCM for 14 columns + HMAC-SHA256 deterministic search-hash on critical lookup paths (User.email, JournalEntryNote.authorEmail)". A leaked `DATABASE_URL` + slow-queries log can no longer reveal customer emails or memos. Defense in depth: two independent keys, domain-separated pre-image, constant-time hash compare, version byte for future key rotation.
+
+**Merge-train**: MERGE_ORDER Group AA (PR #132) captures the 5-PR ordering. Natural merge order: #128 → #127 → #129 → #130 → #131. tsc + 57/57 helper tests pass at every stage.
+
+**Operator post-merge actions**: wire `FIELD_ENCRYPTION_KEY` + `FIELD_DETERMINISTIC_KEY` in Vercel env; run `scripts/encrypt-user-emails.ts`; run one-shot `prisma db execute` UPDATE for JournalEntryNote.authorEmail; verify via `curl /api/health | jq '.encryption'` returns `{ configured: true, columnCount: 14 }`.
+
+**SOC2_READINESS v2.10** (PR #133): captures the encryption stack arc + readiness 85% → 87% bump (Confidentiality TSC was largest "Missing/critically weak" row; 14-column rollout warrants 2pp).
+
+**What's deferred**: TenantInvite.email (column 15, blocked on team feature); BankAccount fields (mechanical follow-up using established pattern).
+
+---
+
+### 2026-06-06 day capstone — 5 deficiency closures + 7 PR #10 splits + encryption stack + CLAUDE.md, 59 PRs
 
 | Deficiency | Sev | Status | Arc | PRs |
 |---|---|---|---|---|
@@ -297,15 +324,20 @@ After all 5 merge + PR #119: PR #10 itself becomes a leaf cleanup PR for the enc
 | #2 No CSP header | HIGH | Closed | Group W (1 engineering + 2 doc) | 3 PRs (standalone PR #10 extraction) |
 | #9 audit log replication | Medium | Remediated | Group X (1 design + 2 doc) | 3 PRs (Phase 1; Phase 2 awaits customer #2) |
 | PR #10 splits (foundation-by-piece) | — | Engineering on main | Group Z (5 PRs: #99 CSP + #115 soc2 helpers + monitoring + #116 /api/health + #120 audit-log RULE + #123 process tooling) — **PR #10 substantively decomposed** | 5 PRs (#99 counted in W; #115, #116, #120, #123 net new) |
-| CLAUDE.md institutionalization | — | Institutional memory | PR #119 — auto-loaded by future Claude Code sessions | 1 PR |
-| **Total** | | | **Groups U + V + W + X + Y + Z + CLAUDE.md** | **53 PRs** |
+| CLAUDE.md institutionalization | — | Institutional memory | PR #119 (ledger-core) + 4 companion re-audit PRs (fa-amort #24, recon #27, revenue-rec #31, integrations #21) — **portfolio-wide re-audit pattern** | 5 PRs |
+| Encryption stack arc | — | Confidentiality TSC posture | Group AA (5 PRs: #127 + #128 + #129 + #130 + #131) — 14 columns encrypted on main + 2 PR #10 splits + 3 stacked rebases | 5 PRs |
+| Operator runbook | — | Founder handoff | PR #126 — 6-phase merge plan | 1 PR |
+| **Total** | | | **Groups U + V + W + X + Y + Z + AA + CLAUDE.md + runbook** | **59 PRs** |
 
 **State progression**:
 - **Critical-severity Open count: 1 → 0** ← session milestone
 - Closed-state count: 12 → 13 → **14** of 28 tracked
 - Remediated-state count: 1 → **3** (#1 + #12 + #9)
-- Readiness %: 80% → 81% → 82% → 83% → **85%**
+- Readiness %: 80% → 81% → 82% → 83% → 85% → **87%** (v2.10 encryption arc bump)
 - Risk register #1 score: 20 → **5** (biggest single-risk score drop in history)
+- **Encrypted columns on main (post-merge + env wire-up): 0 → 14** (Confidentiality TSC substantial upgrade)
+- PR #10 features extracted: 0 → **7/9** (CSP + soc2 helpers + monitoring + /api/health + audit-log RULE + process tooling + field-encryption + Prisma extension)
+- **Encryption stack on extraction stack**: 0/3 phases → **2.5/3 phases**
 
 **Open HIGH severities remaining**: #3 (backup restore drill — operational, Q3 2026). The only remaining HIGH; operator-coordinated, not engineering.
 
