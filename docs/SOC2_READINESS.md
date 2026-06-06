@@ -4,6 +4,15 @@
 **Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`) as of this commit.
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022), Security TSC + Common Criteria CC1–CC9. Availability, Processing Integrity, Confidentiality also referenced where in scope.
 
+**v2.5 amendments (2026-06-05) — RLS arc closure:**
+- **Deficiency #12 (RLS not FORCED) → Remediated** via Phases 1+2a+2b shipped across PRs #66, #67, #69-#83 (16 PRs). Phase 3 implementation DRAFT PR #89 awaits operator ack on Decision C runbook (`docs/runbooks/rls-phase-3-bypass-roles.md`). 23 Server Actions + 3 internal HTTP routes + 1 batch helper migrated to `withTenantContext`. Migration guide (`docs/architecture/rls-phase-2b-migration-guide.md`) institutionalizes the 7-shape catalog (W1/W2/T1/T2/E/M/P) with reference PRs per shape.
+- **Deficiency #28 (createFixedAsset tenant-blind entity lookup) → Closed** via PR #88. Surfaced by the 15th adversarial pass as a historical finding (pre-dated Phase 2b sweep). `CreateFixedAssetInput.tenantId` now required.
+- **Phase 3 design + decisions A/B/D resolved**, decision C runbook drafted; awaiting 5-item operator approval checklist before Phase 3 FORCE migration applies.
+- **15th adversarial pass** found 1 HIGH (audit-bypass on Decision A drop) + 3 MEDIUMs; all closed in-PR before merge — CC4 monitoring evidence.
+- **CLAUDE.md institutionalization (PR #90)**: 7-shape catalog + adversarial-pass cadence baked into the repo's auto-loaded rulebook so future sessions inherit the patterns.
+
+This moves the CC6.1 / CC7.4 multi-tenant-isolation posture from "application-layer scoping is the only enforcement" (the v1 baseline state) to "application-layer scoping + DB-layer policies (advisory pre-FORCE, load-bearing post-FORCE) + adversarial-pass cadence as CC4 evidence."
+
 ---
 
 ## What this document is and isn't
