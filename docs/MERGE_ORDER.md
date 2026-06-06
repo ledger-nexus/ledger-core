@@ -1,6 +1,6 @@
-# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc
+# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc
 
-**Updated 2026-06-06 (v8).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v9).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -16,8 +16,10 @@ institutional-memory arc** added **5 more** (one per repo); the **RLS arc**
 prereqs + 15th adversarial pass + Phase 3 DRAFT + doc-pentagon institutional
 record); the **2026-06-06 pinning arc** (Group V) added **7 more** (5
 engineering PRs closing deficiency #4 portfolio-wide + 2 doc PRs amending
-deficiency log + SOC2_READINESS to v2.6), for **125+ total** across the
-5-repo portfolio. This file documents the dependency order so the
+deficiency log + SOC2_READINESS to v2.6); the **2026-06-06 CSP arc**
+(Group W) added **3 more** (PR #99 standalone CSP extraction from PR #10
++ deficiency log v2.7 + SOC2_READINESS v2.7), for **128+ total** across
+the 5-repo portfolio. This file documents the dependency order so the
 founder can land them efficiently when ready.
 
 Most PRs are independent and can land in any order. The stacked
@@ -505,6 +507,34 @@ Each PR strips `^`/`~` to the exact version currently in that repo's `package-lo
 After all 7 merge: CC7.1 (vulnerability management) supply-chain control upgrades from "range + Dependabot review" to **"pinning + Dependabot review + npm audit CI"**. Silent-transitive-upgrade attack vector eliminated on every `npm ci` deploy. Closed-state count: 12 → 13 of 28 tracked.
 
 **Note:** PR #95 (ledger-core engineering) caught a pre-existing deficiency #13 finding — TS18049 errors in `tests/middleware-fail-closed.test.ts` on `main` for recon (Group R closure PRs not yet merged). The pinning sweep is **orthogonal** to that gap; tsc errors are unchanged by version-string changes.
+
+---
+
+## Group W — CSP standalone closure, deficiency #2 (2026-06-06, 3 PRs)
+
+Closes deficiency **#2** (HIGH severity, opened 2026-05-25) — No CSP header. **Standalone extraction** of the CSP middleware change from PR #10's 9-feature foundation arc. Splitting it out lets #2 close on its own merge schedule rather than block on the entire encryption-stack arc.
+
+### Group W.1 — Engineering (1 PR, off main)
+
+| PR | Branch | Base | What |
+|---|---|---|---|
+| **#99** | `deficiency-2-csp-extracted` | `main` | `src/middleware.ts` generates a 16-byte base64url nonce per request via Edge `crypto.getRandomValues`. CSP header on every response with `strict-dynamic` script-src + Clerk/Sentry/Stripe connect-src + `frame-ancestors 'none'` + `object-src 'none'` + `upgrade-insecure-requests`. Wraps the existing Clerk middleware preserving the 503 fail-closed-in-prod behavior. Adds `tests/csp-nonce.test.ts` (9/9 pass). |
+
+### Group W.2 — Doc-pentagon amendments (2 PRs, stacked)
+
+| Order | PR | Doc | Cite source | Base |
+|---|---|---|---|---|
+| 1 | **#100** | `control-deficiency-log.md` v2.6 → v2.7 — closes #2 | PR #99 | PR #96 (`deficiency-log-2026-06-06-v26`) |
+| 2 | **#101** | `SOC2_READINESS.md` v2.6 → v2.7 — readiness 81% → 82%, CC6.6 posture upgrade | PR #99 + PR #100 | PR #97 (`soc2-readiness-v26-deficiency-4`) |
+
+### Group W merge sequence (suggested)
+
+1. **W.1**: #99 first (engineering)
+2. **W.2**: #100 (deficiency log) after PR #96 + #99 land, then #101 (readiness) after PR #97 + #100 land
+
+After all 3 merge: CC6.6 (anti-XSS) posture upgrades from "static security headers + Next.js default escape" to **"static headers + per-request CSP nonce + strict-dynamic delegation"**. The script-injection attack surface is now defended at the response layer in addition to the framework-level escape. Closed-state count: 13 → 14 of 28 tracked. Readiness % bump: 81% → 82%.
+
+**Relationship to PR #10:** PR #10 still exists with the full foundation arc. PR #99 cherry-picks the CSP-only changes (src/middleware.ts + tests/csp-nonce.test.ts + next.config.js comment). The other 8 features in PR #10 (helper module + env validator + audit-log RULE + Sentry shim + /soc2-check + pre-commit hook + soc2 skill + /api/health) remain bundled. Future extractions follow the same pattern if individual deficiency closures get gated on PR #10's slow merge.
 
 ---
 
