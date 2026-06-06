@@ -47,6 +47,21 @@ import {
   auditPrivilegedAction,
   auditAccessDenied,
 } from "@/lib/audit/log";
+import { withTenantContext } from "@/lib/db/tenant-context";
+
+// RLS Phase 2b migration note:
+//   This action's first DB hit (entity lookup by code) intentionally
+//   runs OUTSIDE withTenantContext — the entity's tenantId IS the
+//   discriminator we need to set the GUC, so we can't have it set
+//   before we read the entity.
+//
+//   Pre-existing security gap (unrelated to RLS): the entity lookup
+//   is NOT tenant-scoped. A tenant-A admin invoking this with an
+//   entityCode that exists in tenant-B's data would close tenant-B's
+//   period. Phase 3 FORCE will mitigate this naturally (RLS rejects
+//   the cross-tenant read), but the proper fix is to add
+//   requireCurrentTenant() and scope the entity lookup. Tracked as
+//   a known gap rather than entangled with the RLS migration.
 
 export interface ClosePeriodInput {
   entityCode: string;
@@ -86,64 +101,99 @@ export async function closePeriodAction(
     });
     if (!entity) return { ok: false, message: `Unknown entity: ${input.entityCode}` };
 
-    const book = await prisma.book.findUnique({
-      where: { code: input.bookCode },
-      select: { id: true, code: true },
-    });
-    if (!book) return { ok: false, message: `Unknown book: ${input.bookCode}` };
+    // RLS Phase 2b: wrap the resolver chain + idempotency check + write
+    // in one withTenantContext using the entity's tenantId. Book is a
+    // shared-global per the RLS design (no tenantId column), so its lookup
+    // is fine inside the GUC-scoped tx.
+    type CloseOutcome =
+      | { kind: "unknownBook" }
+      | { kind: "unknownPeriod" }
+      | { kind: "alreadyClosed"; closedAt: Date; closedBy: string | null }
+      | { kind: "ok"; closedAt: Date; closedBy: string | null; bookCode: string; periodCode: string; jeCount: number };
 
-    // Scope period lookup to the entity's calendar(s) — multiple entities
-    // can have periods with the same code (e.g. "2026-05") on their own
-    // calendars; without this scoping the action would close the wrong one.
-    const period = await prisma.period.findFirst({
-      where: {
-        code: input.periodCode,
-        calendar: { entityId: entity.id },
-      },
-      select: { id: true, code: true },
+    const outcome = await withTenantContext(entity.tenantId, async (tx): Promise<CloseOutcome> => {
+      const book = await tx.book.findUnique({
+        where: { code: input.bookCode },
+        select: { id: true, code: true },
+      });
+      if (!book) return { kind: "unknownBook" };
+
+      // Scope period lookup to the entity's calendar(s) — multiple entities
+      // can have periods with the same code (e.g. "2026-05") on their own
+      // calendars; without this scoping the action would close the wrong one.
+      const period = await tx.period.findFirst({
+        where: {
+          code: input.periodCode,
+          calendar: { entityId: entity.id },
+        },
+        select: { id: true, code: true },
+      });
+      if (!period) return { kind: "unknownPeriod" };
+
+      // Idempotency: if already closed, return the existing close info.
+      const existing = await tx.periodClose.findUnique({
+        where: {
+          entityId_bookId_periodId: {
+            entityId: entity.id,
+            bookId: book.id,
+            periodId: period.id,
+          },
+        },
+        select: { closedAt: true, closedBy: true },
+      });
+      if (existing) {
+        return {
+          kind: "alreadyClosed",
+          closedAt: existing.closedAt,
+          closedBy: existing.closedBy,
+        };
+      }
+
+      const jeCount = await tx.journalEntry.count({
+        where: { entityId: entity.id, bookId: book.id, periodId: period.id },
+      });
+
+      const created = await tx.periodClose.create({
+        data: {
+          tenantId: entity.tenantId,
+          entityId: entity.id,
+          bookId: book.id,
+          periodId: period.id,
+          closedBy: admin.email,
+        },
+        select: { closedAt: true, closedBy: true },
+      });
+
+      return {
+        kind: "ok",
+        closedAt: created.closedAt,
+        closedBy: created.closedBy,
+        bookCode: book.code,
+        periodCode: period.code,
+        jeCount,
+      };
     });
-    if (!period) {
+
+    if (outcome.kind === "unknownBook") {
+      return { ok: false, message: `Unknown book: ${input.bookCode}` };
+    }
+    if (outcome.kind === "unknownPeriod") {
       return {
         ok: false,
         message: `Unknown period: ${input.periodCode} for entity ${input.entityCode}`,
       };
     }
-
-    // Idempotency: if already closed, return the existing close info.
-    const existing = await prisma.periodClose.findUnique({
-      where: {
-        entityId_bookId_periodId: {
-          entityId: entity.id,
-          bookId: book.id,
-          periodId: period.id,
-        },
-      },
-      select: { closedAt: true, closedBy: true },
-    });
-    if (existing) {
+    if (outcome.kind === "alreadyClosed") {
       return {
         ok: true,
         message: `Period ${input.periodCode} already closed on ${input.entityCode} / ${input.bookCode}.`,
         wasAlreadyClosed: true,
-        closedAt: existing.closedAt.toISOString(),
-        closedBy: existing.closedBy ?? undefined,
+        closedAt: outcome.closedAt.toISOString(),
+        closedBy: outcome.closedBy ?? undefined,
       };
     }
 
-    const jeCount = await prisma.journalEntry.count({
-      where: { entityId: entity.id, bookId: book.id, periodId: period.id },
-    });
-
-    const created = await prisma.periodClose.create({
-      data: {
-        tenantId: entity.tenantId,
-        entityId: entity.id,
-        bookId: book.id,
-        periodId: period.id,
-        closedBy: admin.email,
-      },
-      select: { closedAt: true, closedBy: true },
-    });
+    const { closedAt, closedBy, jeCount } = outcome;
 
     // SOC 2 CC5/CC6: every period close is a privileged action.
     // Captured in audit_log so quarterly access reviews can prove the
@@ -164,8 +214,8 @@ export async function closePeriodAction(
       ok: true,
       message: `Period ${input.periodCode} closed on ${input.entityCode} / ${input.bookCode} (${jeCount} JE${jeCount === 1 ? "" : "s"} frozen).`,
       wasAlreadyClosed: false,
-      closedAt: created.closedAt.toISOString(),
-      closedBy: created.closedBy ?? undefined,
+      closedAt: closedAt.toISOString(),
+      closedBy: closedBy ?? undefined,
       journalEntryCount: jeCount,
     };
   } catch (e) {
@@ -220,46 +270,62 @@ export async function reopenPeriodAction(
     });
     if (!entity) return { ok: false, message: `Unknown entity: ${input.entityCode}` };
 
-    const book = await prisma.book.findUnique({
-      where: { code: input.bookCode },
-      select: { id: true },
-    });
-    if (!book) return { ok: false, message: `Unknown book: ${input.bookCode}` };
+    // RLS Phase 2b: mirror of close action — resolver chain + delete in
+    // one withTenantContext using the entity's tenantId.
+    type ReopenOutcome =
+      | { kind: "unknownBook" }
+      | { kind: "unknownPeriod" }
+      | { kind: "alreadyOpen" }
+      | { kind: "ok" };
 
-    const period = await prisma.period.findFirst({
-      where: {
-        code: input.periodCode,
-        calendar: { entityId: entity.id },
-      },
-      select: { id: true },
+    const outcome = await withTenantContext(entity.tenantId, async (tx): Promise<ReopenOutcome> => {
+      const book = await tx.book.findUnique({
+        where: { code: input.bookCode },
+        select: { id: true },
+      });
+      if (!book) return { kind: "unknownBook" };
+
+      const period = await tx.period.findFirst({
+        where: {
+          code: input.periodCode,
+          calendar: { entityId: entity.id },
+        },
+        select: { id: true },
+      });
+      if (!period) return { kind: "unknownPeriod" };
+
+      const existing = await tx.periodClose.findUnique({
+        where: {
+          entityId_bookId_periodId: {
+            entityId: entity.id,
+            bookId: book.id,
+            periodId: period.id,
+          },
+        },
+        select: { id: true },
+      });
+      if (!existing) return { kind: "alreadyOpen" };
+
+      await tx.periodClose.delete({ where: { id: existing.id } });
+      return { kind: "ok" };
     });
-    if (!period) {
+
+    if (outcome.kind === "unknownBook") {
+      return { ok: false, message: `Unknown book: ${input.bookCode}` };
+    }
+    if (outcome.kind === "unknownPeriod") {
       return {
         ok: false,
         message: `Unknown period: ${input.periodCode} for entity ${input.entityCode}`,
       };
     }
-
-    const existing = await prisma.periodClose.findUnique({
-      where: {
-        entityId_bookId_periodId: {
-          entityId: entity.id,
-          bookId: book.id,
-          periodId: period.id,
-        },
-      },
-      select: { id: true },
-    });
-
-    if (!existing) {
+    if (outcome.kind === "alreadyOpen") {
       return {
         ok: true,
         message: `Period ${input.periodCode} was already open on ${input.entityCode} / ${input.bookCode}.`,
         wasAlreadyOpen: true,
       };
     }
-
-    await prisma.periodClose.delete({ where: { id: existing.id } });
 
     // SOC 2 CC5/CC6: reopen is a SIGNIFICANT privileged action (it
     // re-opens books that may have been used for stakeholder reporting).
