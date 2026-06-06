@@ -102,7 +102,21 @@ After FORCE, these need to either:
 
 ### D. Cron job migration
 
-The retention engine cron + the recurring-entries cron both call into shared infra. Audit each cron's data-access pattern and migrate to the P-shape OR document a bypass role.
+The repo's cron-style endpoints, with their current Phase 2b status:
+
+| Endpoint | Triggers | Data-access | Status |
+|---|---|---|---|
+| **`runRecurringEntriesAction`** (action invoked from Vercel Cron via the recurring-entries page or an internal trigger) | Daily/manual | Loops over templates across all tenants; per-iteration `withTenantContext` per template's `tenantId` | ✅ DONE — PR #83 ships the **P-shape** (per-iteration GUC). No further work needed for Phase 3. |
+| **`/api/cron/retention`** (on branch `automated-retention-engine`, not yet on main) | Vercel Cron daily 03:00 | Iterates retention policies; each runs DELETE across all tenants for the affected tables | ⏳ PENDING — needs the **P-shape** applied when the retention branch lands. Each policy iteration should wrap its DELETE in `withTenantContext` per affected tenant. Alternative: provision a `revrec_retention_purger` `BYPASSRLS` role (Decision C). |
+
+**Decision D resolution:** Conditionally complete.
+- Green for everything on main right now (only the recurring-entries action runs there; PR #83 already covers it).
+- The retention engine cron (on the `automated-retention-engine` branch) must include its own `withTenantContext` wrap OR be covered by the bypass-role provisioning from Decision C when it merges.
+
+This factoring is correct because:
+1. Writing speculative code against an unmerged branch would create a merge-conflict landmine
+2. The Phase 3 prerequisite checklist already captures the requirement
+3. The retention-branch PR should be reviewed against this design doc before it lands
 
 ---
 
@@ -258,10 +272,10 @@ Migration is **idempotent** — re-running is a no-op. Rollback is dropping FORC
 
 ## Open questions
 
-- [ ] Decision A: drop probes, role-based bypass, or NOTIFY-based audit? **Default recommendation: drop probes.**
-- [ ] Decision B: when does the shape-E gap fix land? **Recommend: before Phase 3.**
-- [ ] Decision C: bypass-role provisioning — who manages secrets? **Recommend: dedicated role per use-case, secrets in env.**
-- [ ] Decision D: cron migration — block on Phase 3 or treat as follow-up? **Recommend: must precede Phase 3.**
+- [x] Decision A: drop probes (recommended option taken). RESOLVED via PR #86.
+- [x] Decision B: scope entity-code lookups. RESOLVED via PR #85.
+- [ ] Decision C: bypass-role provisioning — who manages secrets? **Recommend: dedicated role per use-case, secrets in env.** Outstanding — requires operator coordination (Postgres role provisioning + secrets management).
+- [x] Decision D: cron migration. RESOLVED — recurring-entries already correct (PR #83 P-shape); retention engine cron is on an unmerged branch and must include `withTenantContext` wrap before merge.
 - [ ] Decision E: should the test suite require Phase 3 to be on, or run against Phase 1 advisory mode? **Recommend: both modes via a CI matrix.**
 
 ---
