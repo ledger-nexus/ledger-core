@@ -9,7 +9,7 @@
 // Invariant: sum of currentBalance for status IN (OPEN, PARTIAL) per
 // (entity, book) === AR control account balance (Dr). See tests.
 
-import { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../post-journal";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
@@ -160,73 +160,99 @@ export interface ApplyArPaymentInput {
   appliedDate: Date;
 }
 
+/**
+ * Inner half of applyArPayment — runs inside an existing transaction.
+ * RLS Phase 2b Class T pattern (see ap.ts applyApPaymentInTx for the
+ * mirrored AP version and docs/architecture/rls-phase-2b-migration-guide.md
+ * for the Class W / Class T rationale).
+ *
+ * Atomicity guarantees come from the OUTER transaction owner — either
+ * withTenantContext (new Server Action path) or the legacy applyArPayment
+ * wrapper. The inner never opens its own $transaction.
+ *
+ * Invariants preserved exactly from the original applyArPayment body:
+ *   - status-gate (APPLIED/WRITTEN_OFF/VOID cannot be paid)
+ *   - overpayment refusal (applied <= current balance)
+ *   - TOCTOU optimistic-concurrency guard on currentBalance
+ */
+export async function applyArPaymentInTx(
+  tx: Prisma.TransactionClient,
+  input: ApplyArPaymentInput
+): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
+  const item = await tx.arOpenItem.findUniqueOrThrow({
+    where: { id: input.openItemId },
+    // tenantId pulled so the application row inherits the same scope.
+    select: { currentBalance: true, originalAmount: true, status: true, tenantId: true },
+  });
+  if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
+    throw new Error(`Cannot apply payment to AR item in ${item.status} state`);
+  }
+
+  const applied = toDecimal(input.appliedAmount);
+  const current = toDecimal(item.currentBalance);
+  if (applied.greaterThan(current)) {
+    throw new Error(
+      `Application amount ${applied} exceeds open balance ${current.toFixed(4)}`
+    );
+  }
+
+  const newBalance = current.minus(applied);
+  const nextStatus = newBalance.isZero() ? "APPLIED" : "PARTIAL";
+
+  // SECURITY (TOCTOU race fix): the SELECT above + the UPDATE below
+  // is the classic time-of-check / time-of-use window. Under Postgres
+  // READ COMMITTED (Prisma's default), two concurrent transactions
+  // could both observe currentBalance = N, both pass the
+  // "applied <= current" check, and both UPDATE — over-applying.
+  // Optimistic-concurrency guard: the UPDATE only succeeds when the
+  // currentBalance still matches what we read. updateMany returns
+  // count=0 if another transaction already raced past us; we throw
+  // and the surrounding $transaction rolls back the arApplication
+  // INSERT atomically. The caller retries.
+  const application = await tx.arApplication.create({
+    data: {
+      tenantId: item.tenantId,
+      openItemId: input.openItemId,
+      appliedByEntryId: input.appliedByEntryId,
+      appliedAmount: applied.toFixed(4),
+      appliedDate: input.appliedDate,
+    },
+    select: { id: true },
+  });
+
+  const updated = await tx.arOpenItem.updateMany({
+    where: {
+      id: input.openItemId,
+      // Guard: only update if the balance hasn't changed since we
+      // read it. Decimal-precise comparison via toFixed(4) — same
+      // precision the DB column uses.
+      currentBalance: current.toFixed(4),
+    },
+    data: {
+      currentBalance: newBalance.toFixed(4),
+      status: nextStatus,
+    },
+  });
+  if (updated.count === 0) {
+    throw new Error(
+      `Concurrent update on AR item ${input.openItemId} — payment was applied to a stale balance. Retry the request.`
+    );
+  }
+
+  return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
+}
+
+/**
+ * Outer wrapper — opens its own $transaction and delegates to the inner.
+ * Preserved for legacy callers (Northwind seed, demo flow, internal scripts)
+ * that don't run inside withTenantContext. New Server Actions should call
+ * applyArPaymentInTx directly from within their withTenantContext block.
+ */
 export async function applyArPayment(
   prisma: PrismaClient,
   input: ApplyArPaymentInput
 ): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
-  return await prisma.$transaction(async (tx) => {
-    const item = await tx.arOpenItem.findUniqueOrThrow({
-      where: { id: input.openItemId },
-      // tenantId pulled so the application row inherits the same scope.
-      select: { currentBalance: true, originalAmount: true, status: true, tenantId: true },
-    });
-    if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
-      throw new Error(`Cannot apply payment to AR item in ${item.status} state`);
-    }
-
-    const applied = toDecimal(input.appliedAmount);
-    const current = toDecimal(item.currentBalance);
-    if (applied.greaterThan(current)) {
-      throw new Error(
-        `Application amount ${applied} exceeds open balance ${current.toFixed(4)}`
-      );
-    }
-
-    const newBalance = current.minus(applied);
-    const nextStatus = newBalance.isZero() ? "APPLIED" : "PARTIAL";
-
-    // SECURITY (TOCTOU race fix): the SELECT above + the UPDATE below
-    // is the classic time-of-check / time-of-use window. Under Postgres
-    // READ COMMITTED (Prisma's default), two concurrent transactions
-    // could both observe currentBalance = N, both pass the
-    // "applied <= current" check, and both UPDATE — over-applying.
-    // Optimistic-concurrency guard: the UPDATE only succeeds when the
-    // currentBalance still matches what we read. updateMany returns
-    // count=0 if another transaction already raced past us; we throw
-    // and the surrounding $transaction rolls back the arApplication
-    // INSERT atomically. The caller retries.
-    const application = await tx.arApplication.create({
-      data: {
-        tenantId: item.tenantId,
-        openItemId: input.openItemId,
-        appliedByEntryId: input.appliedByEntryId,
-        appliedAmount: applied.toFixed(4),
-        appliedDate: input.appliedDate,
-      },
-      select: { id: true },
-    });
-
-    const updated = await tx.arOpenItem.updateMany({
-      where: {
-        id: input.openItemId,
-        // Guard: only update if the balance hasn't changed since we
-        // read it. Decimal-precise comparison via toFixed(4) — same
-        // precision the DB column uses.
-        currentBalance: current.toFixed(4),
-      },
-      data: {
-        currentBalance: newBalance.toFixed(4),
-        status: nextStatus,
-      },
-    });
-    if (updated.count === 0) {
-      throw new Error(
-        `Concurrent update on AR item ${input.openItemId} — payment was applied to a stale balance. Retry the request.`
-      );
-    }
-
-    return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
-  });
+  return prisma.$transaction((tx) => applyArPaymentInTx(tx, input));
 }
 
 // Write-off of an AR open item. Two methods supported:
