@@ -41,6 +41,7 @@ vi.mock("next/cache", () => ({
 }));
 
 import { _internal } from "@/lib/auth/current-user";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 import {
   getCurrentTenant,
   requireCurrentTenant,
@@ -117,9 +118,13 @@ afterAll(async () => {
     select: { id: true },
   });
   const tenantIds = testTenants.map((t) => t.id);
-  await prisma.auditLog.deleteMany({ where: { actorUserId: testUser.id } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { actorUserId: testUser.id } });
+  });
   if (tenantIds.length > 0) {
-    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await withAuditLogMutable(prisma, async () => {
+      await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    });
   }
   await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
   await prisma.user.deleteMany({ where: { id: testUser.id } }).catch(() => {});
@@ -385,7 +390,9 @@ describe("createMyFirstTenantAction", () => {
 
     // Clean up. auditPrivilegedAction now writes a tenant-scoped row;
     // FK blocks tenant delete unless audit_log rows are gone first.
-    await prisma.auditLog.deleteMany({ where: { tenantId: dbTenant!.id } });
+    await withAuditLogMutable(prisma, async () => {
+      await prisma.auditLog.deleteMany({ where: { tenantId: dbTenant!.id } });
+    });
     await prisma.tenant.delete({ where: { id: dbTenant!.id } });
   });
 
@@ -400,8 +407,10 @@ describe("createMyFirstTenantAction", () => {
     // Clean up — same FK-aware pattern as above.
     const created = await prisma.tenant.findMany({ where: { slug }, select: { id: true } });
     if (created.length > 0) {
-      await prisma.auditLog.deleteMany({
+      await withAuditLogMutable(prisma, async () => {
+        await prisma.auditLog.deleteMany({
         where: { tenantId: { in: created.map((t) => t.id) } },
+      });
       });
       await prisma.tenant.deleteMany({ where: { slug } });
     }

@@ -41,6 +41,7 @@ import { GET as bsCsv } from "@/app/api/reports/balance-sheet/csv/route";
 import { GET as isCsv } from "@/app/api/reports/income-statement/csv/route";
 import { GET as tbCsv } from "@/app/api/reports/trial-balance/csv/route";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const SUFFIX = ("HIER" + Date.now().toString(36)).toUpperCase();
@@ -192,7 +193,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
