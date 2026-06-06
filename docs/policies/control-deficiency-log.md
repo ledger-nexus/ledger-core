@@ -1,6 +1,9 @@
 # Control deficiency log
 
-**Version:** 2.5 · **Effective date:** 2026-06-05 · **Owner:** Chris
+**Version:** 2.6 · **Effective date:** 2026-06-06 · **Owner:** Chris
+
+**v2.6 amendments (2026-06-06):**
+- Deficiency #4 (npm deps not pinned) → **Closed portfolio-wide.** Pinned all 115 dependency ranges across 5 repos in 5 mechanical PRs: ledger-core PR #95 (23 deps), recon PR #26 (24), fa-amort PR #23 (22), revenue-rec PR #30 (24), integrations PR #20 (22). Each PR strips `^`/`~` to the exact version currently in `package-lock.json` — no upgrades introduced. Dependabot continues to surface upgrade PRs we then review.
 
 **v2.5 amendments (2026-06-05):**
 - Deficiency #28 (createFixedAsset tenant-blind entity lookup) → Remediated via PR #88. \`CreateFixedAssetInput\` gained required \`tenantId\` field; entity findFirstOrThrow now scopes by \`{ code, tenantId }\`. All 9 callers (route + 2 seeds + 6 test sites) updated. 29/29 affected tests pass.
@@ -42,7 +45,7 @@ Add a new row to the table below. Assign yourself if you found it. Use a short, 
 | 1 | 2026-05-25 | Critical | Auth uses dev cookie stub, not real auth | SOC2_READINESS.md gap analysis | `src/lib/auth/session.ts` uses HMAC-signed cookie keyed by `AUTH_STUB_SECRET` and a user-controlled email. Anyone with the secret can impersonate any user. | Swap to Clerk per `auth-swap.md`. Tracked Phase 1 of SOC2_ROADMAP. | {{NAME}} | Open | — |
 | 2 | 2026-05-25 | High | No CSP header | SOC2_READINESS.md gap analysis | `next.config.js` ships HSTS + X-Frame-Options + X-Content-Type-Options + Referrer-Policy but no Content-Security-Policy. Next.js inline scripts make naïve CSP break the app. | Implement nonce-based CSP via middleware. Phase 2 of SOC2_ROADMAP. | {{NAME}} | Open | — |
 | 3 | 2026-05-25 | High | No backup restore drill | SOC2_READINESS.md gap analysis | We have backups documented in `business-continuity.md` but have never validated a restore. Backup-without-test is "we have hope" not "we have backups." | Quarterly DR drill starting Q3 2026. | {{NAME}} | Open | — |
-| 4 | 2026-05-25 | High | npm deps not pinned to exact versions | SOC2_READINESS.md gap analysis | `package.json` uses `^` and `~` ranges. A malicious dep update could ship into prod through Dependabot or fresh install. | Pin to exact versions; rely on Dependabot to surface upgrade PRs we then review. Phase 2. | {{NAME}} | Open | — |
+| 4 | 2026-05-25 | High | npm deps not pinned to exact versions | SOC2_READINESS.md gap analysis | `package.json` uses `^` and `~` ranges. A malicious dep update could ship into prod through Dependabot or fresh install. | **CLOSED via 5-PR portfolio sweep (2026-06-06):** ledger-core PR #95 (23 deps) + recon PR #26 (24) + fa-amort PR #23 (22) + revenue-rec PR #30 (24) + integrations PR #20 (22). 115 ranges total stripped to exact versions from each repo's `package-lock.json`. Verified `grep -cE '"[~^]' package.json == 0` per repo + `npm install --package-lock-only` clean. Dependabot continues to surface upgrade PRs we then review. | Chris | Closed | 2026-06-06 |
 | 5 | 2026-05-25 | Medium | No Sentry / no error tracking | SOC2_READINESS.md gap analysis | Errors live only in Vercel function logs (7-day retention on free tier). Slow incident detection. | Wire Sentry with PII scrubbing. Phase 2. | {{NAME}} | Open | — |
 | 6 | 2026-05-25 | Medium | No MFA on Vercel / GitHub / Neon | SOC2_READINESS.md gap analysis | Founder account credential theft = full production compromise. MFA is the single best control here. | Enable MFA on all three; print recovery codes; store physically. Phase 1. | {{NAME}} | Open | — |
 | 7 | 2026-05-25 | Medium | No formal access review | SOC2_READINESS.md gap analysis | Solo posture today, but no documented quarterly review. When contributors join this gap becomes Critical. | Add to calendar: quarterly access review. Document in `access-control.md` what gets reviewed. | {{NAME}} | Open | — |
