@@ -1,6 +1,6 @@
-# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design + #1 auth Critical Remediated
+# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design + #1 auth Critical Remediated + PR #10 splits
 
-**Updated 2026-06-06 (v11).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v12).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -24,9 +24,14 @@ design + deficiency log v2.8 + SOC2_READINESS v2.8); the **2026-06-06
 #1 auth Critical Remediated arc** (Group Y) added **3 more** (doc-only:
 deficiency log v2.9 + SOC2_READINESS v2.9 + risk register v2.5 — flips
 the ONLY Critical-severity Open deficiency to Remediated based on
-re-audit of code already on main), for **134+ total** across the 5-repo
-portfolio. This file documents the dependency order so the founder can
-land them efficiently when ready.
+re-audit of code already on main); the **PR #10 splits arc** (Group Z)
+added **2 more** (PR #115 soc2 helpers + monitoring shim foundation +
+PR #116 /api/health endpoint — together with the earlier Group W PR #99
+CSP extraction, completes the 3-PR splitting trajectory that brings
+substantive PR #10 features to main on their own merge schedule),
+for **136+ total** across the 5-repo portfolio. This file documents
+the dependency order so the founder can land them efficiently when
+ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
@@ -613,6 +618,47 @@ After all 3 merge: **Critical-severity Open count: 1 → 0**. The only Critical 
 **Path to Closed** (currently Remediated): remove `src/lib/auth/session.ts` HMAC path entirely + remove `AUTH_STUB_SECRET` from `src/lib/env.ts`. Deferred until first customer onboarding (dev stub remains useful for portfolio demos via UserSwitcher dropdown).
 
 **Why this arc is doc-only:** The engineering was shipped weeks ago. This arc is auditor-facing documentation catching up to architectural reality. Pattern matches the v2.4 RLS deficiency #12 transition (status caught up to shipped code).
+
+---
+
+## Group Z — PR #10 splits, foundation-by-piece (2026-06-06, 3 PRs)
+
+PR #10 (`soc2-hardening-rollout`) is a 9-feature foundation PR that's been open since 2026-06-01. Group Z extracts substantive features as **standalone PRs** so they can reach main on their own merge schedule rather than block on the entire encryption-stack arc.
+
+**Splitting rationale:** Each PR #10 feature closes a different concern. Bundled, they're a 50+ commit PR that's hard to review and risky to land all-at-once. Split, each is a focused PR that closes one thing.
+
+### Group Z.1 — Standalone extractions landed this session
+
+| Order | PR | What | Closes | Base |
+|---|---|---|---|---|
+| 1 | **#99** (also Group W) | `src/middleware.ts` + `tests/csp-nonce.test.ts` — CSP nonce + `strict-dynamic` script-src + frame-ancestors none + object-src none + upgrade-insecure-requests | Deficiency #2 (HIGH No CSP header) → **Closed** | `main` |
+| 2 | **#115** | `src/lib/soc2/index.ts` (10 exports: assertTenantScope, constantTimeEqual, redactPii, sanitizeError, auditedMutation, schemaFingerprint, CrossTenantAccessError) + `src/lib/monitoring/index.ts` (Sentry shim with redactPii + console fallback) + 25 tests | Deficiency #5 (Medium Sentry shim) → completes ledger-core piece for **5/5 portfolio coverage** (Group S covered 4 companions) | `main` |
+| 3 | **#116** | `src/app/api/health/route.ts` — endpoint surfacing schemaFingerprint + DB ping + monitoring presence + uptime + version. 503 on DB-unreachable. | CC7.1 anomaly detection at substrate level | PR #115 |
+
+### Group Z.2 — Remaining PR #10 features (NOT extracted this session)
+
+| Feature | Why deferred | Extraction risk |
+|---|---|---|
+| Audit-log append-only RULE | Requires patching 10+ test files using `auditLog.deleteMany` to use the `withAuditLogMutable` escape hatch. Pairs with PR #104 design (Phase 1 protects against tampering within live DB). | Medium — mechanical search-and-replace but touches many files |
+| `/soc2-check` slash command | Process tooling, no deficiency closure | Low |
+| pre-commit hook | Process tooling, no deficiency closure | Low |
+| soc2 skill | Process tooling, no deficiency closure | Low |
+| env validator | Re-audit found this is **already on main** at `src/lib/env.ts` (commits a7ebfe8, 274f033, f18af1f). The deficiency log doesn't track this as a tracked item. | None — already on main |
+
+### Group Z merge sequence (suggested)
+
+1. **#99** can merge any time (off main, independent)
+2. **#115** can merge any time (off main, independent)
+3. **#116** after #115 lands (stacked on PR #115)
+
+### Splitting trajectory
+
+| Pre-session | Post-session |
+|---|---|
+| 0/9 PR #10 features standalone | **3/9** PR #10 features standalone |
+| PR #10 bundled at 9 features | PR #10 bundled at 6 features (remaining) |
+
+The pattern is now well-established for future PR #10 extractions: each remaining feature can be cherry-picked + verified + posted as a standalone PR following the same playbook. After Group Z, PR #10 itself becomes a less critical merge blocker (6 features remaining, most of low marginal value).
 
 ---
 
