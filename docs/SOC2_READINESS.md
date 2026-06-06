@@ -4,6 +4,11 @@
 **Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`) as of this commit.
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022), Security TSC + Common Criteria CC1–CC9. Availability, Processing Integrity, Confidentiality also referenced where in scope.
 
+**v2.6 amendments (2026-06-06) — npm pinning portfolio-wide:**
+- **Deficiency #4 (npm deps not pinned) → Closed portfolio-wide** via 5 PRs: ledger-core PR #95 (23 deps) + recon PR #26 (24) + fa-amort PR #23 (22) + revenue-rec PR #30 (24) + integrations PR #20 (22). 115 dependency ranges total stripped to exact versions from each repo's `package-lock.json`. Verified per-repo: 0 remaining `^`/`~` ranges + `npm install --package-lock-only` clean. Dependabot continues to surface upgrade PRs we then review.
+- CC7.1 (vulnerability management) posture upgrade: dependency-pinning eliminates the silent-transitive-upgrade attack vector on every `npm ci` deploy. The supply-chain control is now pinning + Dependabot review + npm audit CI, not range + Dependabot review.
+- Readiness % bump: 80% → **81%** (deficiency #4 was a HIGH; portfolio-wide closure across 5 repos warrants the increment).
+
 **v2.5 amendments (2026-06-05) — RLS arc closure:**
 - **Deficiency #12 (RLS not FORCED) → Remediated** via Phases 1+2a+2b shipped across PRs #66, #67, #69-#83 (16 PRs). Phase 3 implementation DRAFT PR #89 awaits operator ack on Decision C runbook (`docs/runbooks/rls-phase-3-bypass-roles.md`). 23 Server Actions + 3 internal HTTP routes + 1 batch helper migrated to `withTenantContext`. Migration guide (`docs/architecture/rls-phase-2b-migration-guide.md`) institutionalizes the 7-shape catalog (W1/W2/T1/T2/E/M/P) with reference PRs per shape.
 - **Deficiency #28 (createFixedAsset tenant-blind entity lookup) → Closed** via PR #88. Surfaced by the 15th adversarial pass as a historical finding (pre-dated Phase 2b sweep). `CreateFixedAssetInput.tenantId` now required.
