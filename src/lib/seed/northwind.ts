@@ -259,7 +259,9 @@ async function seedParties(prisma: PrismaClient) {
 // ---- Sub-ledger setup ----------------------------------------------
 
 async function setupFixedAssets(prisma: PrismaClient) {
+  const tenantId = await getDefaultTenantId(prisma);
   await createFixedAsset(prisma, {
+    tenantId,
     entityCode: ENTITY_CODE,
     code: "LAPTOPS-2026-001",
     description: "8 MacBooks (engineering team) @ $3,000",

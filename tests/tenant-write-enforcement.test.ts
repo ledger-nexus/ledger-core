@@ -349,6 +349,7 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
 
   it("createFixedAsset denormalizes tenantId from the entity", async () => {
     const result = await createFixedAsset(prisma, {
+      tenantId: tenantA.id,
       entityCode: entityA.code,
       code: `FA-${SUFFIX}`,
       description: "Test laptop",

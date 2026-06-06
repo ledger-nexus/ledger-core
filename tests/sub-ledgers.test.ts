@@ -433,6 +433,7 @@ describe("Fixed assets: divergent depreciation across books", () => {
     });
 
     await createFixedAsset(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "A1",
       description: "Test asset",
@@ -495,6 +496,7 @@ describe("Fixed assets: divergent depreciation across books", () => {
       ],
     });
     await createFixedAsset(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "A2",
       description: "Test",
@@ -571,6 +573,7 @@ describe("Book-tax-difference report", () => {
       ],
     });
     await createFixedAsset(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "A3",
       description: "Test",

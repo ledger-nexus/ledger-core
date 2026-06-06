@@ -199,6 +199,7 @@ describe("fixed asset disposal", () => {
       ],
     });
     await createFixedAsset(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "DISPOSE_ME",
       description: "Test",
@@ -261,6 +262,7 @@ describe("fixed asset disposal", () => {
       ],
     });
     await createFixedAsset(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "DISPOSE_GAIN",
       description: "Test",
@@ -316,6 +318,7 @@ describe("fixed asset disposal", () => {
       ],
     });
     await createFixedAsset(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "DOUBLE_DISPOSE",
       description: "Test",
