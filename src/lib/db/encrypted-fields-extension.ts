@@ -1,0 +1,552 @@
+// Prisma client extension — transparent at-rest encryption for
+// confidential columns.
+//
+// Confidentiality TSC. Builds on the AES-256-GCM helper in
+// src/lib/soc2/field-encryption.ts. The extension wires the helper
+// into Prisma so feature code never has to remember to encrypt/
+// decrypt — `prisma.journalEntry.create({ data: { memo } })` writes
+// ciphertext to Postgres, and `prisma.journalEntry.findUnique(...)`
+// returns the plaintext memo to the caller.
+//
+// Column registry (single source of truth):
+//   See ENCRYPTED_COLUMNS below. To add a column:
+//     1. Add the (model, field) pair here
+//     2. Verify the Prisma type is `String?` (we encode null-as-null
+//        and refuse empty strings)
+//     3. Add the field name to `PII_FIELD_NAMES` in
+//        `src/lib/soc2/index.ts` so it also redacts in logs
+//     4. Add a migration entry in `prisma/sql/encrypt-{model}-{field}.ts`
+//        that re-encrypts existing plaintext rows (skip already-
+//        encrypted via `looksEncrypted`)
+//     5. Update `docs/policies/data-classification.md`
+//
+// Failure modes:
+//   - If FIELD_ENCRYPTION_KEY isn't set, the extension passes the
+//     plaintext through unchanged. The helper throws
+//     KeyNotConfiguredError if called, but the extension catches and
+//     warns rather than failing every Prisma query. This is the
+//     "rollout safety net" — production sets the key on day 1; dev
+//     can run without it.
+//   - Decryption failure (tampered ciphertext, wrong key) on read
+//     surfaces as a FieldEncryptionError on the read path.
+//     Application code should catch and fall back to displaying
+//     "[Encryption error — contact support]" rather than crashing
+//     the page.
+//
+// Per-model wiring is intentionally explicit rather than reflection-
+// driven. Adding a new encrypted column is a code review event;
+// hiding that behind a decorator would make it invisible.
+
+import { Prisma } from "@prisma/client";
+import {
+  encryptField,
+  decryptField,
+  looksEncrypted,
+  KeyNotConfiguredError,
+  FieldEncryptionError,
+} from "@/lib/soc2/field-encryption";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Column registry
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tuples of (Prisma model name, field name) for every column the
+ * extension transparently encrypts. Order doesn't matter; lookups
+ * happen by model + field.
+ *
+ * Type modes:
+ *   - default ("string"): the column is `String?` or `String` in
+ *     Prisma. The plaintext is encrypted as-is; the ciphertext
+ *     envelope is stored as a String column value.
+ *   - "json": the column is `Json?` or `Json` in Prisma. The value
+ *     can be any JsonValue (object / array / primitive / null). On
+ *     write we JSON.stringify before encrypt; on read we JSON.parse
+ *     after decrypt. The ciphertext envelope is a base64 string, and
+ *     a quoted string is itself a valid JsonValue — so Prisma is
+ *     happy storing it in a Json column. Mixed plaintext / ciphertext
+ *     during rollout works because looksEncrypted gates the parse.
+ */
+export type EncryptedColumnType = "string" | "json";
+
+export const ENCRYPTED_COLUMNS: ReadonlyArray<{
+  model: string;
+  field: string;
+  type?: EncryptedColumnType;
+}> = [
+  { model: "JournalEntry", field: "memo" },
+  // EmailDelivery body fields contain literal email content sent to
+  // users — JE memos, owner-transfer offers, invite tokens. Highest-
+  // cost-per-leak after JE memo because a leaked email body typically
+  // reveals BOTH the tenant context AND the operational event in the
+  // same row.
+  { model: "EmailDelivery", field: "subject" },
+  { model: "EmailDelivery", field: "bodyText" },
+  { model: "EmailDelivery", field: "bodyHtml" },
+  // Party.displayName is the customer / vendor / contact name as
+  // displayed across AR/AP, JE detail, and the aging reports. A
+  // leaked Party table = a leaked customer roster, which is also
+  // a competitive-intelligence asset. Audited 2026-05-29 across all
+  // 5 repos: zero queries filter by displayName (only `code` is
+  // searchable), so AES-GCM is safe — no need for deterministic
+  // encryption or a secondary search index.
+  { model: "Party", field: "displayName" },
+  // JournalEntryNote.body is plain-text prose CPAs write to annotate
+  // ledger entries. The schema comment says it directly: "CPAs write
+  // short prose." Annotations regularly include customer names,
+  // vendor invoices, internal context ("this is the disputed Acme
+  // invoice — see email thread 4/22"). The notes UI displays one note
+  // at a time, ordered by createdAt — no text-search filter has ever
+  // been requested, and the resolve UI keys off `resolvedAt` not body
+  // content. Audited 2026-05-30 across all 5 repos: zero filter-by-
+  // body queries. Standard AES-GCM is safe.
+  { model: "JournalEntryNote", field: "body" },
+  // Tenant.name is the customer's organization name as displayed in
+  // the workspace switcher, billing pages, and admin tools. It's NOT
+  // the slug (which stays plaintext — it's the URL key, in WHERE
+  // clauses everywhere). The pair of {slug, name} is the same shape
+  // as Party {code, displayName} — searchable id stays plaintext,
+  // free-text display name gets encrypted. Audited 2026-05-30: zero
+  // filter-by-name queries. Reads happen on Tenant load (every
+  // authenticated request) — AES-GCM is microseconds so the per-
+  // session decrypt is perf-neutral.
+  { model: "Tenant", field: "name" },
+  // Notification.{title,body} carries the rendered per-user alert
+  // text: "Acme paid $5,000 invoice 1234", "Owner transfer to alice
+  // declined", "JE-2026-01 needs approval". The category enum is
+  // plaintext (used for filtering); the rendered text routinely
+  // includes customer names, vendor names, dollar amounts, JE
+  // numbers — the prose surface where multiple PII vectors land in
+  // one row. Audited 2026-05-31: zero filter queries on title or
+  // body; only display reads via the notification bell + user-data
+  // export.
+  { model: "Notification", field: "title" },
+  { model: "Notification", field: "body" },
+  // LegalEntity.name is the customer's legal company name (e.g.
+  // "Acme Corp, Inc."), distinct from `code` (the lookup key, in
+  // WHERE clauses everywhere) and `tenantId` (the actor scope).
+  // Same {code, name} shape as Tenant and Party — searchable id
+  // stays plaintext, free-text display name gets encrypted.
+  // Audited 2026-05-31: zero filter-by-name queries; only display
+  // reads in reports, headers, BTD, and the consolidation hierarchy.
+  { model: "LegalEntity", field: "name" },
+  // User.displayName is the human-readable name shown on the user's
+  // profile, audit log attributions, and owner-transfer
+  // notifications. NOT the email (email stays plaintext for the
+  // login flow — deterministic encryption is required for email
+  // and is a separate workstream). Audited 2026-05-31: zero
+  // filter-by-displayName queries; only display reads.
+  { model: "User", field: "displayName" },
+  // AuditLog.metadata is the per-event payload for SOC 2 audit
+  // records — varies by eventType, examples:
+  //   - PRIVILEGED_ACTION → { action, reason, resource, resourceId, ... }
+  //   - DATA_EXPORT       → { format, rowCount }
+  //   - LOGIN_FAILED      → { reason, attemptedEmail (hashed) }
+  //   - JE_POSTED         → { entryNumber, lineCount, ... }
+  // Routinely embeds resource identifiers + actor context + reason
+  // text. While the audit-log row itself is protected by the
+  // append-only RULE + admin-only RBAC, the JSON body has high PII
+  // density per row and should be encrypted at rest.
+  //
+  // IMPORTANT — backfill posture: audit_log is append-only at the DB
+  // level (CC6). UPDATE/DELETE are blocked by Postgres rules in
+  // production. New writes from this rollout forward encrypt
+  // automatically (the extension's create hook fires). Legacy
+  // plaintext rows can only be migrated in dev/staging where
+  // withAuditLogMutable() can temporarily disable the rules.
+  // Production legacy rows stay plaintext for the 7-year retention
+  // period — a documented limitation, not a code gap.
+  //
+  // Audited 2026-05-31: zero filter queries on metadata. Display
+  // happens via JSON.stringify on /admin/audit-log; the snippet
+  // helper at metadataSnippet() also gets the decrypted JsonValue.
+  { model: "AuditLog", field: "metadata", type: "json" },
+  // JournalEntry.sourcePayload is the FROZEN verbatim payload from
+  // the source ERP — QBO Invoice JSON, NetSuite Transaction with
+  // nested lines, etc. Per CLAUDE.md mapper discipline: "Every
+  // imported row MUST populate sourcePayload (the frozen raw
+  // original — verbatim, not a re-encoding). The roundtrip proof
+  // depends on sourcePayload being preserved exactly."
+  //
+  // Content can include: customer/vendor names + addresses, dollar
+  // amounts on every line, source-ERP user emails, custom-field
+  // values, tax IDs from the source system. Highest per-row PII
+  // density in the substrate.
+  //
+  // The Json-column encryption mode (type: "json") JSON.stringify's
+  // on write + JSON.parse's on read — the column stays Prisma type
+  // Json (storing the ciphertext envelope as a JSON string), the
+  // app surface still sees the original JsonValue. Roundtrip
+  // exactness is preserved bit-for-bit.
+  //
+  // Audited 2026-05-31: zero filter queries on sourcePayload. Only
+  // displayed verbatim via JSON.stringify on /journal-entries/[id],
+  // and read by QBO/NetSuite reverse-mappers (export paths) which
+  // also reconstruct from the same JsonValue.
+  { model: "JournalEntry", field: "sourcePayload", type: "json" },
+  // Add new rows here as the rollout proceeds. Each addition needs a
+  // matching migration script in prisma/sql/ that backfills existing
+  // rows. See README in that directory.
+];
+
+function isEncryptedColumn(model: string, field: string): boolean {
+  return ENCRYPTED_COLUMNS.some((c) => c.model === model && c.field === field);
+}
+
+function fieldsForModel(model: string): string[] {
+  return ENCRYPTED_COLUMNS.filter((c) => c.model === model).map((c) => c.field);
+}
+
+/** Returns the encryption mode for a (model, field), or "string" by default. */
+function columnType(model: string, field: string): EncryptedColumnType {
+  const entry = ENCRYPTED_COLUMNS.find(
+    (c) => c.model === model && c.field === field
+  );
+  return entry?.type ?? "string";
+}
+
+/**
+ * Parent-to-child relation map. Lets the encryption walker recurse
+ * into nested writes like:
+ *   prisma.bankStatement.create({ data: { lines: { create: [{...}] } } })
+ * Prisma's $extends query hook only fires on the TOP-LEVEL model;
+ * the nested create payload never sees the child's hook. We
+ * compensate by enumerating the relation paths that lead to
+ * encrypted columns and walking them explicitly.
+ *
+ * Empty in ledger-core today (no nested-write paths land in an
+ * encrypted child). Recon's mirror populates this.
+ */
+const RELATION_MAP: ReadonlyArray<{
+  parent: string;
+  relation: string;
+  child: string;
+}> = [
+  // Add { parent, relation, child } when a feature in ledger-core
+  // does a nested create that writes into an encrypted column.
+];
+
+function relationsForModel(parent: string): Array<{
+  relation: string;
+  child: string;
+}> {
+  return RELATION_MAP.filter((r) => r.parent === parent).map((r) => ({
+    relation: r.relation,
+    child: r.child,
+  }));
+}
+
+/**
+ * True iff this model has either an encrypted column directly OR a
+ * relation path to a child model that does. Used by the query hooks
+ * to decide whether to walk args.data at all.
+ */
+function modelTouchesEncryption(model: string): boolean {
+  if (fieldsForModel(model).length > 0) return true;
+  for (const r of RELATION_MAP) {
+    if (r.parent === model && fieldsForModel(r.child).length > 0) return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Encryption helpers (safe wrappers — never crash the query)
+// ─────────────────────────────────────────────────────────────────────────────
+
+let warnedAboutMissingKey = false;
+
+/**
+ * Encrypt a value if it's a string + the key is configured.
+ * Pass-through (with a one-time warning) when key is missing.
+ * Skip already-encrypted values (idempotency on UPDATE).
+ */
+function safeEncrypt(value: unknown): unknown {
+  if (typeof value !== "string" || value.length === 0) return value;
+  if (looksEncrypted(value)) return value;
+  try {
+    return encryptField(value);
+  } catch (e) {
+    if (e instanceof KeyNotConfiguredError) {
+      if (!warnedAboutMissingKey) {
+        console.warn(
+          "[encrypted-fields] FIELD_ENCRYPTION_KEY is not set; columns " +
+            "in ENCRYPTED_COLUMNS write plaintext. Set the env var to enable."
+        );
+        warnedAboutMissingKey = true;
+      }
+      return value;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Decrypt a value if it looks encrypted. Pass-through when it
+ * doesn't (allows mixed plaintext / ciphertext during rollout).
+ * Decryption failures surface as a FieldEncryptionError; callers
+ * decide whether to swallow or propagate.
+ */
+function safeDecrypt(value: unknown): unknown {
+  if (typeof value !== "string" || value.length === 0) return value;
+  if (!looksEncrypted(value)) return value;
+  try {
+    return decryptField(value);
+  } catch (e) {
+    if (e instanceof KeyNotConfiguredError) {
+      // The ciphertext is in the row but we can't decrypt. Return a
+      // sentinel so the application can render "[Encryption error]"
+      // rather than crash.
+      return "[encrypted — key not configured]";
+    }
+    if (e instanceof FieldEncryptionError) {
+      return "[encryption error — contact support]";
+    }
+    throw e;
+  }
+}
+
+/**
+ * Encrypt a JsonValue. We JSON.stringify the value first so the
+ * AES-GCM helper can do its thing on a string, then store the base64
+ * ciphertext envelope as the Json column's value. Quoted strings are
+ * legal JsonValues, so Prisma is happy.
+ *
+ * Null / undefined skip encryption (Prisma writes a SQL NULL).
+ *
+ * "Already encrypted" idempotency: if Prisma hands us a string that
+ * looksEncrypted, we leave it alone (this happens on legacy rows
+ * being re-saved, or on the backfill script's UPDATE selector
+ * pattern).
+ */
+function safeEncryptJson(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string" && looksEncrypted(value)) return value;
+  try {
+    return encryptField(JSON.stringify(value));
+  } catch (e) {
+    if (e instanceof KeyNotConfiguredError) {
+      if (!warnedAboutMissingKey) {
+        console.warn(
+          "[encrypted-fields] FIELD_ENCRYPTION_KEY is not set; Json columns " +
+            "in ENCRYPTED_COLUMNS write plaintext. Set the env var to enable."
+        );
+        warnedAboutMissingKey = true;
+      }
+      return value;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Decrypt a JsonValue read from Prisma. If Prisma gave us a string
+ * that looksEncrypted, decrypt + JSON.parse to recover the original
+ * JsonValue. Otherwise (legacy row, plaintext JSON value, primitive,
+ * null) pass through unchanged — this is what enables mixed
+ * plaintext/ciphertext during the rollout window.
+ */
+function safeDecryptJson(value: unknown): unknown {
+  if (typeof value !== "string" || value.length === 0) return value;
+  if (!looksEncrypted(value)) return value;
+  try {
+    const plaintext = decryptField(value);
+    if (plaintext === null) return value;
+    try {
+      return JSON.parse(plaintext);
+    } catch {
+      // Shouldn't happen — we JSON.stringify on write — but if a row
+      // was written by some other path with non-JSON ciphertext,
+      // surface the decrypted string rather than crash.
+      return plaintext;
+    }
+  } catch (e) {
+    if (e instanceof KeyNotConfiguredError) {
+      return "[encrypted — key not configured]";
+    }
+    if (e instanceof FieldEncryptionError) {
+      return "[encryption error — contact support]";
+    }
+    throw e;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extension
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Two phases per operation:
+//   1. WRITE (create / update / upsert / createMany): walk the input
+//      `data` recursively and encrypt any field name in the registry
+//      for the operating model.
+//   2. READ (findFirst / findMany / findUnique / etc.): walk the
+//      result and decrypt any ciphertext.
+//
+// `createMany` returns a count, not rows — no read decryption needed.
+// `updateMany` returns a count, no read decryption.
+
+export const encryptedFieldsExtension = Prisma.defineExtension({
+  name: "encrypted-fields",
+  query: {
+    $allModels: {
+      async create({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        args.data = encryptDataObject(model, args.data) as typeof args.data;
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async createMany({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        const data = args.data as unknown;
+        if (Array.isArray(data)) {
+          args.data = data.map((row) => encryptDataObject(model, row)) as typeof args.data;
+        } else {
+          args.data = encryptDataObject(model, data) as typeof args.data;
+        }
+        return query(args);
+      },
+
+      async update({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        args.data = encryptDataObject(model, args.data) as typeof args.data;
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async updateMany({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        args.data = encryptDataObject(model, args.data) as typeof args.data;
+        return query(args);
+      },
+
+      async upsert({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        args.create = encryptDataObject(model, args.create) as typeof args.create;
+        args.update = encryptDataObject(model, args.update) as typeof args.update;
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async findUnique({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async findUniqueOrThrow({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async findFirst({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async findFirstOrThrow({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async findMany({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        const result = await query(args);
+        if (!Array.isArray(result)) return result;
+        return result.map((row) => decryptRow(model, row));
+      },
+    },
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Walkers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Encrypt fields in the `data` payload of a write operation. */
+function encryptDataObject(model: string, data: unknown): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const fields = fieldsForModel(model);
+  const out: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+  for (const field of fields) {
+    if (!(field in out)) continue;
+    const value = out[field];
+    if (value === null || value === undefined) {
+      out[field] = value;
+      continue;
+    }
+    // Route by registry type. Json columns get JSON.stringify before
+    // AES-GCM; String columns go straight in.
+    const type = columnType(model, field);
+    const encrypt = type === "json" ? safeEncryptJson : safeEncrypt;
+    // Prisma write-operation values can be `{ set: ... }` for nested
+    // update inputs. Unwrap before encrypting and re-wrap on the way
+    // out so the underlying generator still recognizes the shape.
+    if (typeof value === "object" && value !== null && "set" in value) {
+      const wrapped = value as { set: unknown };
+      out[field] = { set: encrypt(wrapped.set) };
+      continue;
+    }
+    out[field] = encrypt(value);
+  }
+
+  // Recurse into nested relation writes. Prisma's $extends query
+  // hooks only fire on the TOP-LEVEL model; if a feature does a
+  // nested write into a model with encrypted columns, the child's
+  // hook never sees the payload. We walk the relation map to
+  // compensate.
+  for (const { relation, child } of relationsForModel(model)) {
+    if (!(relation in out)) continue;
+    const nested = out[relation];
+    if (!nested || typeof nested !== "object") continue;
+    const nestedRec = nested as Record<string, unknown>;
+
+    if ("create" in nestedRec) {
+      const createPayload = nestedRec.create;
+      if (Array.isArray(createPayload)) {
+        nestedRec.create = createPayload.map((item) =>
+          encryptDataObject(child, item)
+        );
+      } else if (createPayload && typeof createPayload === "object") {
+        nestedRec.create = encryptDataObject(child, createPayload);
+      }
+    }
+    if (
+      "createMany" in nestedRec &&
+      nestedRec.createMany &&
+      typeof nestedRec.createMany === "object"
+    ) {
+      const cm = nestedRec.createMany as Record<string, unknown>;
+      if (Array.isArray(cm.data)) {
+        cm.data = cm.data.map((item) => encryptDataObject(child, item));
+      } else if (cm.data && typeof cm.data === "object") {
+        cm.data = encryptDataObject(child, cm.data);
+      }
+    }
+    out[relation] = nestedRec;
+  }
+
+  return out;
+}
+
+/** Decrypt fields in a single returned row. */
+function decryptRow<T>(model: string, row: T): T {
+  if (!row || typeof row !== "object") return row;
+  const fields = fieldsForModel(model);
+  const out: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+  for (const field of fields) {
+    if (!(field in out)) continue;
+    const value = out[field];
+    if (value === null || value === undefined) continue;
+    const type = columnType(model, field);
+    out[field] = type === "json" ? safeDecryptJson(value) : safeDecrypt(value);
+  }
+  return out as T;
+}
+
+/** Test helper. Reset the one-time missing-key warning so tests can re-trigger. */
+export function _resetWarningForTesting(): void {
+  warnedAboutMissingKey = false;
+}

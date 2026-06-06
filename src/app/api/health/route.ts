@@ -15,6 +15,12 @@
 //     the Postgres connection is alive.
 //   - monitoring: { sentryDsnPresent } — SOC 2 CC7 evidence that the
 //     error monitor is wired (the actual DSN value is NEVER exposed).
+//   - encryption: { configured, columnCount } — SOC 2 CC6
+//     (Confidentiality TSC). configured is true iff FIELD_ENCRYPTION_KEY
+//     is set AND a valid 64-char hex string. columnCount surfaces how
+//     many (model, field) tuples the deployed Prisma extension is
+//     encrypting. The KEY VALUE ITSELF is NEVER exposed — only the
+//     boolean.
 //   - deterministicEncryption: { configured } — SOC 2 CC6 (Confidentiality
 //     TSC). True iff FIELD_DETERMINISTIC_KEY is set AND a valid 64-char
 //     hex string. Drives the search-hash columns that enable equality
@@ -35,6 +41,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { schemaFingerprint } from "@/lib/soc2";
+import { ENCRYPTED_COLUMNS } from "@/lib/db/encrypted-fields-extension";
 
 // Force the Node.js runtime — schemaFingerprint requires the
 // Prisma client which doesn't run on the Edge.
@@ -53,6 +60,12 @@ interface HealthResponse {
   monitoring: {
     sentryDsnPresent: boolean;
   };
+  encryption: {
+    /** True iff FIELD_ENCRYPTION_KEY is set AND a valid 64-char hex string. */
+    configured: boolean;
+    /** Number of (model, field) tuples the extension is configured to encrypt. */
+    columnCount: number;
+  };
   deterministicEncryption: {
     /** True iff FIELD_DETERMINISTIC_KEY is set AND a valid 64-char hex string. */
     configured: boolean;
@@ -60,6 +73,17 @@ interface HealthResponse {
   version: string;
   uptimeSeconds: number;
   timestamp: string;
+}
+
+/**
+ * Inspect FIELD_ENCRYPTION_KEY without revealing it. Regex-only shape
+ * check (64 hex chars = 32 bytes). Never logs, never returns the
+ * value — only the boolean.
+ */
+function isEncryptionKeyConfigured(): boolean {
+  const k = process.env.FIELD_ENCRYPTION_KEY;
+  if (!k) return false;
+  return /^[0-9a-fA-F]{64}$/.test(k);
 }
 
 /**
@@ -115,6 +139,10 @@ export async function GET(): Promise<NextResponse> {
       ? { reachable: true, latencyMs: dbLatencyMs }
       : { reachable: false, error: dbError ?? "unknown" },
     monitoring: { sentryDsnPresent },
+    encryption: {
+      configured: isEncryptionKeyConfigured(),
+      columnCount: ENCRYPTED_COLUMNS.length,
+    },
     deterministicEncryption: { configured: isDeterministicKeyConfigured() },
     version,
     uptimeSeconds: Math.floor((Date.now() - PROCESS_STARTED_AT_MS) / 1000),
