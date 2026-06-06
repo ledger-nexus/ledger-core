@@ -6,9 +6,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-06 (3-HIGH closure capstone)
+**Last updated:** 2026-06-06 (4-deficiency closure capstone — 3 HIGH + 1 Medium)
 
-**Current state:** **3 HIGH-severity deficiencies fully closed in 2 days.** End-to-end engineering + doc-pentagon + merge-train coverage for #12 (RLS), #4 (npm pinning portfolio-wide), and #2 (CSP). Closed-state count 12 → **14** of 28 tracked; readiness % 80% → **82%**. **Deficiency #12 (RLS not FORCED) → Remediated.** The 27-PR RLS arc closed across Phases 1+2a+2b + Phase 3 design + Phase 3 prereqs + 15th adversarial pass + institutional record (CLAUDE.md, deficiency log v2.5, SOC2_READINESS v2.5, risk register v2.3). Phase 3 implementation (the actual `ALTER TABLE FORCE` flip + 6-category cross-tenant test suite) is DRAFT in PR #89 awaiting operator ack on the Decision C runbook. **Deficiency #4 (npm deps not pinned) → Closed portfolio-wide** via 5-PR sweep: 115 dependency ranges pinned to exact versions across all 5 repos. **Deficiency #2 (No CSP header) → Closed** via standalone PR #99 extraction from PR #10's foundation arc (strict-dynamic nonce middleware, 9/9 tests pass). Multi-tenant isolation posture + supply-chain control + anti-XSS posture all upgraded in the same day.
+**Current state:** **3 HIGH-severity + 1 Medium-severity deficiencies closed in 2 days** (3 fully Closed, 2 Remediated). End-to-end engineering + doc-pentagon + merge-train coverage for #12 (RLS), #4 (npm pinning portfolio-wide), #2 (CSP), and #9 (audit log replication design). Closed-state count 12 → **14** of 28 tracked; Remediated-state 1 → **2**; readiness % 80% → **83%**. **Deficiency #12 (RLS not FORCED) → Remediated.** The 27-PR RLS arc closed across Phases 1+2a+2b + Phase 3 design + Phase 3 prereqs + 15th adversarial pass + institutional record. Phase 3 implementation (the actual `ALTER TABLE FORCE` flip + 6-category cross-tenant test suite) is DRAFT in PR #89 awaiting operator ack on the Decision C runbook. **Deficiency #4 (npm deps not pinned) → Closed portfolio-wide** via 5-PR sweep: 115 dependency ranges pinned to exact versions across all 5 repos. **Deficiency #2 (No CSP header) → Closed** via standalone PR #99 extraction from PR #10's foundation arc (strict-dynamic nonce middleware, 9/9 tests pass). **Deficiency #9 (audit log replication) → Remediated** via PR #104 Phase 1 design doc; Phase 2 (sync inline emit) deferred until customer #2 onboarding. Multi-tenant isolation + supply-chain control + anti-XSS + audit-trail-integrity postures all upgraded in the same day.
 
 **v1.0 portfolio milestone** remains intact — substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. The 2026-06-05 → 2026-06-06 SOC 2 hardening (RLS + pinning + CSP arcs) is multi-tenant safety + supply chain + XSS hardening on top of the v1.0 portfolio.
 
@@ -198,19 +198,50 @@ After all 3 merge: anti-XSS control upgrades to defense-in-depth at the response
 
 ---
 
-### 2026-06-06 day capstone — 3 HIGH closures, 18 PRs
+### Audit log replication arc — Phase 1 design (2026-06-06, 3 PRs)
 
-| Deficiency | Arc | PRs |
-|---|---|---|
-| #12 RLS not FORCED | Group U (Phases 1+2a+2b + Phase 3 design + prereqs + 15th pass + pentagon) | 27 PRs (Remediated; DRAFT impl PR #89 awaits Decision C) |
-| #4 npm deps not pinned | Group V (5 engineering + 2 doc) | 7 PRs (portfolio-wide) |
-| #2 No CSP header | Group W (1 engineering + 2 doc) | 3 PRs (standalone PR #10 extraction) |
-| **Total** | **Groups U + V + W** | **37 PRs** |
+Remediates deficiency #9 (Medium severity, opened 2026-05-25) — audit_log not replicated outside primary DB. **Same architectural pattern as the RLS arc**: Phase 1 design captures the SOC 2 commitment now; Phase 2 implementation defers to customer-onboarding trigger.
 
-**Closed-state progression**: 12 → 13 → **14** of 28 tracked.
-**Readiness % progression**: 80% → 81% → **82%**.
+**Engineering / design (Group X.1, 1 PR):**
+- PR #104: `docs/architecture/audit-log-replication-design.md` — 4-option comparison (S3 + Object Lock, secondary Postgres, event stream via SQS/Kinesis, periodic snapshot)
+- **Recommended Option A**: S3 + Object Lock compliance mode + 7-year retention
+- **3-phase rollout**: Phase 1 (this doc) → Phase 2 (sync inline emit via `src/lib/audit/mirror.ts` — DEFERRED until customer #2 onboards) → Phase 3 (async via SQS — DEFERRED until ~1000 rows/day)
+- Implementation skeleton + schema migration plan (`sha256` + `priorSha256` columns for hash chain) + cost estimate ($0.02/mo at v1, $1.50/mo at 10-customer scale) + CC mapping (CC4 + CC7.2 + CC7.4 + CC6.7) + 6-step migration sequence with chaos-drill verification
 
-**Open HIGH severities remaining**: #1 (auth Clerk swap — major v2 arc, deferred), #3 (backup restore drill — operational, Q3 2026). Both gated on the founder, not engineering. Engineering forward progress from here moves into Medium severities; #9 (audit_log replication outside primary DB) has the largest remaining design surface.
+**Institutional record (Group X.2, 2 PRs):**
+- `docs/policies/control-deficiency-log.md` v2.7 → v2.8 (PR #105): row #9 → Remediated
+- `docs/SOC2_READINESS.md` v2.7 → v2.8 (PR #106): readiness 82% → 83%, CC4 / CC7.4 posture upgrade
+
+**Merge-train**: MERGE_ORDER Group X (PR #107) captures the 3-PR ordering.
+
+**Why Remediated (not Closed)**: mirrors v2.4 RLS deficiency #12 transition. Design surface is captured + implementation path is clear; Phase 2 hasn't shipped yet. Customer #2 onboarding triggers Phase 2 ship.
+
+**Phase 2 trigger requirements**: AWS account + IAM role with `s3:PutObject` only + Object-Locked bucket (compliance mode, 7-year retention) + secrets in Vercel env + boot-time validator enforcement + schema migration + portfolio-wide `prisma.auditLog.create` → `emitAuditRow` cutover + chaos-drill verification. All captured in design doc's Migration sequence section.
+
+After all 3 merge: CC4 / CC7.4 audit-trail-integrity posture upgrades to "documented architecture for substrate-loss survival". Remediated-state count 1 → 2.
+
+---
+
+### 2026-06-06 day capstone — 4 deficiency closures, 21 PRs
+
+| Deficiency | Sev | Status | Arc | PRs |
+|---|---|---|---|---|
+| #12 RLS not FORCED | HIGH | Remediated | Group U (Phases 1+2a+2b + Phase 3 design + prereqs + 15th pass + pentagon) | 27 PRs (DRAFT impl PR #89 awaits Decision C) |
+| #4 npm deps not pinned | HIGH | Closed | Group V (5 engineering + 2 doc) | 7 PRs (portfolio-wide) |
+| #2 No CSP header | HIGH | Closed | Group W (1 engineering + 2 doc) | 3 PRs (standalone PR #10 extraction) |
+| #9 audit log replication | Medium | Remediated | Group X (1 design + 2 doc) | 3 PRs (Phase 1; Phase 2 awaits customer #2) |
+| **Total** | | | **Groups U + V + W + X** | **40 PRs** |
+
+**State progression**:
+- Closed-state count: 12 → 13 → **14** of 28 tracked
+- Remediated-state count: 1 → **2** (#12 + #9)
+- Readiness % progression: 80% → 81% → 82% → **83%**
+
+**Open HIGH severities remaining**: #1 (auth Clerk swap — major v2 arc, deferred), #3 (backup restore drill — operational, Q3 2026). Both gated on the founder, not engineering.
+
+**Open Medium severities remaining**: #6 (MFA), #7 (access review), #8 (vendor SOC 2 receipts), #10 (training records). All operational/founder-coordinated.
+
+**Forward engineering progress** from here moves into PR #10 splitting opportunities (env validator, audit-log RULE, /api/health, helper module) — each potentially extractable as standalone closures following the CSP arc playbook.
 
 ---
 
