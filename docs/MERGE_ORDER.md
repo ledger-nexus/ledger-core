@@ -1,6 +1,6 @@
-# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design
+# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design + #1 auth Critical Remediated
 
-**Updated 2026-06-06 (v10).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v11).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -20,9 +20,13 @@ deficiency log + SOC2_READINESS to v2.6); the **2026-06-06 CSP arc**
 (Group W) added **3 more** (PR #99 standalone CSP extraction from PR #10
 + deficiency log v2.7 + SOC2_READINESS v2.7); the **2026-06-06 audit log
 replication design arc** (Group X) added **3 more** (PR #104 Phase 1
-design + deficiency log v2.8 + SOC2_READINESS v2.8), for **131+ total**
-across the 5-repo portfolio. This file documents the dependency order so
-the founder can land them efficiently when ready.
+design + deficiency log v2.8 + SOC2_READINESS v2.8); the **2026-06-06
+#1 auth Critical Remediated arc** (Group Y) added **3 more** (doc-only:
+deficiency log v2.9 + SOC2_READINESS v2.9 + risk register v2.5 — flips
+the ONLY Critical-severity Open deficiency to Remediated based on
+re-audit of code already on main), for **134+ total** across the 5-repo
+portfolio. This file documents the dependency order so the founder can
+land them efficiently when ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
@@ -565,6 +569,50 @@ Closes deficiency **#9** (Medium severity, opened 2026-05-25) at the design laye
 After all 3 merge: CC4 / CC7.4 audit-trail-integrity posture upgrades from "audit trail lives only in primary Neon DB" to **"audit trail backed by documented architecture for substrate-loss survival"**. Status transition mirrors v2.4 RLS deficiency #12 (Remediated, not Closed — Phase 2 ships when customer #2 onboards). Closed-state count unchanged at 14; Remediated-state count 1 → 2. Readiness % bump: 82% → 83%.
 
 **Phase 2 trigger condition:** customer #2 onboarding. Phase 2 implementation requires AWS account + IAM role + bucket provisioning + secrets in Vercel env + schema migration (add sha256 + priorSha256 columns) + replace `prisma.auditLog.create` calls with `emitAuditRow` portfolio-wide + chaos-drill verification. All steps captured in the design doc's "Migration sequence" section.
+
+---
+
+## Group Y — #1 auth Critical Remediated, doc-only re-audit arc (2026-06-06, 3 PRs)
+
+**The most significant single-deficiency closure of the session.** Flips deficiency #1 (the ONLY Critical-severity Open) from Open → Remediated based on a re-audit of code already on `main`. **No engineering required** — the layered defense was already shipped and verified; the gap was the deficiency log row hadn't been updated.
+
+### Group Y.0 — Re-audit findings (already on main, no PR needed)
+
+| Layer | File | Behavior |
+|---|---|---|
+| Clerk integration | `src/lib/auth/clerk.ts` | Clerk-backed `getCurrentUserFromClerk()` with JIT user provisioning |
+| Env-gated dispatch | `src/lib/auth/current-user.ts` | Dispatches to Clerk when `CLERK_SECRET_KEY` set; falls back to dev stub otherwise |
+| Middleware fail-closed | `src/middleware.ts` (commit b99bbb4) | 503 for every non-public route when `CLERK_SECRET_KEY` unset in production |
+| Verification | `tests/middleware-fail-closed.test.ts` | Asserts 503 behavior |
+| Sign-in/sign-up | `src/app/sign-in/`, `src/app/sign-up/` | Clerk hosted UI pages |
+| Env validation | `src/lib/env.ts` | Paired-presence (both Clerk keys or neither) |
+
+### Group Y.1 — Doc-pentagon amendments (3 PRs, stacked on their v2.8 bases)
+
+| Order | PR | Doc | Cite source | Base |
+|---|---|---|---|---|
+| 1 | **#110** | `control-deficiency-log.md` v2.8 → v2.9 — flips #1 Open → Remediated | Re-audit findings | PR #105 (`deficiency-log-2026-06-06-v28`) |
+| 2 | **#111** | `SOC2_READINESS.md` v2.8 → v2.9 — readiness 83% → 85%, Critical-Open=0 milestone | PR #110 | PR #106 (`soc2-readiness-v28-audit-log-replication`) |
+| 3 | **#112** | `risk-register.md` v2.4 → v2.5 — Risk #1 score 20 (4×5) → 5 (1×5), Open → Mitigated | PR #110 + PR #111 | PR #109 (`risk-register-2026-06-06-v24`) |
+
+### Group Y merge sequence (suggested)
+
+1. **Y.1**: #110 first (deficiency log), then #111 (readiness) + #112 (risk register) after their bases land
+
+After all 3 merge: **Critical-severity Open count: 1 → 0**. The only Critical deficiency in the log is now Remediated. Risk #1 (the highest-scored Open risk on the register at 20) drops to 5 and shifts from Open → Mitigated. Risks above the 12 threshold are now: #5 (vendor outage 12), #19 (backup integrity 15), #20 (phishing 12).
+
+**Original attack and current state:**
+
+| | Original | Current |
+|---|---|---|
+| Attack vector | Anyone with `AUTH_STUB_SECRET` can impersonate any user | Requires BOTH prod `CLERK_SECRET_KEY` unset AND attacker to obtain `AUTH_STUB_SECRET` |
+| Likelihood (risk register) | 4 | 1 |
+| Score | 20 | 5 |
+| Defense | None | Clerk + env-gated dispatch + 503 fail-closed gate + verification test |
+
+**Path to Closed** (currently Remediated): remove `src/lib/auth/session.ts` HMAC path entirely + remove `AUTH_STUB_SECRET` from `src/lib/env.ts`. Deferred until first customer onboarding (dev stub remains useful for portfolio demos via UserSwitcher dropdown).
+
+**Why this arc is doc-only:** The engineering was shipped weeks ago. This arc is auditor-facing documentation catching up to architectural reality. Pattern matches the v2.4 RLS deficiency #12 transition (status caught up to shipped code).
 
 ---
 
