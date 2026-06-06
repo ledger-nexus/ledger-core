@@ -1,8 +1,9 @@
 # RLS Phase 2b — migration guide
 
-**Status:** Guide complete; migrations pending operator scheduling
+**Status:** SWEEP COMPLETE (2026-06-05). 23 actions/routes/helpers migrated across PRs #70-#83 + this guide. Awaiting merge.
 **Prereq:** Phase 1 (PR #66) + Phase 2a (PR #67) merged
-**Closes:** the broad call-site refactor portion of deficiency #12
+**Closes:** the broad call-site refactor portion of deficiency #12 (Task #128)
+**Next:** Phase 3 (FORCE + cross-tenant test suite) — Task #127
 
 ## What Phase 2b does
 
@@ -264,15 +265,17 @@ The outer `withTenantContext` is itself a `$transaction` — don't nest a second
 
 ## Shape catalog (discovered during the sweep)
 
-After landing 9 migrations across PRs #70-#75, the original Class W / Class T binary turned out to undercount the shapes. Five distinct shapes have surfaced. Match your target to one of these before starting and you'll know within 2 minutes what the diff will look like:
+After landing 23 migrations across PRs #70-#83, the original Class W / Class T binary turned out to undercount the shapes. **Seven distinct shapes** surfaced over the sweep's lifetime. Match your target to one of these before starting and you'll know within 2 minutes what the diff will look like:
 
 | Shape | Helper status | Action body pattern | Reference PR | Touched files |
 |---|---|---|---|---|
 | **W1 — pure widening** | Single-statement helper takes `PrismaClient` | Just wrap the call in `withTenantContext`; widen helper signature to `Db = PrismaClient \| Prisma.TransactionClient` | #70 (`mark-notifications-read`) | helper.ts + action.ts + test |
-| **W2 — helper already tx-aware** | Helper already accepts `TransactionClient` (e.g. `postJournalEntry` per v1.11) | One-line semantic change — wrap + swap. No helper file touched. | #73 (`create-journal-entry`), #74 (`paste-journal-entry`) | action.ts + test |
-| **T1 — single-helper Class T** | Helper opens its own `prisma.$transaction(async tx => ...)` | Split helper into inner-takes-tx + outer-wraps. Action calls inner from inside `withTenantContext`. | #71 (`apply-ap-payment`), #72 (`apply-ar-payment`) | helper.ts (inner/outer split) + action.ts + test |
-| **T2 — multi-step in-action** | Action ITSELF uses `prisma.$transaction(...)` for atomicity (no helper to split) | Replace `prisma.$transaction(async tx => ...)` with `withTenantContext(tenant.id, async tx => ...)`. The outer block IS a `$transaction` with the GUC set. Drops any legacy `tx as typeof prisma` casts on now-tx-aware helpers. | #73 (`reverse-journal-entry`), #74 (`journal-entry-notes`) | action.ts + test |
+| **W2 — helper already tx-aware** | Helper already accepts `TransactionClient` (e.g. `postJournalEntry` per v1.11) | One-line semantic change — wrap + swap. No helper file touched. | #73 (`create-journal-entry`), #74 (`paste-journal-entry`), #81 (`/api/internal/journal-entries`) | action.ts + test |
+| **T1 — single-helper Class T** | Helper opens its own `prisma.$transaction(async tx => ...)` | Split helper into inner-takes-tx + outer-wraps. Action calls inner from inside `withTenantContext`. | #71 (`apply-ap-payment`), #72 (`apply-ar-payment`), #78 (`reassignRecord`), #82 (`createFixedAsset`) | helper.ts (inner/outer split) + action.ts + test |
+| **T2 — multi-step in-action** | Action ITSELF uses `prisma.$transaction(...)` for atomicity (no helper to split) | Replace `prisma.$transaction(async tx => ...)` with `withTenantContext(tenant.id, async tx => ...)`. The outer block IS a `$transaction` with the GUC set. Drops any legacy `tx as typeof prisma` casts on now-tx-aware helpers. | #73 (`reverse-journal-entry`), #74 (`journal-entry-notes`), #80 (`setup-first-entity`), #82 (`record-depreciation`) | action.ts + test |
 | **E — tenant-id-from-entity-lookup** | Action receives entity code; tenantId discriminator IS the entity's tenantId | First DB hit (entity lookup by code) runs OUTSIDE `withTenantContext` — we need its result to know the GUC value. Everything else (book/period/PeriodClose resolvers + the mutation) goes inside `withTenantContext(entity.tenantId, async tx => ...)`. | #75 (`period-close`, `period-reopen`) | action.ts + test |
+| **M — multi-tenant batch** | Action loops over records across MULTIPLE tenants (bulk admin operation; no single `tenant.id` discriminator) | Each loop iteration sets its own GUC via `withTenantContext(rec.tenantId, ...)`. Carry the per-record `tenantId` through to the loop body — extend the upstream typed result if needed. Per-iteration tx independence is the contract: a single failure lands in `failedCount`, batch continues. | #79 (`user-lifecycle/deactivateUserAction`) | action.ts + helper-extension (OrphanedRecord.tenantId) + test |
+| **P — per-iteration batch helper** | Helper runs a multi-step batch where each step needs its OWN tx for atomicity-of-commit (a bad step must not roll back already-succeeded steps) | Wrap each per-iteration call (`postJournalEntry`, etc.) in `withTenantContext(template.tenantId, async tx => ...)` from INSIDE the helper. The pre-loop fetch and post-loop final update typically get their own `withTenantContext` blocks too. | #83 (`runRecurringEntries`) | helper.ts + test |
 
 ### Outcome-variant return discipline (T2 + E shapes)
 
