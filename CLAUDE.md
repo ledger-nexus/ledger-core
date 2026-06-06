@@ -123,6 +123,42 @@ The roadmap from v0.2 (universal substrate scaffolding) to v1.0 (full multi-enti
 3. Read `PROJECT_STATUS.md` for the latest "where we are / what's next" (note: status doc is being rewritten in the next batch)
 4. Confirm understanding before suggesting work
 
+## SOC 2 / PR #10 splitting pattern (institutionalized 2026-06-06)
+
+**PR #10 (`soc2-hardening-rollout`) is a 9-feature foundation PR open since 2026-06-01.** When a session needs a feature that lives only in PR #10 (e.g., a deficiency closure depends on it), DO NOT wait for PR #10 to merge — extract the feature as a standalone PR.
+
+**Splitting recipe** (proven 3× this session: PR #99 CSP, PR #115 soc2 helpers + monitoring shim, PR #116 /api/health):
+
+1. `git checkout main && git checkout -b extract-<feature> main` — branch from main, not from PR #10
+2. `git checkout <commit-sha> -- <files>` — cherry-pick the feature's files from the relevant commit on the `soc2-hardening-rollout` branch
+3. Verify `@/lib/*` imports resolve on main — if a dep is still in PR #10, extract the dep first (PR #115 unblocked PR #116 by extracting `@/lib/soc2 → schemaFingerprint`)
+4. Run `npx tsc --noEmit` — must be clean before commit
+5. Run the feature's tests (`npx vitest run tests/<feature>.test.ts`) — all must pass
+6. Open PR with body that explicitly cites the source commit + the deficiency / control it closes
+
+**PR #10 feature inventory** (as of 2026-06-06):
+
+| Feature | Status on main |
+|---|---|
+| Helper module `src/lib/soc2/` | ✅ Extracted via PR #115 |
+| Monitoring shim `src/lib/monitoring/` | ✅ Extracted via PR #115 |
+| `/api/health` endpoint | ✅ Extracted via PR #116 |
+| CSP nonce middleware | ✅ Extracted via PR #99 (also Group W) |
+| Env validator `src/lib/env.ts` | ✅ Already on main (per 2026-06-06 re-audit; commits a7ebfe8, 274f033, f18af1f) |
+| Audit-log append-only RULE | ❌ NOT extracted — requires patching 15 test files using `auditLog.deleteMany` to use `withAuditLogMutable` escape hatch. Deferred. |
+| /soc2-check slash command | ❌ NOT extracted — process tooling, low value |
+| pre-commit hook | ❌ NOT extracted — process tooling, low value |
+| soc2 skill | ❌ NOT extracted — process tooling, low value |
+
+**Deficiency-log re-audit pattern**: Before opening a new PR to close a tracked deficiency, check whether the closure is **already on main** (the #1 finding pattern of 2026-06-06). The deficiency log may lag architectural reality — a flip from Open → Remediated is sometimes just a doc PR away. The re-audit playbook:
+1. Read the deficiency row's "Description" carefully — what's the attack/gap?
+2. `git log --all --oneline -- <file_path>` for the relevant code file — does main have a commit addressing it?
+3. `git show main:<path>` — does the layered defense already exist?
+4. Look for verification tests (`tests/<feature>.test.ts`)
+5. If all three answer YES, the deficiency is Remediated. Open a doc PR flipping the status + amending readiness % + risk register score.
+
+This pattern closed deficiency #1 (the only Critical) on 2026-06-06 via doc-only PRs (#110, #111, #112) — Critical-Open count 1 → 0.
+
 ## Style preferences
 
 - Be direct. The user is a CPA — they understand precision.
