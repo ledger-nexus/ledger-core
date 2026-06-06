@@ -1,6 +1,6 @@
-# Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints + RLS arc
+# Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc
 
-**Updated 2026-06-05 night (v7).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v8).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -14,9 +14,11 @@ pass** added **4 more** (2nd commits on each shim PR); the **CLAUDE.md
 institutional-memory arc** added **5 more** (one per repo); the **RLS arc**
 (Group U) added **27 more** (Phases 1+2a+2b + Phase 3 design + Phase 3
 prereqs + 15th adversarial pass + Phase 3 DRAFT + doc-pentagon institutional
-record), for **118+ total** across the 5-repo portfolio. This file documents
-the dependency order so the founder can land them efficiently when
-ready.
+record); the **2026-06-06 pinning arc** (Group V) added **7 more** (5
+engineering PRs closing deficiency #4 portfolio-wide + 2 doc PRs amending
+deficiency log + SOC2_READINESS to v2.6), for **125+ total** across the
+5-repo portfolio. This file documents the dependency order so the
+founder can land them efficiently when ready.
 
 Most PRs are independent and can land in any order. The stacked
 groups are explicitly called out below.
@@ -468,6 +470,41 @@ All 6 PRs in Group U.5 are **independent** doc-only (except #88 which is the his
 5. **U.4**: #89 LAST — gated on operator Decision C ack + all upstream PRs landed
 
 After all 27 merge: deficiency #12 closed at the application layer (Phases 1+2a+2b) AND the database layer (Phase 3 FORCE). Multi-tenant isolation posture upgrades from "application-layer scoping is the only enforcement" to "application + DB-layer (load-bearing post-FORCE) + per-PR adversarial-pass cadence as CC4 monitoring evidence."
+
+---
+
+## Group V — npm pinning portfolio-wide, deficiency #4 closure (2026-06-06, 7 PRs)
+
+Closes deficiency **#4** (HIGH severity, opened 2026-05-25) — npm deps not pinned to exact versions. Mirrors the Sentry-shim arc's playbook (Group S): one engineering PR per repo (5 total) + doc-pentagon amendments (2 total).
+
+### Group V.1 — Engineering sweep (5 PRs, all independent)
+
+Each PR strips `^`/`~` to the exact version currently in that repo's `package-lock.json`. No upgrades introduced. Each branches off its repo's `main` — order doesn't matter.
+
+| Repo | PR | Deps pinned | Verification |
+|---|---|---|---|
+| ledger-core | **#95** | 23 | `grep -cE '"[~^]' package.json` = 0; `npx tsc --noEmit` clean |
+| recon | **#26** | 24 | `grep -cE '"[~^]' package.json` = 0; lockfile clean |
+| fa-amort | **#23** | 22 | `grep -cE '"[~^]' package.json` = 0; lockfile clean |
+| revenue-rec | **#30** | 24 | `grep -cE '"[~^]' package.json` = 0; lockfile clean |
+| integrations | **#20** | 22 | `grep -cE '"[~^]' package.json` = 0; lockfile clean |
+| **Total** | **5 PRs** | **115 ranges** | |
+
+### Group V.2 — Doc-pentagon amendments (2 PRs, stacked)
+
+| Order | PR | Doc | Cite source | Base |
+|---|---|---|---|---|
+| 1 | **#96** | `control-deficiency-log.md` v2.5 → v2.6 | Group V.1 (5 PRs) | `deficiency-log-2026-06-05-v24` (PR #87) |
+| 2 | **#97** | `SOC2_READINESS.md` v2.5 → v2.6 — readiness 80% → 81% | PR #96 + Group V.1 | `soc2-readiness-rls-arc-update` (PR #91) |
+
+### Group V merge sequence (suggested)
+
+1. **V.1**: all 5 engineering PRs in parallel (no inter-PR deps)
+2. **V.2**: #96 first (deficiency log), then #97 (readiness) after Group V.1 lands + PR #87/#91 land
+
+After all 7 merge: CC7.1 (vulnerability management) supply-chain control upgrades from "range + Dependabot review" to **"pinning + Dependabot review + npm audit CI"**. Silent-transitive-upgrade attack vector eliminated on every `npm ci` deploy. Closed-state count: 12 → 13 of 28 tracked.
+
+**Note:** PR #95 (ledger-core engineering) caught a pre-existing deficiency #13 finding — TS18049 errors in `tests/middleware-fail-closed.test.ts` on `main` for recon (Group R closure PRs not yet merged). The pinning sweep is **orthogonal** to that gap; tsc errors are unchanged by version-string changes.
 
 ---
 
