@@ -4,6 +4,12 @@
 **Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`) as of this commit.
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022), Security TSC + Common Criteria CC1–CC9. Availability, Processing Integrity, Confidentiality also referenced where in scope.
 
+**v2.7 amendments (2026-06-06) — CSP standalone closure:**
+- **Deficiency #2 (No CSP header) → Closed** via PR #99. Standalone extraction of the CSP middleware change from PR #10's foundation arc. `src/middleware.ts` generates a per-request 16-byte base64url nonce via Edge `crypto.getRandomValues`; CSP header set on every response with `strict-dynamic` script-src + Clerk/Sentry/Stripe connect-src + `frame-ancestors 'none'` + `object-src 'none'` + `upgrade-insecure-requests`. 9/9 tests pass (`tests/csp-nonce.test.ts`).
+- **CC6.6 posture upgrade**: anti-XSS control upgrades from "static security headers + Next.js default escape" to **"static headers + per-request CSP nonce + strict-dynamic delegation"**. The script-injection attack surface is now defended at the response layer in addition to the framework-level escape.
+- **Extraction rationale**: PR #10 is a 9-feature foundation PR (helper module + env validator + CSP + audit-log RULE + Sentry shim + /soc2-check + pre-commit hook + soc2 skill + /api/health). Splitting CSP out lets #2 close on its own merge schedule rather than block on the entire foundation arc.
+- **Readiness % bump: 81% → 82%.** Deficiency #2 was a HIGH; standalone closure with passing tests warrants a 1pp bump.
+
 **v2.6 amendments (2026-06-06) — npm pinning portfolio-wide:**
 - **Deficiency #4 (npm deps not pinned) → Closed portfolio-wide** via 5 PRs: ledger-core PR #95 (23 deps) + recon PR #26 (24) + fa-amort PR #23 (22) + revenue-rec PR #30 (24) + integrations PR #20 (22). 115 dependency ranges total stripped to exact versions from each repo's `package-lock.json`. Verified per-repo: 0 remaining `^`/`~` ranges + `npm install --package-lock-only` clean. Dependabot continues to surface upgrade PRs we then review.
 - CC7.1 (vulnerability management) posture upgrade: dependency-pinning eliminates the silent-transitive-upgrade attack vector on every `npm ci` deploy. The supply-chain control is now pinning + Dependabot review + npm audit CI, not range + Dependabot review.
