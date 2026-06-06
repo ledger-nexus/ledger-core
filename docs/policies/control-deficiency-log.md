@@ -1,6 +1,11 @@
 # Control deficiency log
 
-**Version:** 1.0 · **Effective date:** {{DATE}} · **Owner:** {{NAME}}
+**Version:** 2.4 · **Effective date:** 2026-06-05 · **Owner:** Chris
+
+**v2.4 amendments (2026-06-05):**
+- Deficiency #12 (RLS): Phase 2b call-site sweep COMPLETE (23 sites across PRs #69-#83). Phase 3 design + decisions A/B/D resolved (PRs #84-#86). Status → "Remediated" (Phase 3 implementation pending operator ack on Decision C runbook).
+- New deficiency #28 (createFixedAsset tenant-blind entity lookup) added from 15th adversarial-pass historical finding.
+- Captures the 15th adversarial-pass HIGH closure (audit-bypass on Decision A drop) as institutional CC4 evidence — finding emerged from the work, was closed in-PR before merge.
 
 ## Purpose
 
@@ -41,7 +46,8 @@ Add a new row to the table below. Assign yourself if you found it. Use a short, 
 | 9 | 2026-05-25 | Medium | Audit log not replicated outside primary DB | SOC2_READINESS.md gap analysis | If the Neon DB is lost, the audit trail goes with it. Audit logs need to survive DB loss to be credible evidence. | Mirror audit_log to append-only S3 or dedicated DB. Phase 3. | {{NAME}} | Open | — |
 | 10 | 2026-05-25 | Low | No formal training / acknowledgement records | SOC2_READINESS.md gap analysis | Policies in `docs/policies/` don't have signed acknowledgement from the founder. SOC 2 expects sign-off evidence per person per year. | Add `docs/policies/acknowledgements/{name}-{year}.md` with content + signature. Annual cadence. | {{NAME}} | Open | — |
 | 11 | 2026-05-25 | High | tenantId is nullable; not yet enforced at query layer | Phase 1 of multi-tenancy work | Schema had `tenantId String?` on every tenant-scoped model. Phase 4a wired write enforcement (engine refuses cross-tenant); Phase 4c scoped the highest-leverage read queries; Phase 4b applied `ALTER COLUMN tenantId SET NOT NULL` on 26 tables (audit_log intentionally excluded for pre-identity TOKEN_REJECTED events). Remaining gap: composite `[tenantId, code]` uniques deferred until customer #2 onboards. | Closed via Phases 4a + 4b + 4c. Composite uniques tracked as Phase 4b-followup. | {{NAME}} | Closed | 2026-05-26 |
-| 12 | 2026-05-25 | High | No Postgres Row-Level Security (RLS) | Phase 1 of multi-tenancy work | RLS would catch any query that forgets `where: { tenantId }` at the database layer. Application-level scoping is the only enforcement in v1. Documented as a planned follow-up in `docs/multi-tenancy.md`. | Add per-table RLS policies; set `app.current_tenant_id` per Prisma connection. Tracked v2 of multi-tenancy. | {{NAME}} | Open | — |
+| 12 | 2026-05-25 | High | No Postgres Row-Level Security (RLS) | Phase 1 of multi-tenancy work | RLS would catch any query that forgets `where: { tenantId }` at the database layer. Application-level scoping is the only enforcement in v1. Documented as a planned follow-up in `docs/multi-tenancy.md`. | **Phase 1 (PR #66)**: 39 policies + GUC SQL function. **Phase 2a (PR #67)**: `withTenantContext` helper. **Phase 2b (PRs #69-#83, 14 PRs)**: 23 Server Actions + 3 HTTP routes + recurring-batch helper migrated; full shape catalog (W1/W2/T1/T2/E/M/P) institutionalized in migration guide. **Phase 3 design (PR #84)**: full design + bypass-role runbook + decisions A/B/D resolved with recommendations. **Phase 3 prereqs (PRs #85-#86)**: Decision B (entity scoping) + Decision A (drop probes) landed. **15th adversarial pass** found 1 HIGH (audit-bypass on Decision A) + 3 MEDIUMs; all closed in-PR before merge. Phase 3 implementation (ALTER TABLE FORCE + 6-category cross-tenant test suite) pending operator ack on Decision C runbook. | Chris | Remediated | 2026-06-05 |
+| 28 | 2026-06-05 | High | `createFixedAsset` entity lookup not tenant-scoped | 15th adversarial pass — historical finding (pre-dates Phase 2b sweep) | `src/lib/accounting/sub-ledgers/fixed-assets.ts:62` does `legalEntity.findFirstOrThrow({ where: { code } })` without tenantId scope. Pre-Phase-3-FORCE, a token holder could create a FixedAsset under another tenant's entity with the same code. PR #82's Class T split preserves the bug verbatim; Decision B (PR #85) fixed only the record-depreciation route, not the create-asset path. | Scope the lookup by `input.tenantId` (or derive from caller's `requireCurrentTenant()`). Lands as a separate PR before Phase 3 FORCE migration. Tracked separately from #12 since it's a pre-existing application-layer bug, not an RLS gap. | Chris | Open | — |
 
 ## Procedure
 
