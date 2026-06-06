@@ -6,7 +6,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-06 (5-deficiency closure capstone + 3 PR #10 splits — Critical-Open=0 milestone)
+**Last updated:** 2026-06-06 (5-deficiency closure capstone + 4 PR #10 splits + CLAUDE.md institutionalization — Critical-Open=0 milestone)
 
 **Current state:** **Critical-severity Open count: 1 → 0.** 5 deficiencies closed in 2 days (2 Closed, 3 Remediated) including the session-defining #1 auth Critical Remediation. End-to-end engineering + doc-pentagon + merge-train coverage for #1 (auth), #12 (RLS), #4 (npm pinning portfolio-wide), #2 (CSP), and #9 (audit log replication design). Closed-state count 12 → **14** of 28 tracked; Remediated-state 1 → **3**; readiness % 80% → **85%**.
 
@@ -253,31 +253,38 @@ After all 3 merge: **Critical-severity Open count: 1 → 0** — the session-def
 
 ---
 
-### PR #10 splits — foundation-by-piece (2026-06-06, 3 PRs)
+### PR #10 splits — foundation-by-piece (2026-06-06, 4 PRs)
 
 PR #10 (`soc2-hardening-rollout`) has been open since 2026-06-01 with 9 bundled features. Group Z extracts substantive features as **standalone PRs** so they reach main on their own merge schedule.
 
-**Engineering (Group Z, 3 PRs):**
+**Engineering (Group Z, 4 PRs):**
 - **PR #99** (also Group W) — `src/middleware.ts` CSP nonce + `tests/csp-nonce.test.ts`. Closes deficiency #2 (HIGH).
 - **PR #115** — `src/lib/soc2/index.ts` (10 exports: assertTenantScope, constantTimeEqual, redactPii, sanitizeError, auditedMutation, schemaFingerprint, CrossTenantAccessError) + `src/lib/monitoring/index.ts` (Sentry shim) + 25 tests. **Completes 5/5 portfolio Sentry shim coverage** (Group S covered 4 companions; this brings the ledger-core piece to main).
 - **PR #116** — `src/app/api/health/route.ts` endpoint surfacing schemaFingerprint + DB ping + monitoring presence + uptime + version. 503 on DB-unreachable for pod rotation. **CC7.1 anomaly detection at substrate level.**
+- **PR #120** — `prisma/sql/audit-log-append-only.sql` Postgres RULE + `tests/_helpers/audit-log-cleanup.ts` (`withAuditLogMutable` escape hatch) + 3 RULE tests + **15 test files patched** to wrap audit cleanup in the escape hatch. **CC4 (audit trail integrity) + CC7.2 (anomaly detection).** Pairs with PR #104 design (Phase 1 RULE protects tampering within live DB; design protects DB loss).
 
 **Splitting trajectory:**
 - Pre-session: 0/9 PR #10 features standalone, PR #10 bundled at 9 features
-- Post-session: **3/9 standalone**, PR #10 bundled at 6 features remaining
+- Post-session: **4/9 standalone**, PR #10 bundled at 5 features remaining (4 process tooling + helper module which is now extracted via PR #115)
 
 **Remaining PR #10 features (NOT extracted):**
-- Audit-log append-only RULE — requires patching 15 test files using `auditLog.deleteMany` (deferred)
 - /soc2-check slash command, pre-commit hook, soc2 skill — process tooling, low value
 - Env validator — already on main per re-audit (commits a7ebfe8, 274f033, f18af1f)
 
-**Merge-train**: MERGE_ORDER Group Z (PR #117) captures the 3-PR ordering + remaining-features inventory.
+**Audit trail defense-in-depth** (after PR #120 + PR #104 merge):
+1. App-level discipline (CLAUDE.md convention)
+2. **DB-level RULE silently no-ops UPDATE+DELETE** (PR #120) ← NEW
+3. Out-of-band S3 + Object Lock archive (PR #104 design; Phase 2 deferred)
 
-After all 3 merge: PR #10 becomes a less critical merge blocker (6 features remaining, most of low marginal value). The pattern is now well-established for future PR #10 extractions following the same playbook.
+**Merge-train**: MERGE_ORDER Group Z (PR #117 + PR #121 amendment) captures the 4-PR ordering + remaining-features inventory + defense-in-depth table.
+
+**Institutional memory**: PR #119 amends CLAUDE.md with the PR #10 splitting recipe + deficiency-log re-audit pattern. Future Claude Code sessions inherit the playbook auto-loaded.
+
+After all 4 merge + PR #119: PR #10 becomes a less critical merge blocker (5 features remaining, mostly process tooling). The pattern is well-established for future PR #10 extractions.
 
 ---
 
-### 2026-06-06 day capstone — 5 deficiency closures + 3 PR #10 splits, 46 PRs
+### 2026-06-06 day capstone — 5 deficiency closures + 4 PR #10 splits + CLAUDE.md, 51 PRs
 
 | Deficiency | Sev | Status | Arc | PRs |
 |---|---|---|---|---|
@@ -286,8 +293,9 @@ After all 3 merge: PR #10 becomes a less critical merge blocker (6 features rema
 | #4 npm deps not pinned | HIGH | Closed | Group V (5 engineering + 2 doc) | 7 PRs (portfolio-wide) |
 | #2 No CSP header | HIGH | Closed | Group W (1 engineering + 2 doc) | 3 PRs (standalone PR #10 extraction) |
 | #9 audit log replication | Medium | Remediated | Group X (1 design + 2 doc) | 3 PRs (Phase 1; Phase 2 awaits customer #2) |
-| PR #10 splits (foundation-by-piece) | — | Engineering on main | Group Z (3 PRs: #99 CSP + #115 soc2 helpers + monitoring + #116 /api/health) | 3 PRs (#99 counted in W; #115, #116 net new) |
-| **Total** | | | **Groups U + V + W + X + Y + Z** | **46 PRs** |
+| PR #10 splits (foundation-by-piece) | — | Engineering on main | Group Z (4 PRs: #99 CSP + #115 soc2 helpers + monitoring + #116 /api/health + #120 audit-log RULE) | 4 PRs (#99 counted in W; #115, #116, #120 net new) |
+| CLAUDE.md institutionalization | — | Institutional memory | PR #119 — auto-loaded by future Claude Code sessions | 1 PR |
+| **Total** | | | **Groups U + V + W + X + Y + Z + CLAUDE.md** | **51 PRs** |
 
 **State progression**:
 - **Critical-severity Open count: 1 → 0** ← session milestone
@@ -301,9 +309,11 @@ After all 3 merge: PR #10 becomes a less critical merge blocker (6 features rema
 **Open Medium severities remaining**: #6 (MFA), #7 (access review), #8 (vendor SOC 2 receipts), #10 (training records). All operational/founder-coordinated.
 
 **Engineering parity reached** on tracked deficiencies. Forward engineering progress from here:
-- **PR #10 splitting continuation** — 3/9 features extracted this session (CSP, soc2 helpers + monitoring shim, /api/health). Remaining: audit-log RULE (15-file test patch surface; deferred), process tooling (/soc2-check, pre-commit hook, soc2 skill — low value). Env validator already on main per re-audit.
+- **PR #10 splitting at 4/9** — CSP, soc2 helpers + monitoring shim, /api/health, audit-log RULE all extracted. Remaining (5 features): process tooling (/soc2-check, pre-commit hook, soc2 skill — low value; helper module already extracted in #115; env validator already on main per re-audit).
+- **Audit trail integrity now 3-layer defended** after PR #120 + PR #104 merge: app-level discipline (CLAUDE.md) + DB-level Postgres RULE silently no-ops UPDATE+DELETE (PR #120) + S3 + Object Lock archive (PR #104 design; Phase 2 deferred until customer #2).
 - **Phase 2 implementations** of the Remediated items (#12 RLS Phase 3 FORCE pending operator Decision C ack; #9 audit log replication Phase 2 pending customer #2 onboarding).
 - **Re-audit other deficiencies for hidden Remediated state** (the #1 finding pattern — deficiency log lagging architectural reality).
+- **CLAUDE.md institutional memory** (PR #119) now documents the PR #10 splitting recipe + re-audit pattern so future sessions inherit the playbook.
 
 ---
 
