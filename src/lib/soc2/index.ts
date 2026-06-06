@@ -413,5 +413,16 @@ export {
   auditTokenUse,
 } from "@/lib/audit/log";
 
+// Field-level encryption (Confidentiality TSC + CC6.1).
+// Confidential Postgres columns are AES-256-GCM-encrypted at the
+// application layer; a leaked connection string can't read plaintext.
+export {
+  encryptField,
+  decryptField,
+  looksEncrypted,
+  FieldEncryptionError,
+  KeyNotConfiguredError,
+} from "./field-encryption";
+
 // Re-export Prisma type for ergonomic helper signatures elsewhere.
 export type { PrismaClient };
