@@ -1,6 +1,6 @@
-# Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints
+# Merge order — 2026-05-25 → 2026-06-05 SOC 2 hardening sprint + continuation + NS sprints + RLS arc
 
-**Updated 2026-06-05 night (v6).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-05 night (v7).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -11,8 +11,10 @@ automation** added **2 more** (PR #62 script + PR #63 URL backfill); the
 **risk register v2.2** added **1 more**; the **even-later-evening Sentry shim
 arc** added **4 more** (companion ports closing #5); the **14th adversarial
 pass** added **4 more** (2nd commits on each shim PR); the **CLAUDE.md
-institutional-memory arc** added **5 more** (one per repo),
-for **91+ total** across the 5-repo portfolio. This file documents
+institutional-memory arc** added **5 more** (one per repo); the **RLS arc**
+(Group U) added **27 more** (Phases 1+2a+2b + Phase 3 design + Phase 3
+prereqs + 15th adversarial pass + Phase 3 DRAFT + doc-pentagon institutional
+record), for **118+ total** across the 5-repo portfolio. This file documents
 the dependency order so the founder can land them efficiently when
 ready.
 
@@ -400,6 +402,72 @@ Closes deficiency **#13** (TS18049 in middleware mock tests) across the 2 remain
 After both merge: `npx tsc --noEmit` clean across all 5 repos for the first time. Deficiency #13 fully Closed; closed-state count 11 → 12. **Independent of all other groups** — can merge in any order vs. Groups K-Q.
 
 **CC4 process learning embedded in the closure narrative:** tasks #63 + #81 had been marked completed in the ledger-core task log but never actually landed on `main` in any repo. Going forward, task completion requires merged-to-main verification, not just local "done." Captured in the v2.3 deficiency-log change log (PR #58 third commit).
+
+---
+
+## Group U — RLS arc, deficiency #12 closure (2026-06-05 night, 27 PRs)
+
+The full closure of deficiency #12 (no Postgres RLS — application-layer scoping was the only enforcement). **The most architecturally significant arc this session.** Splits into 5 sub-groups by phase.
+
+### Group U.1 — Phase 1 + Phase 2a foundation (2 PRs, sequential)
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| 1 | **#66** | `rls-phase-1-policies` | `main` | 39 per-table RLS policies + `app_current_tenant_id()` SQL function. **Advisory only** until Phase 3 FORCE. |
+| 2 | **#67** | `rls-phase-2-tenant-context` | #66 | `withTenantContext` helper — opens `prisma.$transaction` + parameterized `set_config('app.current_tenant_id', tenantId, true)`. Injection-safe (parameterized, not template-string). |
+
+### Group U.2 — Phase 2b sweep (14 PRs, mostly independent — 7-shape catalog institutionalized)
+
+The full migration of 23 Server Actions + 3 HTTP routes + 1 batch helper to `withTenantContext`. Each PR is a small, reviewable sweep over one shape from the catalog. **All branch off `#67` (Phase 2a).** Order within Group U.2 doesn't matter.
+
+| Shape | Reference PR | What |
+|---|---|---|
+| **W1** (pure widening) | #69 (migration guide) + #70 (mark-notifications-read) | Helper takes a `Db` (PrismaClient \| TransactionClient) param; caller wraps in `withTenantContext`. |
+| **W2** (helper already tx-aware) | (subsumed into W1 in mid-sweep) | Helper already accepts `Db`; only Server Action wraps. |
+| **T1** (Class T single-helper split) | #71 (applyApPayment inner/outer split) | Helper opens internal `$transaction`; split into `innerInTx` (takes `TransactionClient`) + outer (opens tx, delegates). |
+| **T2** (Class T multi-step) | #73, #74 (period-close, reassign) | Multi-step action with multiple early exits → outcome-variant tagged-union return pattern. |
+| **E** (tenant-id-from-entity-lookup) | #75, #76 (entity-by-code resolves tenant first) | Entity lookup determines `tenantId`; `withTenantContext` opens *after* the lookup. |
+| **M** (multi-tenant batch) | #79 (close-all-open-periods) | Action iterates tenants → calls `withTenantContext` per-tenant in the loop. |
+| **P** (per-iteration batch helper) | #82 (`withTenantContextOptions` forwarder) | Long-running batch needs `maxWait`/`timeout`/`isolationLevel`; helper extended to forward options to `prisma.$transaction(fn, opts)`. |
+
+Full sweep manifest (14 PRs): #69-#83 (per-shape sweeps + migration-guide amendments). See `docs/architecture/rls-phase-2b-migration-guide.md` for the canonical 7-shape catalog with reference PRs.
+
+### Group U.3 — Phase 3 design + prereqs (3 PRs, mostly sequential)
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| 1 | **#84** | `rls-phase-3-design` | `main` | `docs/architecture/rls-phase-3-design.md` + `docs/runbooks/rls-phase-3-bypass-roles.md`. Resolves Decisions A (drop probes) + B (entity scoping) + D (crons) with recommendations. Leaves C (bypass roles) as operator coordination. |
+| 2 | **#85** | `rls-phase-3-prereq-b-entity-scoping` | #84 | Decision B implementation: `period-close.ts` close + reopen actions scope `entity.findFirst({ code, tenantId })`. Embedded **15th-pass M2** (uncaught `NoTenantSelectedError`/`NoTenantMembershipError`) + **15th-pass M3** (multi-tenant-admin contract regression documented inline). |
+| 3 | **#86** | `rls-phase-3-prereq-a-drop-probes` | #84 | Decision A implementation: `journal-entries/route.ts` + `fixed-asset/route.ts` drop cross-tenant probes; replaced with `auditTokenUse({success: false, reason: "Unknown entity (code does not exist in token's tenant)"})`. Embedded **15th-pass HIGH** (audit-bypass fix). |
+
+### Group U.4 — Phase 3 implementation DRAFT (1 PR, gated)
+
+| PR | Branch | Base | What | Gating |
+|---|---|---|---|---|
+| **#89** | `rls-phase-3-force-implementation` | #67 (Phase 2a) | `prisma/migrations/0008_rls_phase_3_force/migration.sql` — 37 ALTER TABLE FORCE statements (30 direct-tenantId tables + 7 child tables) + `tests/rls-phase-3-cross-tenant.test.ts` 6-category suite env-gated via `RLS_FORCE_ENABLED=1`. | **DRAFT.** Gated on (1) Phase 2b PRs merged, (2) Phase 3 prereqs (#85, #86) merged, (3) **operator ack on Decision C 5-item runbook checklist** (`docs/runbooks/rls-phase-3-bypass-roles.md`), (4) dev migration green, (5) production cutover per 3-stage rollout. |
+
+### Group U.5 — Historical deficiency closure + doc-pentagon (5 PRs, mostly doc-only)
+
+| Order | PR | Branch | Base | What |
+|---|---|---|---|---|
+| 1 | **#88** | `deficiency-28-fixed-asset-tenant-scope` | `main` | **15th-pass historical finding:** `createFixedAsset` `legalEntity.findFirstOrThrow({ where: { code } })` was tenant-blind. Added required `tenantId: string` to `CreateFixedAssetInput` + scoped lookup to `{ code, tenantId }`. 7 test sites updated. Closes new deficiency #28. |
+| 2 | **#87** | `deficiency-log-v25-rls-arc` | `main` | `docs/policies/control-deficiency-log.md` v2.4 → v2.5 — #12 Remediated (full RLS-arc closure narrative across PRs #66-#86) + #28 Closed (PR #88). |
+| 3 | **#90** | `claude-md-rls-arc-institutionalization` | `main` | `CLAUDE.md` — new "SOC 2 / RLS — multi-tenant query enforcement" subsection: 5-step migration recipe + 7-shape catalog + audit-emit-outside-tx rule + cross-tenant probe rule + scope-entity-by-code rule + adversarial-pass cadence prescription. |
+| 4 | **#91** | `soc2-readiness-v25-rls-arc` | `main` | `docs/SOC2_READINESS.md` v2.4 → v2.5 — CC6.1 / CC7.4 posture upgrade narrative. |
+| 5 | **#92** | `risk-register-v23-rls-arc` | `main` | `docs/policies/risk-register.md` v2.2 → v2.3 — Risk #17 (multi-tenant data leakage) Future → Mitigated (1×5=5, down from latent 4×5=20). New Risk #21 (Phase 3 FORCE flip data-disappearance) captured at 2×4=8 with mitigations. |
+| 6 | **#93** | `project-status-rls-arc-capstone` | `main` | `PROJECT_STATUS.md` capstone for the RLS arc — completes the doc-pentagon (deficiency log + CLAUDE.md + SOC2_READINESS + risk register + PROJECT_STATUS). |
+
+All 6 PRs in Group U.5 are **independent** doc-only (except #88 which is the historical-finding code PR) — each branches off its repo's `main`, can merge in any order.
+
+### Group U merge sequence (suggested)
+
+1. **U.1**: #66 → #67 (sequential foundation)
+2. **U.2**: all 14 Phase 2b PRs in parallel after #67 lands
+3. **U.3**: #84 → (#85 + #86 in parallel) after #67 + Phase 2b
+4. **U.5**: #88 first (code), then doc-pentagon (#87, #90, #91, #92, #93) in any order
+5. **U.4**: #89 LAST — gated on operator Decision C ack + all upstream PRs landed
+
+After all 27 merge: deficiency #12 closed at the application layer (Phases 1+2a+2b) AND the database layer (Phase 3 FORCE). Multi-tenant isolation posture upgrades from "application-layer scoping is the only enforcement" to "application + DB-layer (load-bearing post-FORCE) + per-PR adversarial-pass cadence as CC4 monitoring evidence."
 
 ---
 
