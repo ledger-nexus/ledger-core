@@ -1,6 +1,10 @@
 # Control deficiency log
 
-**Version:** 2.4 · **Effective date:** 2026-06-05 · **Owner:** Chris
+**Version:** 2.5 · **Effective date:** 2026-06-05 · **Owner:** Chris
+
+**v2.5 amendments (2026-06-05):**
+- Deficiency #28 (createFixedAsset tenant-blind entity lookup) → Remediated via PR #88. \`CreateFixedAssetInput\` gained required \`tenantId\` field; entity findFirstOrThrow now scopes by \`{ code, tenantId }\`. All 9 callers (route + 2 seeds + 6 test sites) updated. 29/29 affected tests pass.
+- Phase 3 implementation skeleton DRAFT PR #89 opened — 37 ALTER TABLE FORCE statements + 6-category cross-tenant test suite, awaits operator ack on Decision C runbook before merge.
 
 **v2.4 amendments (2026-06-05):**
 - Deficiency #12 (RLS): Phase 2b call-site sweep COMPLETE (23 sites across PRs #69-#83). Phase 3 design + decisions A/B/D resolved (PRs #84-#86). Status → "Remediated" (Phase 3 implementation pending operator ack on Decision C runbook).
