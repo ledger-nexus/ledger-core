@@ -12,7 +12,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import {
-  reassignRecord,
+  reassignRecordInTx,
+  emitReassignmentNotification,
   ReassignError,
   type ReassignableRecordType,
 } from "@/lib/ownership/reassign";
@@ -22,6 +23,7 @@ import {
   NotAuthorizedError,
 } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { withTenantContext } from "@/lib/db/tenant-context";
 
 export interface AdminReassignState {
   ok: boolean;
@@ -48,7 +50,10 @@ export async function adminReassignAction(input: {
       return { ok: false, message: `recordType ${input.recordType} not reassignable` };
     }
 
-    await reassignRecord(prisma, {
+    // RLS Phase 2b Class T: tx-scoped reassignRecordInTx +
+    // outside-tx notification emit. See reassign-ap-item.ts for the
+    // two-phase rationale.
+    const reassignInput = {
       recordType: input.recordType,
       recordId: input.recordId,
       newOwner: { type: input.newOwnerType, id: input.newOwnerId },
@@ -58,7 +63,19 @@ export async function adminReassignAction(input: {
       actorTenantId: tenant.id,
       reason: input.reason?.trim() || `admin:orphan repair by ${admin.displayName}`,
       lockFromRules: true,
-    });
+    };
+    await withTenantContext(tenant.id, async (tx) =>
+      reassignRecordInTx(tx, reassignInput)
+    );
+
+    try {
+      await emitReassignmentNotification(prisma, reassignInput);
+    } catch (e) {
+      console.warn(
+        `Admin reassignment of ${input.recordType} ${input.recordId.slice(0, 8)} succeeded but notification emit failed:`,
+        e
+      );
+    }
 
     revalidatePath("/admin/orphans");
     return { ok: true };
