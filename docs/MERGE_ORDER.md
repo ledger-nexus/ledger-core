@@ -1,6 +1,6 @@
 # Merge order — 2026-05-25 → 2026-06-06 SOC 2 hardening sprint + continuation + NS sprints + RLS arc + pinning arc + CSP arc + audit log replication design + #1 auth Critical Remediated + PR #10 splits
 
-**Updated 2026-06-06 (v15).** The sprint (2026-05-25 → 2026-06-03)
+**Updated 2026-06-06 (v16).** The sprint (2026-05-25 → 2026-06-03)
 left 35 open PRs; the 2026-06-04 continuation arc added 15 more (50+ total);
 the 2026-06-05 NS sprints + #26 closure + doc-triangle added **15 more**;
 the evening **#25 closure + doc-triangle** added **4 more**; the late
@@ -673,8 +673,16 @@ PR #10 (`soc2-hardening-rollout`) is a 9-feature foundation PR that's been open 
 
 | Pre-session | Post-session |
 |---|---|
-| 0/9 PR #10 features standalone | **5/9** PR #10 features standalone |
-| PR #10 bundled at 9 features | PR #10 bundled at **4 leaf items** (encryption-stack `field-encryption.ts` + docs already amended elsewhere + env validator already on main + soc2 skill which isn't actually in PR #10) |
+| 0/9 PR #10 features standalone | **8/9** PR #10 features standalone (5 in Group Z + 2 in Group AA.1 + 1 in PR #135 control matrix) |
+| PR #10 bundled at 9 features | PR #10 bundled at **1 leaf item** (env validator already on main per re-audit; soc2 skill not actually in PR #10's file tree — it's a user-level skill loaded from `~/.claude/skills/`. PR #10 is **substantively 100% decomposed**.) |
+
+### Group Z continuation — additional PR #10 splits
+
+| Order | PR | What | Base |
+|---|---|---|---|
+| 6 | **#135** | `docs/SOC2_CONTROL_MATRIX.md` (177 lines) — the auditor entry point: CC1-CC9 subcontrol → file/line evidence map. Distinct from SOC2_READINESS.md (gap analysis); this is the "show me where control X lives" doc. CC4 (monitoring) + CC2.1 (internal communication). | `main` (off main, independent) |
+
+After PR #135 lands, PR #10's substantive content is **100% extracted** across the 8 standalone PRs (CSP + soc2 helpers + monitoring + /api/health + audit-log RULE + process tooling + control matrix + field-encryption + Prisma extension). PR #10 itself becomes a no-op cleanup PR that can be closed without merging.
 
 ### Defense-in-depth for audit trail integrity
 
