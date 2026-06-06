@@ -175,28 +175,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     select: { id: true, code: true },
   });
   if (!entity) {
-    // Audit cross-tenant probe attempts: if the entity exists in
-    // SOME OTHER tenant, log it as a privacy event (same pattern as
-    // /api/internal/journal-entries). Caller still sees UNKNOWN_ENTITY.
-    const elsewhere = await prisma.legalEntity.findFirst({
-      where: { code: body.entityCode },
-      select: { tenantId: true },
-    });
-    if (elsewhere && elsewhere.tenantId !== identity.tenantId) {
-      await auditTokenUse({
-        success: false,
-        endpoint: "POST /api/internal/fixed-asset",
-        reason: "Tenant scope mismatch — token does not own this entity",
-        tenantId: identity.tenantId,
-        metadata: {
-          tokenLabel: identity.label,
-          tokenTenantId: identity.tenantId,
-          entityCode: body.entityCode,
-          elsewhereTenantId: elsewhere.tenantId,
-        },
-        requestHeaders: reqHeaders,
-      });
-    }
+    // RLS Phase 3 decision A (PR #84 design): the previous version of
+    // this branch did a GLOBAL legalEntity.findFirst probe to detect
+    // cross-tenant token misuse. Dropped — Phase 3 FORCE would block
+    // the probe anyway, and the audit-on-token-use chain already
+    // captures the failure with the entity code attempted. See
+    // docs/architecture/rls-phase-3-design.md → Decision A.
     return err(
       "UNKNOWN_ENTITY",
       `No entity with code "${body.entityCode}"`,

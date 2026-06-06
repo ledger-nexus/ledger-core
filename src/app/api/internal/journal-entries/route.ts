@@ -283,34 +283,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (e instanceof InvalidLineError) return err("INVALID_LINE", e.message, 422);
     if (e instanceof UnknownAccountError) return err("UNKNOWN_ACCOUNT", e.message, 422);
     if (e instanceof UnknownEntityError) {
-      // Audit cross-tenant probe attempts. If the entity actually
-      // exists in some OTHER tenant, this is a "wrong-tenant token"
-      // event — the same SEV-2 incident the legacy
-      // TenantScopeMismatchError used to surface, except now the
-      // entity lookup is tenant-scoped so the error name shifted.
-      // We probe by looking up the entity GLOBALLY (rare path —
-      // only fires when the tenant-scoped lookup missed). If found,
-      // the attempt was cross-tenant; we audit + still return the
-      // information-leak-safe UNKNOWN_ENTITY response to the caller.
-      const elsewhere = await prisma.legalEntity.findFirst({
-        where: { code: body.entityCode },
-        select: { tenantId: true },
-      });
-      if (elsewhere && elsewhere.tenantId !== identity.tenantId) {
-        await auditTokenUse({
-          success: false,
-          endpoint: "POST /api/internal/journal-entries",
-          reason: "Tenant scope mismatch — token does not own this entity",
-          tenantId: identity.tenantId,
-          metadata: {
-            tokenLabel: identity.label,
-            tokenTenantId: identity.tenantId,
-            entityCode: body.entityCode,
-            elsewhereTenantId: elsewhere.tenantId,
-          },
-          requestHeaders: reqHeaders,
-        });
-      }
+      // RLS Phase 3 decision A (PR #84 design): the previous version of
+      // this branch did a GLOBAL legalEntity.findFirst probe to detect
+      // cross-tenant token misuse and emit a "wrong-tenant token" audit
+      // event. After Phase 3 FORCE, that probe will return null even for
+      // entities that exist in other tenants — RLS blocks the read. The
+      // audit-on-token-use already captures the failure event with the
+      // entity code attempted (success=false above), so dropping the
+      // probe loses NO load-bearing audit coverage. See
+      // docs/architecture/rls-phase-3-design.md → Decision A.
       return err("UNKNOWN_ENTITY", e.message, 422);
     }
     if (e instanceof UnknownBookError) return err("UNKNOWN_BOOK", e.message, 422);

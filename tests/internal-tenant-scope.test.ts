@@ -246,22 +246,37 @@ describe("/api/internal/journal-entries: tenant-scoped token enforcement", () =>
     expect(meta.tenantId).toBe(tenantA.id);
   });
 
-  it("Audit log captures cross-tenant attempts with TOKEN_REJECTED + reason", async () => {
-    // The cross-tenant test above attached identity.tenantId = A; the
-    // rejection log is therefore scoped to tenant A. Tightening the
-    // query rules out unrelated TOKEN_REJECTED logs (garbage Bearer
-    // tests etc., which have tenantId = null).
-    const log = await prisma.auditLog.findFirst({
+  it("Cross-tenant attempts do NOT emit a 'tenant scope mismatch' audit (Decision A — probe dropped)", async () => {
+    // RLS Phase 3 decision A (PR #84 design, landed PR #86):
+    // The previous version emitted a TOKEN_REJECTED audit row with
+    // reason "tenant scope mismatch" by doing a GLOBAL legalEntity
+    // findFirst probe in the UnknownEntityError handler. The probe was
+    // dropped because:
+    //   1. Phase 3 FORCE would block the probe read anyway (RLS).
+    //   2. The audit-on-token-use chain at the top of the route already
+    //      captures the failure event with the entity code attempted.
+    //
+    // This test pins the new behavior: cross-tenant attempts surface
+    // as UNKNOWN_ENTITY (verified in the earlier test) but DO NOT
+    // emit a "tenant scope mismatch"-labeled rejection audit. The
+    // success TOKEN_USED audit still fires from the resolveBearerToken
+    // step at the top of the route.
+    const probeLog = await prisma.auditLog.findFirst({
       where: {
         eventType: "TOKEN_REJECTED",
         action: "POST /api/internal/journal-entries",
         tenantId: tenantA.id,
+        // Reason MUST not be the probe-specific text.
+        // (Token-resolution-failure rejections from other tests still
+        // exist but have tenantId=null, not tenantA.id.)
       },
       orderBy: { occurredAt: "desc" },
       select: { metadata: true, outcome: true },
     });
-    expect(log).not.toBeNull();
-    const meta = log!.metadata as Record<string, unknown>;
-    expect(meta.reason).toMatch(/tenant scope mismatch/i);
+    // Either no row, or if present its reason is NOT the probe text.
+    if (probeLog) {
+      const meta = probeLog.metadata as Record<string, unknown>;
+      expect(meta.reason).not.toMatch(/tenant scope mismatch/i);
+    }
   });
 });
