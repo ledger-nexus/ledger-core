@@ -41,39 +41,99 @@ async function cleanup() {
     `${PREFIX}_NS2`,
     `${PREFIX}_NS3`,
   ];
-  const entities = await prisma.legalEntity.findMany({
-    where: { tenantId, code: { in: entityCodes } },
-    select: { id: true },
-  });
-  const entityIds = entities.map((e) => e.id);
 
-  // Delete dependent rows in FK-safe order. Multi-sub mode creates
-  // accounts with entityId: null which are tenant-wide; we filter them
-  // by sourceSystem to avoid clobbering other test data.
-  // JE lines cascade with JE delete; AR/AP open items cascade with JE too.
+  // Clean by lineage triple rather than by current entity IDs. The
+  // fixture's transaction internalids are stable across runs; entity
+  // UUIDs are not. Filtering by current entity IDs would miss orphan
+  // JEs from a prior (possibly broken) run when those runs attached the
+  // JE to a different entity UUID — then the lineage-triple unique
+  // index blocks re-creation with the correct entity.
+  const lineageIds = [
+    "10001", "10002", "10003",  // Invoice
+    "20001",                     // VendorBill
+    "30001",                     // CustomerPayment
+    "40001",                     // VendorPayment
+    "50001",                     // JournalEntry
+  ];
 
-  // Delete JEs sourced from NetSuite for entities we created (covers
-  // all our test transactions, including the cross-currency UK one).
-  if (entityIds.length > 0) {
-    await prisma.journalEntry.deleteMany({
+  // AR/AP open items FK to JE.openedByEntryId / openItem.appliedByEntryId.
+  // Find the JE ids first, then cascade-delete open items + applications
+  // before the JEs themselves.
+  const jeIds = (
+    await prisma.journalEntry.findMany({
       where: {
         sourceSystem: "NETSUITE",
-        entityId: { in: entityIds },
+        sourceRecordId: { in: lineageIds },
+        tenantId,
       },
+      select: { id: true },
+    })
+  ).map((j) => j.id);
+
+  if (jeIds.length > 0) {
+    // Delete applications first (FK to both AR/AP open items + JEs).
+    await prisma.arApplication.deleteMany({
+      where: {
+        OR: [
+          { appliedByEntryId: { in: jeIds } },
+          { openItem: { openedByEntryId: { in: jeIds } } },
+        ],
+      },
+    });
+    await prisma.apApplication.deleteMany({
+      where: {
+        OR: [
+          { appliedByEntryId: { in: jeIds } },
+          { openItem: { openedByEntryId: { in: jeIds } } },
+        ],
+      },
+    });
+    await prisma.arOpenItem.deleteMany({
+      where: { openedByEntryId: { in: jeIds } },
+    });
+    await prisma.apOpenItem.deleteMany({
+      where: { openedByEntryId: { in: jeIds } },
     });
   }
 
-  // Parties + Items + Accounts in multi-mode are entity-null but
-  // sourced from NetSuite — scope by sourceSystem + mappingVersion
-  // to avoid catching cross-test pollution.
+  await prisma.journalEntry.deleteMany({
+    where: {
+      sourceSystem: "NETSUITE",
+      sourceRecordId: { in: lineageIds },
+      tenantId,
+    },
+  });
+
+  // Parties + Items + Accounts: clean by the fixture's lineage ids
+  // (not by entityId) so we catch BOTH:
+  //   - current multi-mode rows (entityId: null, global chart)
+  //   - stale rows from a prior (broken) run where entityId pointed at
+  //     a now-deleted entity. Those orphans block re-imports because
+  //     the lineage triple unique skips creating fresh ones.
+  const accountIds = ["1000", "1200", "2000", "3100", "4000", "6000", "7200"];
+  const partyIds = ["5000", "5001", "6000"];
+  const itemIds = ["7000"];
+
   await prisma.party.deleteMany({
-    where: { sourceSystem: "NETSUITE", entityId: null, tenantId },
+    where: {
+      sourceSystem: "NETSUITE",
+      tenantId,
+      sourceRecordId: { in: partyIds },
+    },
   });
   await prisma.item.deleteMany({
-    where: { sourceSystem: "NETSUITE", entityId: null, tenantId },
+    where: {
+      sourceSystem: "NETSUITE",
+      tenantId,
+      sourceRecordId: { in: itemIds },
+    },
   });
   await prisma.account.deleteMany({
-    where: { sourceSystem: "NETSUITE", entityId: null, tenantId },
+    where: {
+      sourceSystem: "NETSUITE",
+      tenantId,
+      sourceRecordId: { in: accountIds },
+    },
   });
 
   await prisma.legalEntity.deleteMany({

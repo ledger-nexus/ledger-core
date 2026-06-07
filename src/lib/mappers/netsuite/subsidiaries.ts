@@ -172,6 +172,11 @@ export async function setupSubsidiaries(
           nsIsImported: true,
           nsInternalid: m.internalid,
           nsIsElimination: m.isElimination,
+          // Preserve the frozen original NsSubsidiary object so the
+          // reverse exporter can reconstruct the Subsidiary array
+          // byte-for-byte — matches the lineage-replay pattern that
+          // Account/Party/Item/JE rows use via `sourcePayload`.
+          nsSourcePayload: m.sourcePayload as unknown as object,
         },
       },
       update: {
@@ -183,6 +188,11 @@ export async function setupSubsidiaries(
           nsIsImported: true,
           nsInternalid: m.internalid,
           nsIsElimination: m.isElimination,
+          // Preserve the frozen original NsSubsidiary object so the
+          // reverse exporter can reconstruct the Subsidiary array
+          // byte-for-byte — matches the lineage-replay pattern that
+          // Account/Party/Item/JE rows use via `sourcePayload`.
+          nsSourcePayload: m.sourcePayload as unknown as object,
         },
       },
       select: { id: true, functionalCurrencyId: true },

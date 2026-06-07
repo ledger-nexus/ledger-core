@@ -23,10 +23,25 @@ import type {
   NsCustomSegment,
   NsCustomFieldDefinition,
   NsExport,
+  NsSubsidiary,
 } from "./types";
 
 export interface ExportToNsInput {
-  entityCode: string;
+  /**
+   * Single-sub backward compat. Reconstructs the NS export from a single
+   * ledger-core entity. Equivalent to `entityResolution: { mode: "single",
+   * entityCode }`.
+   */
+  entityCode?: string;
+  /**
+   * Multi-sub mode: discovers every LegalEntity with NS lineage
+   * (`extensions.nsIsImported === true`) whose code matches the
+   * resolution prefix, and reconstructs the Subsidiary array + routes
+   * each transaction back to its origin subsidiary.
+   */
+  entityResolution?:
+    | { mode: "single"; entityCode: string }
+    | { mode: "multi"; entityCodePrefix: string };
   bookCode?: string;
   exportedAt?: Date;
 }
@@ -37,11 +52,70 @@ export async function exportToNs(
 ): Promise<NsExport> {
   const bookCode = input.bookCode ?? "US_GAAP";
 
+  // Resolve the exporter strategy. Single mode keeps the v0.6 behavior;
+  // multi mode discovers every NS-imported entity matching the prefix.
+  const resolution =
+    input.entityResolution ??
+    (input.entityCode
+      ? ({ mode: "single", entityCode: input.entityCode } as const)
+      : (() => {
+          throw new Error(
+            "exportToNs requires either `entityCode` (single mode) or " +
+              "`entityResolution` (single or multi mode)."
+          );
+        })());
+
+  // Discover the entity codes to query against.
+  //   - single: just the named entity (v0.6 path)
+  //   - multi: every LegalEntity with extensions.nsIsImported === true
+  //            AND code starts with the prefix (so we don't drag in
+  //            another tenant's NS-imported entities)
+  let entityCodes: string[];
+  let subsidiariesReconstructed: NsSubsidiary[] = [];
+  if (resolution.mode === "single") {
+    entityCodes = [resolution.entityCode];
+  } else {
+    const prefix = resolution.entityCodePrefix + "_NS";
+    // path() helps the Postgres planner use the GIN index on extensions.
+    const candidates = await prisma.legalEntity.findMany({
+      where: {
+        code: { startsWith: prefix },
+        extensions: { path: ["nsIsImported"], equals: true },
+      },
+      select: {
+        code: true,
+        extensions: true,
+      },
+      orderBy: { code: "asc" },
+    });
+    entityCodes = candidates.map((e) => e.code);
+    // Reconstruct Subsidiary array from frozen sourcePayload in
+    // extensions. Matches the lineage-replay pattern used by every
+    // other entity below — frozen original wins, never re-derive.
+    subsidiariesReconstructed = candidates
+      .map((e) => {
+        const ext = (e.extensions ?? {}) as Record<string, unknown>;
+        return (ext.nsSourcePayload as NsSubsidiary | undefined) ?? null;
+      })
+      .filter((s): s is NsSubsidiary => s !== null)
+      // NS conventionally orders Subsidiary by internalid ascending —
+      // the natural order of "parent created before child" in OneWorld.
+      .sort((a, b) => Number(a.internalid) - Number(b.internalid));
+  }
+
+  // Accounts/Parties/Items: in multi mode they're on the global chart
+  // (entityId: null per Phase 3 chart-of-accounts decision). In single
+  // mode they're scoped to the entity. Build the right `where` for each.
+  const masterRowEntityFilter =
+    resolution.mode === "single"
+      ? ({ entity: { code: resolution.entityCode } } as const)
+      : ({ entityId: null } as const);
+
   const accounts = await prisma.account.findMany({
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Account",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -50,7 +124,7 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Customer",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -59,7 +133,7 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Vendor",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -68,16 +142,19 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Item",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
   });
 
+  // JEs are always entity-scoped — they post to a specific entity even
+  // when the chart is global. In multi mode we want JEs from every
+  // discovered entity; in single mode just the one.
   const entries = await prisma.journalEntry.findMany({
     where: {
       sourceSystem: "NETSUITE",
-      entity: { code: input.entityCode },
+      entity: { code: { in: entityCodes } },
       book: { code: bookCode },
     },
     select: { sourceRecordType: true, sourcePayload: true },
@@ -184,6 +261,10 @@ export async function exportToNs(
       exportedAt: (input.exportedAt ?? new Date()).toISOString(),
       comment: "Roundtrip export from ledger-core. Reconstructed from sourcePayload lineage.",
     },
+    // Subsidiary array: only emitted in multi mode (reconstructed from
+    // LegalEntity.extensions.nsSourcePayload). Single mode keeps the v0.6
+    // exporter shape — no Subsidiary key, matching the v0.6 fixture.
+    Subsidiary: subsidiariesReconstructed.length ? subsidiariesReconstructed : undefined,
     Account: accounts.filter((a) => a.sourcePayload).map((a) => a.sourcePayload as unknown as NsAccount),
     Class: classes,
     Department: departments,
