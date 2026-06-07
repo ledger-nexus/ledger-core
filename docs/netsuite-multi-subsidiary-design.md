@@ -148,14 +148,44 @@ That's a 30-second sales clip.
 - 8-10 unit tests covering mapper + orchestrator
 - tsc clean
 
-## What ships in Phase 2
+## What shipped in Phase 2
 
-- Fixture expansion (3-sub group with IC)
-- Integration tests vs real Postgres
-- Per-transaction routing through all import steps
-- Reverse exporter handles multi-sub
-- `/import/netsuite` UI gains an "entity resolution" toggle
-- `isEliminationEntity` column migration (deferred behind a flag)
+- `prisma/fixtures/netsuite-multi-sub.json` — 3-sub group (Vandelay Industries parent + USA child + UK child) with cross-sub Invoice on the UK sub
+- `tests/netsuite-multi-subsidiary-integration.test.ts` — 6 integration tests vs real Postgres covering:
+  - 3-sub hierarchy upsert with parent wiring
+  - Extensions JSONB lineage tags (`nsIsImported` / `nsInternalid` / `nsIsElimination`)
+  - Idempotency (re-run produces identical result)
+  - Missing-parent → warning + treated as top-level
+  - Currency-not-seeded → fatal error with operator-actionable message
+  - Single-mode collapse (all 3 subs → 1 entity)
+
+## What's deferred to Phase 3 (next session)
+
+**Per-transaction routing through every import step** turned out to need an architectural decision that warrants its own design pass. Captured here so the next session has the context:
+
+### The chart-of-accounts question
+
+ledger-core's `Account` model has an `entityId` column — every account row belongs to exactly one `LegalEntity`. In v0.6 single-sub mode that's fine: all accounts belong to the one imported entity.
+
+NetSuite's accounts are **global to the company**, shared across all subsidiaries. A real OneWorld customer has one chart that all subs post against; a sub's transactions reference accounts on the company-wide chart.
+
+When the importer goes multi-sub, this divergence forces a decision:
+
+**Option A — Accounts on the parent entity.** Import all NS Accounts as ledger-core Accounts owned by the parent `LegalEntity` (sub 1 in our fixture). Transactions on sub 2 and sub 3 reference those parent-owned account rows. **Requires:** ledger-core reports to gracefully traverse from a transaction's entity up the parent hierarchy to find its accounts. **Risk:** existing report queries that scope by `accountWhere.entityId` need to add the hierarchy walk.
+
+**Option B — Duplicate accounts per subsidiary.** Each NS Account creates N ledger-core Account rows (one per imported sub) with the same code. **Requires:** consolidation engine recognizes the duplicates as the same account semantically. **Risk:** the IC elimination logic in `getConsolidatedTrialBalance` currently assumes accounts are distinct across entities; lots of `WHERE accountCode = X AND entityId IN (...)` queries to rewrite.
+
+**Option C — Account-set abstraction (architectural).** Introduce an `AccountSet` table where many entities point at the same account row via a join. Accounts become entity-agnostic; entities pick which set they post against. **Requires:** schema migration + universal-schema spec update. **Biggest lift.**
+
+**Initial recommendation (subject to Phase 3 review):** Option A. It matches the NS reality (one chart, many subs) and keeps the IC elimination logic identical. The hierarchy-walk in reports is mechanical and the universal-schema already has `LegalEntity.parentEntityId` ready for it. Phase 3 starts here.
+
+### Other Phase 3 deliverables
+
+- Per-transaction `entityCode` resolution in `importFromNs` (depends on the chart decision above)
+- Reverse exporter reconstructs the `Subsidiary` array from `LegalEntity` rows with `extensions.nsIsImported === true`
+- `/import/netsuite` UI gains an "Entity resolution" toggle (Single vs Multi-subsidiary), with the multi-sub case generating the prefix from the page form
+- `isEliminationEntity` column migration (deferred behind a flag; currently flagged via `extensions.nsIsElimination`)
+- Demo: import `netsuite-multi-sub.json` end-to-end, hit `/reports/consolidated-tb`, see the 3-sub consolidated TB with IC eliminations
 
 ## Open questions
 
