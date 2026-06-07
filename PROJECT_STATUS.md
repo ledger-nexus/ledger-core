@@ -6,9 +6,11 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-05-21
+**Last updated:** 2026-06-06
 
-**Current state:** **v1.0 just landed.** Multi-entity consolidation report with intercompany elimination, AP aging report, M-1/M-3 detail report grouping BTD deltas by IRS Form 1120 Schedule M-3 lines. The portfolio's headline architecture is now complete: substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. Consolidation demo seed (Acme Group + 2 subs) ships with the Northwind seed so the report has data to render out of the box.
+**Current state:** **v0.7 NS multi-subsidiary arc landed today.** A real OneWorld NS export (3-sub group: USD parent + USD USA + GBP UK) now imports end-to-end through the UI, routes per-tx through each subsidiary, and renders a consolidated trial balance with intercompany elimination logic active. Library + CLI (`pnpm demo:ns-multi-sub`) + UI (`/import/netsuite`) + hardened Server Action + multi-currency disclosure banner all shipped. The architecture proof is complete: NS multi-sub mapping + multi-entity consolidation work together.
+
+**Repo:** https://github.com/ledger-nexus/ledger-core
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -130,12 +132,43 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] `docs/deployment.md` Loom walkthrough updated to 8 beats — adds the consolidation IC elimination demo (beat 7) and the M-3 depreciation grouping (beat 8). Total run time still ~3 minutes.
 - [x] Account autocomplete on `/journal-entries/new` via native `<datalist>` (no new deps). Same datalist pattern for the party selector. User types code OR name and the browser filters; no need to scroll a 35-account dropdown.
 
+### v0.7 — NS multi-subsidiary import arc (shipped 2026-06-06)
+> The headline 2026-06-06 build. Closes the "drop in a real OneWorld export → consolidated TB with IC eliminations" demo. Four PRs stacked end-to-end.
+
+- [x] **Phase 1 — design + pure mapper + orchestrator** (PR #138)
+  - `docs/netsuite-multi-subsidiary-design.md` — discriminator type `EntityResolution = {mode: "single", entityCode} | {mode: "multi", entityCodePrefix}`, two-pass orchestrator pattern, backward-compat input shape
+  - `src/lib/mappers/netsuite/subsidiaries.ts` — `mapSubsidiary` pure mapper, `setupSubsidiaries` two-pass upsert + parent wiring, `resolveEntityCode` derivation, `resolveEntityResolution` backward-compat fold
+  - 15 unit tests pass
+- [x] **Phase 2 — fixture + integration tests + chart-of-accounts decision** (PR #139)
+  - `prisma/fixtures/netsuite-multi-sub.json` — Vandelay Industries parent + USD USA + GBP UK with cross-currency UK invoice
+  - 6 integration tests against real Postgres
+  - Chart-of-accounts Option A locked: NS accounts on the global chart (`Account.entityId: null`) shared across all subs; matches NS's "one chart, many subs" reality
+- [x] **Phase 3 — orchestrator wiring + per-tx routing** (PR #140)
+  - `import.ts` gains `entityResolution?` + `setupSubsidiaries` first-step + `subsidiaryEntityCodeByInternalid` map + `resolveEntityCodeForTransaction(subsidiaryInternalid, txKind, txId)` helper
+  - 7 per-tx call sites route by NS `subsidiary` field
+  - Backward compat preserved: 13/13 v0.6 single-sub tests still green
+  - 5 new e2e tests pass (3-sub fixture → routing + cross-currency)
+- [x] **Phase 4 — reverse exporter + roundtrip proof** (PR #141)
+  - `subsidiaries.ts` preserves frozen `NsSubsidiary` in `LegalEntity.extensions.nsSourcePayload` (matches Account/Party/Item/JE lineage-replay)
+  - `export.ts` gains multi-mode: discovers entities by `extensions.nsIsImported`, reconstructs Subsidiary array, scopes master rows by `entityId: null`, JEs across all sub entities
+  - 2 new roundtrip tests: `diffNsExports = null` (byte-equivalence) + export idempotency
+  - **41/41 total NS tests pass** (15 + 6 + 5 + 2 + 13 v0.6 regression)
+- [x] **Demo script** (PR #142) — `pnpm demo:ns-multi-sub` imports the fixture, prints the hierarchy + bucket counts, hands the operator a URL into `/reports/consolidation`. Idempotent.
+- [x] **UI page + Server Action** (PR #143)
+  - `/import/netsuite` with Single/Multi-sub mode toggle, file-upload-to-textarea, prefix input
+  - `importNsAction` Server Action: requireAdmin + requireCurrentTenant gated, 10 MB cap, ASCII-only regex validation server-side (defense-in-depth — client validates too)
+  - Generic catch-all error message (no internal leak) + audit log on every path (ACCESS_DENIED / PRIVILEGED_ACTION / DATA_EXPORT / SECURITY_EVENT)
+  - 13/13 validation tests pass (6 baseline + 7 adversarial — spaces, path traversal, SQL chars, length overflow, Cyrillic homoglyph, null byte, shell metacharacters)
+- [x] **Multi-currency disclosure banner** (PR #144) — `ConsolidationReport` now exposes `hasMultiCurrency` + `distinctCurrencies`. Page surfaces a warning banner when entities use mismatched functional currencies, explaining the consolidated totals are NOT FX-translated. Closes the CPA-credibility gap before the full ASC 830 arc lands.
+
 ### v1.2+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
 - [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
-- [ ] Multi-currency revaluation
+- [ ] **ASC 830 FX translation arc** (4-6 PR build) — read NS `sub.exchangerate`, pass `fxRate` to `postJournalEntry` (field exists), translation method picker per account type (current rate / temporal / historical), CTA account auto-generation, post-translation consolidation
 - [ ] FX gain/loss accounts wired into journal lines properly
+- [ ] **NS Accounting Books** — exercise multi-book parallel posting through NS data (the next NS architectural axis after multi-sub)
+- [ ] `isEliminationEntity` column migration (currently flagged via `extensions.nsIsElimination`)
 
 ---
 
