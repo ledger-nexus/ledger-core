@@ -170,7 +170,7 @@ describe("NS multi-sub roundtrip (import → export)", () => {
     const exported = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta.exportedAt),
+      exportedAt: new Date(original._meta?.exportedAt ?? "2026-04-30T00:00:00Z"),
     });
 
     // 3. Subsidiary count + currency tie out before the full diff so a
@@ -195,12 +195,12 @@ describe("NS multi-sub roundtrip (import → export)", () => {
     const first = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta.exportedAt),
+      exportedAt: new Date(original._meta?.exportedAt ?? "2026-04-30T00:00:00Z"),
     });
     const second = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta.exportedAt),
+      exportedAt: new Date(original._meta?.exportedAt ?? "2026-04-30T00:00:00Z"),
     });
     expect(diffNsExports(first, second)).toBeNull();
   });

@@ -13,6 +13,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "demo": "tsx prisma/demo.ts",
+    "demo:ns-multi-sub": "tsx prisma/demo-ns-multi-sub.ts",
     "db:reset": "prisma migrate reset --force && pnpm db:seed",
     "test": "vitest run",
     "test:watch": "vitest",
