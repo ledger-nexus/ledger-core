@@ -68,6 +68,49 @@ async function seedMasterData(prisma: PrismaClient) {
     create: { code: "EUR", name: "Euro", decimals: 2, symbol: "€" },
     update: {},
   });
+  await prisma.currency.upsert({
+    where: { code: "GBP" },
+    create: { code: "GBP", name: "Pound Sterling", decimals: 2, symbol: "£" },
+    update: {},
+  });
+
+  // FX rate baseline for the v0.8 FX translation arc (Phase 1.5).
+  // One asOf date covering all of 2026 demo activity — operators with
+  // real daily rates would seed many more rows. Rates picked to
+  // approximate 2026 market conditions:
+  //   1 GBP = 1.27 USD  (UK pound to dollar)
+  //   1 EUR = 1.05 USD  (euro to dollar)
+  // BOTH DIRECTIONS seeded so the importer's straight lookup (no
+  // auto-inversion per the design) succeeds whichever way the
+  // transaction flows. See docs/fx-translation-design.md.
+  const fxRates = [
+    { from: "GBP", to: "USD", rate: "1.2700" },
+    { from: "USD", to: "GBP", rate: "0.7874" }, // = 1/1.27 to 4 dp
+    { from: "EUR", to: "USD", rate: "1.0500" },
+    { from: "USD", to: "EUR", rate: "0.9524" }, // = 1/1.05 to 4 dp
+  ];
+  const fxAsOf = new Date("2026-01-01");
+  for (const r of fxRates) {
+    // Composite unique on (from, to, asOf, rateType) — upsert idempotent.
+    await prisma.fxRate.upsert({
+      where: {
+        fromCurrencyId_toCurrencyId_asOf_rateType: {
+          fromCurrencyId: r.from,
+          toCurrencyId: r.to,
+          asOf: fxAsOf,
+          rateType: "SPOT",
+        },
+      },
+      create: {
+        fromCurrencyId: r.from,
+        toCurrencyId: r.to,
+        asOf: fxAsOf,
+        rate: r.rate,
+        rateType: "SPOT",
+      },
+      update: { rate: r.rate },
+    });
+  }
 
   // Multi-tenancy: every entity belongs to a Tenant. Seeds belong to
   // the migration-created "default" tenant (the single-tenant fallback
