@@ -92,3 +92,81 @@ describe("importNsAction validation guards", () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe("importNsAction server-side prefix/code validation (defense-in-depth)", () => {
+  // A malicious client can bypass the form regex by POSTing directly.
+  // These cases confirm the action re-validates server-side. Each one
+  // simulates a client trying to slip a hostile value through.
+
+  const validNsExport = JSON.stringify({
+    _meta: {},
+    Account: [{ internalid: "1" }],
+    Subsidiary: [{ internalid: "1", name: "X", currency: "USD" }],
+  });
+
+  it("rejects entityCodePrefix with spaces", async () => {
+    const r = await importNsAction({
+      exportJson: validNsExport,
+      mode: "multi",
+      entityCodePrefix: "ACME 17",
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects entityCodePrefix with path traversal", async () => {
+    const r = await importNsAction({
+      exportJson: validNsExport,
+      mode: "multi",
+      entityCodePrefix: "../etc",
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects entityCodePrefix with SQL-ish characters", async () => {
+    const r = await importNsAction({
+      exportJson: validNsExport,
+      mode: "multi",
+      entityCodePrefix: "ACME'; DROP",
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects entityCodePrefix longer than 16 chars", async () => {
+    const r = await importNsAction({
+      exportJson: validNsExport,
+      mode: "multi",
+      entityCodePrefix: "A".repeat(17),
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects entityCodePrefix with non-ASCII (homoglyph defense)", async () => {
+    const r = await importNsAction({
+      exportJson: validNsExport,
+      mode: "multi",
+      // Cyrillic 'A' looks like Latin A but would collide differently
+      // in the unique constraint.
+      entityCodePrefix: "АCME",
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects entityCode with control chars (single mode)", async () => {
+    const r = await importNsAction({
+      exportJson: validNsExport,
+      mode: "single",
+      entityCode: "ACME\x00",
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects bookCode with shell metacharacters", async () => {
+    const r = await importNsAction({
+      exportJson: validNsExport,
+      mode: "single",
+      entityCode: "ACME",
+      bookCode: "US_GAAP; rm -rf /",
+    });
+    expect(r.ok).toBe(false);
+  });
+});
