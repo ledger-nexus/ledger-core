@@ -59,7 +59,17 @@ export interface ConsolidationReport {
   rootEntityName: string;
   bookCode: string;
   asOf: Date;
-  entitiesIncluded: { code: string; name: string; isRoot: boolean }[];
+  /**
+   * Each entity in the consolidation hierarchy + its functional currency.
+   * The page surfaces a multi-currency-disclosure banner when the set of
+   * currencies has more than one distinct value (see `hasMultiCurrency`).
+   */
+  entitiesIncluded: {
+    code: string;
+    name: string;
+    isRoot: boolean;
+    functionalCurrencyId: string;
+  }[];
   rows: ConsolidatedRow[];
   eliminationSummary: EliminationSummaryRow[];
 
@@ -75,6 +85,18 @@ export interface ConsolidationReport {
   // Net IC imbalance: if all IC pairs net to zero, this is zero.
   // Non-zero indicates one side recorded but not the other, or FX drift.
   netIcImbalance: Decimal;
+
+  /**
+   * True iff the included entities have more than one distinct
+   * functional currency. When true, the consolidated totals are NOT
+   * FX-translated — they're naïve sums of each entity's debit/credit
+   * in its own currency. The page surfaces a disclosure banner. The
+   * proper translation (current rate / temporal / current-rate with
+   * CTA accounting per ASC 830) is a follow-up arc.
+   */
+  hasMultiCurrency: boolean;
+  /** The distinct currencies present in the included entities. */
+  distinctCurrencies: string[];
 }
 
 export async function getConsolidatedTrialBalance(
@@ -93,7 +115,14 @@ export async function getConsolidatedTrialBalance(
   // entities from other tenants into the consolidation.
   const root = await prisma.legalEntity.findFirst({
     where: { code: input.rootEntityCode },
-    select: { id: true, code: true, name: true, parentEntityId: true, tenantId: true },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      parentEntityId: true,
+      tenantId: true,
+      functionalCurrencyId: true,
+    },
   });
   if (!root) {
     throw new Error(`Root entity ${input.rootEntityCode} not found`);
@@ -101,9 +130,17 @@ export async function getConsolidatedTrialBalance(
 
   // Walk the entity hierarchy WITHIN the same tenant only. Cross-tenant
   // hierarchy traversal is not supported (would be a privacy violation).
+  // functionalCurrencyId is pulled so we can compute hasMultiCurrency
+  // for the disclosure banner — see ConsolidationReport.hasMultiCurrency.
   const allEntities = await prisma.legalEntity.findMany({
     where: { tenantId: root.tenantId },
-    select: { id: true, code: true, name: true, parentEntityId: true },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      parentEntityId: true,
+      functionalCurrencyId: true,
+    },
   });
 
   const included: typeof allEntities = [root];
@@ -242,6 +279,17 @@ export async function getConsolidatedTrialBalance(
   );
   const netIcImbalance = totalIcDebit.minus(totalIcCredit);
 
+  // Multi-currency disclosure data. If the included entities have more
+  // than one distinct functional currency, the post-elim totals are
+  // NOT FX-translated — they're naïve sums of debit/credit values in
+  // each entity's own currency. The UI surfaces a banner. The proper
+  // ASC 830 translation arc (current rate / temporal / CTA accounting)
+  // is deferred and tracked separately. See
+  // docs/netsuite-multi-subsidiary-design.md "Non-goals (deferred)".
+  const distinctCurrencies = Array.from(
+    new Set(included.map((e) => e.functionalCurrencyId))
+  ).sort();
+
   return {
     rootEntityCode: root.code,
     rootEntityName: root.name,
@@ -251,6 +299,7 @@ export async function getConsolidatedTrialBalance(
       code: e.code,
       name: e.name,
       isRoot: e.code === root.code,
+      functionalCurrencyId: e.functionalCurrencyId,
     })),
     rows,
     eliminationSummary: Array.from(eliminationByCode.values()).sort((a, b) =>
@@ -262,5 +311,7 @@ export async function getConsolidatedTrialBalance(
     consolidatedTotalCredit: consolTotalCredit,
     balances: consolTotalDebit.equals(consolTotalCredit),
     netIcImbalance,
+    hasMultiCurrency: distinctCurrencies.length > 1,
+    distinctCurrencies,
   };
 }
