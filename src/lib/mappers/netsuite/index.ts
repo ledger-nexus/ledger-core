@@ -18,6 +18,16 @@ export {
   getOrCreateDimensionSet,
   dimensionSetHash,
 } from "./dimensions";
+export {
+  mapSubsidiary,
+  setupSubsidiaries,
+  resolveEntityCode,
+  resolveEntityResolution,
+  type EntityResolution,
+  type MappedSubsidiary,
+  type SetupSubsidiariesInput,
+  type SetupSubsidiariesResult,
+} from "./subsidiaries";
 export type {
   NsExport,
   NsAccount,
