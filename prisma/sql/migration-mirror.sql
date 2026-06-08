@@ -166,3 +166,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS "gl_entry_header_lineage_uniq"
   WHERE "sourceSystem" IS NOT NULL
     AND "sourceRecordType" IS NOT NULL
     AND "sourceRecordId" IS NOT NULL;
+
+-- ════════════════════════════════════════════════════════════════════
+-- 6. Sub-ledger lineage partial unique indexes (ar_open_item / ap_open_item)
+--    (from 0018_ns_sub_ledger_lineage_book_scope, verbatim)
+--    Mirrors the gl_entry_header lineage uniq (section 5) onto the
+--    sub-ledger tables ahead of NS Books Phase 3.5.B's per-book
+--    sub-ledger writes: same (tenantId, bookId, source-triple) scope,
+--    same partial WHERE so manual entries (NULL lineage) are exempt.
+--    Partial uniques cannot be expressed in schema.prisma, so db push
+--    never creates them — this mirror entry is what CI and post-reset
+--    restores rely on.
+--    Rollback: DROP INDEX "ar_open_item_lineage_uniq";
+--              DROP INDEX "ap_open_item_lineage_uniq";
+-- ════════════════════════════════════════════════════════════════════
+
+CREATE UNIQUE INDEX IF NOT EXISTS "ar_open_item_lineage_uniq"
+  ON "ar_open_item" ("tenantId", "bookId", "sourceSystem", "sourceRecordType", "sourceRecordId")
+  WHERE "sourceSystem" IS NOT NULL
+    AND "sourceRecordType" IS NOT NULL
+    AND "sourceRecordId" IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "ap_open_item_lineage_uniq"
+  ON "ap_open_item" ("tenantId", "bookId", "sourceSystem", "sourceRecordType", "sourceRecordId")
+  WHERE "sourceSystem" IS NOT NULL
+    AND "sourceRecordType" IS NOT NULL
+    AND "sourceRecordId" IS NOT NULL;
