@@ -101,4 +101,14 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   // Interest expense — used by ASC 842 finance leases. Operating leases
   // combine interest + amortization into the lease expense line (7400).
   { code: "8200", name: "Interest Expense", type: "EXPENSE", normalBalance: "DEBIT", subtype: "INTEREST" },
+  // Realized FX gain/loss. Used by v0.8 Phase 3 when settling a foreign-
+  // currency AR / AP at a rate that differs from the original booking
+  // rate. ASC 830 calls this a "transaction adjustment" — the difference
+  // between the booked AR (at invoice rate) and the cash received (at
+  // payment rate) is realized in this account. Normal balance DEBIT
+  // because losses are more common in financial statements than gains,
+  // but the account holds both (sign indicates direction). Subtype
+  // FX_GAIN_LOSS is preserved so future cash-flow + statement
+  // presentations can break it out separately.
+  { code: "8300", name: "Realized FX Gain/Loss", type: "EXPENSE", normalBalance: "DEBIT", subtype: "FX_GAIN_LOSS" },
 ];
