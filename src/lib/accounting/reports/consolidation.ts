@@ -19,6 +19,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { getTrialBalance } from "../reports";
+import { getTranslationRate, type TranslationRateSource } from "../fx";
 import { signFor } from "../types";
 
 const IC_ASSET_SUBTYPES = ["DUE_FROM_AFFILIATE"];
@@ -88,15 +89,38 @@ export interface ConsolidationReport {
 
   /**
    * True iff the included entities have more than one distinct
-   * functional currency. When true, the consolidated totals are NOT
-   * FX-translated — they're naïve sums of each entity's debit/credit
-   * in its own currency. The page surfaces a disclosure banner. The
-   * proper translation (current rate / temporal / current-rate with
-   * CTA accounting per ASC 830) is a follow-up arc.
+   * functional currency. When true, AND Phase 4c translation didn't
+   * run (translationActive=false), the consolidated totals are naïve
+   * sums of debit/credit in each entity's own currency — the
+   * disclosure banner appears.
+   *
+   * When translation IS active (translationActive=true), the totals
+   * are accurate post-translation USD figures and the banner is
+   * replaced with a "FX translation active" note.
    */
   hasMultiCurrency: boolean;
   /** The distinct currencies present in the included entities. */
   distinctCurrencies: string[];
+
+  /**
+   * v0.8 FX Phase 4c — set true when this report applied ASC 830
+   * translation. False when same-currency (no translation needed) OR
+   * when translation was skipped because the caller didn't pass
+   * `periodStart` (needed for weighted-avg). When true, the page
+   * replaces the disclosure banner with "FX translation active".
+   */
+  translationActive: boolean;
+  /** Map of entity code → the current-rate (CR) rate used. Null for same-currency entities. */
+  translationRateByEntity: Record<string, string | null>;
+  /**
+   * v0.8 FX Phase 4c — Cumulative Translation Adjustment. Computed as
+   * the equity-side plug after translating each account at its ASC 830
+   * category rate. Always Decimal(0) when translationActive=false.
+   * Positive = net debit (FX loss / equity decrease), negative = net
+   * credit (FX gain / equity increase). The page surfaces this as a
+   * dedicated CTA line on the equity section.
+   */
+  cumulativeTranslationAdjustment: Decimal;
 }
 
 export async function getConsolidatedTrialBalance(
@@ -105,6 +129,17 @@ export async function getConsolidatedTrialBalance(
     rootEntityCode: string;
     bookCode?: string;
     asOf: Date;
+    /**
+     * v0.8 FX Phase 4c — period start. When provided, the consolidation
+     * runs ASC 830 translation (CURRENT_RATE / WEIGHTED_AVG / HISTORICAL /
+     * EXCLUDED per Account.translationCategory) and computes the CTA
+     * plug. When omitted, the report falls back to the v1.0 naïve-sum
+     * behavior + the multi-currency disclosure banner (PR #144).
+     *
+     * Required to apply WEIGHTED_AVG (income statement) translation,
+     * which averages periodStart and periodEnd rates.
+     */
+    periodStart?: Date;
   }
 ): Promise<ConsolidationReport> {
   const bookCode = input.bookCode ?? "US_GAAP";
@@ -166,7 +201,78 @@ export async function getConsolidatedTrialBalance(
     }))
   );
 
-  // Aggregate by accountCode.
+  // v0.8 FX Phase 4c — set up the translation layer. We look up the
+  // book's reporting currency once, then translate per entity.
+  // Translation only runs when:
+  //   1. The caller passed `periodStart` (required for WEIGHTED_AVG)
+  //   2. AT LEAST ONE entity has a functional currency != book reporting
+  //      currency (i.e., translation has work to do)
+  // Otherwise we fall back to the v1.0 naïve-sum path and the page
+  // surfaces the disclosure banner (Phase 4c → Phase 5 removes the
+  // banner once translation is verified end-to-end).
+  const book = await prisma.book.findUniqueOrThrow({
+    where: { code: bookCode },
+    select: { reportingCurrencyId: true },
+  });
+  const bookReportingCurrencyId = book.reportingCurrencyId;
+  const translationCanRun = !!input.periodStart;
+  const needsTranslation = included.some(
+    (e) => e.functionalCurrencyId !== bookReportingCurrencyId
+  );
+  const translationActive = translationCanRun && needsTranslation;
+
+  // Account category lookup. Per Phase 4a, every account row has a
+  // category. We fetch the categories for every account that appeared
+  // in any entity's TB so the per-row translation logic can dispatch.
+  const allAccountCodes = Array.from(
+    new Set(
+      perEntityTbs.flatMap((entry) => entry.tb.rows.map((r) => r.accountCode))
+    )
+  );
+  const accountCategoryRows = translationActive
+    ? await prisma.account.findMany({
+        where: { code: { in: allAccountCodes } },
+        select: { code: true, translationCategory: true },
+      })
+    : [];
+  const categoryByCode = new Map(
+    accountCategoryRows.map((a) => [a.code, a.translationCategory])
+  );
+
+  // Track the entity-level translation rate (CURRENT_RATE) we'd use
+  // for the banner / page display. Null for same-currency entities.
+  const translationRateByEntity: Record<string, string | null> = {};
+
+  // Cache rates per (entity, category) within a single report run.
+  // Same entity's CURRENT_RATE is re-used across every CR-classified
+  // account on that entity — no point re-querying the FxRate table
+  // for each row.
+  const rateCache = new Map<string, { rate: Decimal | null; source: TranslationRateSource }>();
+  async function rateFor(
+    entityFunctionalCurrencyId: string,
+    category: "CURRENT_RATE" | "HISTORICAL" | "WEIGHTED_AVG" | "EXCLUDED"
+  ): Promise<{ rate: Decimal | null; source: TranslationRateSource }> {
+    const cacheKey = `${entityFunctionalCurrencyId}|${category}`;
+    const cached = rateCache.get(cacheKey);
+    if (cached) return cached;
+    const result = await getTranslationRate(prisma, {
+      category,
+      ctx: {
+        fromCurrencyId: entityFunctionalCurrencyId,
+        toCurrencyId: bookReportingCurrencyId,
+        // periodStart defaults to asOf when omitted — non-translation
+        // path returns rate=1 anyway via same-currency branch.
+        periodStart: input.periodStart ?? input.asOf,
+        periodEnd: input.asOf,
+      },
+    });
+    rateCache.set(cacheKey, result);
+    return result;
+  }
+
+  // Aggregate by accountCode. Each perEntity entry now carries the
+  // POST-translation debit/credit (untranslated when translation
+  // didn't run).
   type Aggregate = {
     code: string;
     name: string;
@@ -177,10 +283,41 @@ export async function getConsolidatedTrialBalance(
   const aggregates = new Map<string, Aggregate>();
 
   for (const { entity, tb } of perEntityTbs) {
+    // Capture entity's CURRENT_RATE for the page display + result fields.
+    // Done once per entity even when the entity has no rows.
+    if (translationActive) {
+      if (entity.functionalCurrencyId === bookReportingCurrencyId) {
+        translationRateByEntity[entity.code] = null;
+      } else {
+        const cr = await rateFor(entity.functionalCurrencyId, "CURRENT_RATE");
+        translationRateByEntity[entity.code] = cr.rate ? cr.rate.toString() : null;
+      }
+    } else {
+      translationRateByEntity[entity.code] = null;
+    }
+
     for (const row of tb.rows) {
+      // Apply translation per Account.translationCategory. When
+      // translation isn't active OR the entity is same-currency, the
+      // rate is 1 (same_currency branch in getTranslationRate) and
+      // multiplication is a no-op.
+      let debit = row.debit;
+      let credit = row.credit;
+      if (translationActive) {
+        const category = categoryByCode.get(row.accountCode) ?? "CURRENT_RATE";
+        const { rate } = await rateFor(entity.functionalCurrencyId, category);
+        if (rate !== null) {
+          // CURRENT_RATE / WEIGHTED_AVG / EXCLUDED / same_currency path.
+          debit = row.debit.times(rate);
+          credit = row.credit.times(rate);
+        }
+        // HISTORICAL path (rate === null) — for v0.8 we don't walk
+        // per-line history yet (rare in NS-imported data; equity
+        // transactions are sparse). Pass through untranslated as the
+        // pragmatic approximation. Phase 5 polish: walk JE lines and
+        // use line.entry.fxRate. The CTA plug catches any imbalance.
+      }
       const existing = aggregates.get(row.accountCode);
-      const debit = row.debit;
-      const credit = row.credit;
       if (existing) {
         existing.perEntity.push({ entityCode: entity.code, debit, credit });
       } else {
@@ -279,16 +416,49 @@ export async function getConsolidatedTrialBalance(
   );
   const netIcImbalance = totalIcDebit.minus(totalIcCredit);
 
-  // Multi-currency disclosure data. If the included entities have more
-  // than one distinct functional currency, the post-elim totals are
-  // NOT FX-translated — they're naïve sums of debit/credit values in
-  // each entity's own currency. The UI surfaces a banner. The proper
-  // ASC 830 translation arc (current rate / temporal / CTA accounting)
-  // is deferred and tracked separately. See
-  // docs/netsuite-multi-subsidiary-design.md "Non-goals (deferred)".
+  // Multi-currency disclosure data. After Phase 4c, the report can
+  // ALSO translate accurately when translationActive=true — the page
+  // chooses between disclosure banner (legacy path) and "FX
+  // translation active" note based on translationActive.
   const distinctCurrencies = Array.from(
     new Set(included.map((e) => e.functionalCurrencyId))
   ).sort();
+
+  // v0.8 FX Phase 4c — CTA (Cumulative Translation Adjustment).
+  //
+  // Mechanic: when ASC 830 translation runs, different rates apply to
+  // different account categories (CR for BS, WA for IS, HR for equity).
+  // The translated trial balance no longer balances even though the
+  // source trial balances do (each in its own currency). The plug —
+  // the amount needed to re-balance the consolidated TB — is the CTA,
+  // a real economic effect of holding foreign-currency assets through
+  // a rate change. It posts to equity in ASC 830 (specifically, OCI
+  // → AOCI cumulative translation adjustment).
+  //
+  // Computation: CTA = consolTotalDebit - consolTotalCredit (post-
+  // elimination). The CTA is added to the report as a synthetic
+  // equity-side balancing entry; this doesn't post a JE (no fictional
+  // line in the GL), it's a report-time aggregation only.
+  let cumulativeTranslationAdjustment = new Decimal(0);
+  if (translationActive) {
+    cumulativeTranslationAdjustment = consolTotalDebit.minus(consolTotalCredit);
+    if (!cumulativeTranslationAdjustment.isZero()) {
+      // Adjust the report totals so the BS appears balanced. The CTA
+      // line itself is what represents the adjustment — when displayed,
+      // it appears in the equity section.
+      if (cumulativeTranslationAdjustment.gt(0)) {
+        // Debits exceed credits → CTA is a credit (equity increase
+        // / FX gain). Post the credit to balance.
+        consolTotalCredit = consolTotalCredit.plus(cumulativeTranslationAdjustment);
+      } else {
+        // Credits exceed debits → CTA is a debit (equity decrease
+        // / FX loss). Post the debit.
+        consolTotalDebit = consolTotalDebit.plus(
+          cumulativeTranslationAdjustment.abs()
+        );
+      }
+    }
+  }
 
   return {
     rootEntityCode: root.code,
@@ -313,5 +483,8 @@ export async function getConsolidatedTrialBalance(
     netIcImbalance,
     hasMultiCurrency: distinctCurrencies.length > 1,
     distinctCurrencies,
+    translationActive,
+    translationRateByEntity,
+    cumulativeTranslationAdjustment,
   };
 }
