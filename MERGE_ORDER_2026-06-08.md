@@ -1,8 +1,8 @@
 # Merge order — 2026-06-08 session
 
-19 PRs landed today across 3 architectural arcs. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #159) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`).
+20 PRs landed today across 3 architectural arcs + 1 closure tail. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #161) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`).
 
-## The 19-PR stack
+## The 20-PR stack
 
 | # | PR | Title | Files of note |
 |---|----|-------|--------------|
@@ -25,10 +25,11 @@
 | 17 | [#157](https://github.com/ledger-nexus/ledger-core/pull/157) | docs: PROJECT_STATUS captures v0.9 NS Accounting Books arc | `PROJECT_STATUS.md` |
 | 18 | [#158](https://github.com/ledger-nexus/ledger-core/pull/158) | v0.9 NS Books Phase 4: reverse exporter for multi-book roundtrip | `export.ts` |
 | 19 | [#159](https://github.com/ledger-nexus/ledger-core/pull/159) | v0.9 NS Books: promote isEliminationEntity to a column | migration 0010, `subsidiaries.ts` |
+| 20 | [#161](https://github.com/ledger-nexus/ledger-core/pull/161) | v0.8 FX HISTORICAL line-walking — closes the v0.8 Phase 4c pragma | `consolidation.ts`, new `fx-consolidation-historical.test.ts` |
 
-## Three arcs, three architectural axes
+## Three arcs + one closure tail
 
-The 19 PRs cluster cleanly into 3 NS architectural axes:
+The 19 architectural PRs cluster cleanly into 3 NS axes; the 20th (#161) is a focused closure of a documented v0.8 pragma:
 
 ### v0.7 closing (PRs #141 → #145) — 5 PRs
 **Entity axis**: NS multi-subsidiary import, end-to-end through to consolidated trial balance. Phase 4 reverse exporter closes the roundtrip. UI + demo + hardened Server Action ship the v0.7 deliverable. Multi-currency disclosure banner makes the gap honest before the FX arc lands.
@@ -38,6 +39,9 @@ The 19 PRs cluster cleanly into 3 NS architectural axes:
 
 ### v0.9 NS Accounting Books (PRs #154 → #159) — 6 PRs
 **Book axis**: multi-book parallel posting driven by NS data. Phase 2's lineage-uniq migration also fixes a long-standing cross-tenant collision bug. Phase 4 closes the reverse roundtrip. The isEliminationEntity column promotion is architectural debt cleanup the arc surfaced.
+
+### v0.8 FX closure tail (PR #161) — 1 PR
+**Currency-axis polish**: closes the documented HISTORICAL-pass-through pragma from v0.8 Phase 4c. ASC 830 requires HISTORICAL accounts (equity) to translate at the rate IN EFFECT WHEN POSTED, not the period-end rate. The new `translateHistoricalAccount` walker queries each JournalLine for the account + multiplies each line's debit/credit by its parent JE's `fxRate`. The CTA plug stops absorbing the equity-translation gap; pre-existing Phase 4c test shrinks from CTA=360 → 120 (the 240 difference was the missing equity translation). New `fx-consolidation-historical` test posts two contributions at DIFFERENT historical rates (1.20 and 1.15) to prove single-rate translation can't reproduce the line-walked result.
 
 ## Migration dependencies
 
@@ -51,20 +55,25 @@ Each is idempotent (`IF NOT EXISTS` / `WHERE NOT EXISTS`). Production rollout: a
 
 ## Test results across the stack
 
-Verified on dev DB at the head of #159:
+Verified on dev DB at the head of #161:
 
-- **39/39** NS test files green:
-  - `netsuite-multi-subsidiary` (Phase 1 unit): 15/15
-  - `netsuite-multi-subsidiary-integration` (Phase 2 Postgres): 6/6
-  - `netsuite-import-multi-sub-e2e` (Phase 3 e2e): 5/5
-  - `netsuite-roundtrip-multi-sub` (Phase 4 export): 2/2
-  - `netsuite-fx-realized-gain-loss` (FX Phase 3): 2/2
-  - `netsuite-fx-exchangerate-precedence` (FX Phase 2): 2/2
-  - `netsuite-accounting-books` (NS Books Phase 1): 19/19
-  - `netsuite-accounting-books-routing` (NS Books Phase 3): 2/2
-  - `netsuite-accounting-books-roundtrip` (NS Books Phase 4): 2/2
-  - `ns-iselimination-column` (column promotion): 3/3
-- **tsc clean** across all 19 PR diffs
+- **81/81** NS + FX test files green:
+  - `netsuite-multi-subsidiary` (v0.7 Phase 1 unit): 15/15
+  - `netsuite-multi-subsidiary-integration` (v0.7 Phase 2 Postgres): 6/6
+  - `netsuite-import-multi-sub-e2e` (v0.7 Phase 3 e2e): 5/5
+  - `netsuite-roundtrip-multi-sub` (v0.7 Phase 4 export): 2/2
+  - `netsuite-fx-exchangerate-precedence` (v0.8 FX Phase 2): 2/2
+  - `netsuite-fx-realized-gain-loss` (v0.8 FX Phase 3): 2/2
+  - `fx-translation-rate` (v0.8 FX Phase 4b): 8/8
+  - `fx-translation-category` (v0.8 FX Phase 4a): 9/9
+  - `fx-consolidation-translation` (v0.8 FX Phase 4c): 4/4
+  - `fx-consolidation-historical` (v0.8 FX closure tail, PR #161): 2/2
+  - `netsuite-accounting-books` (v0.9 NS Books Phase 1): 19/19
+  - `netsuite-accounting-books-integration` (v0.9 NS Books Phase 2): N/N
+  - `netsuite-accounting-books-routing` (v0.9 NS Books Phase 3): 2/2
+  - `netsuite-accounting-books-roundtrip` (v0.9 NS Books Phase 4): 2/2
+  - `ns-iselimination-column` (v0.9 column promotion): 3/3
+- **tsc clean** across all 20 PR diffs
 - **Backward compat preserved** at every layer — every existing v0.7 test passes against the head of the stack
 
 ## What's still deferred (not in this session)
@@ -72,16 +81,17 @@ Verified on dev DB at the head of #159:
 - NS Books Phase 3.5: sub-ledger multi-book (Invoice/Bill/Payment per-book open items)
 - NS Books Phase 4.5: operator-supplied original `AccountingBook[]` preserved byte-for-byte
 - NS Books Phase 5: UI book-mapping editor on `/import/netsuite`
-- HISTORICAL category line-walking in consolidation (currently passes through untranslated; CTA catches the imbalance)
 - NS SuiteAnalytics → report endpoints
 - Drop the `extensions.nsIsElimination` JSON flag after every consumer migrates to the column
+
+(HISTORICAL line-walking in consolidation was closed by PR #161 — entries removed from this list.)
 
 ## Recommended merge approach
 
 1. Land PRs in numerical order on a feature merge train branch (e.g. `merge-train-2026-06-08`).
 2. Squash-merge each PR — the linear history makes the train easy to revert by PR if needed.
-3. After all 19 land on the train, fast-forward `main`.
-4. Run the 39-test NS suite + the consolidation suite on `main` post-merge as the production-readiness check.
+3. After all 20 land on the train, fast-forward `main`.
+4. Run the 81-test NS + FX suite on `main` post-merge as the production-readiness check.
 5. Document the session in the operator runbook (or chain a session-capstone doc PR if useful).
 
 Alternative for individual review: cherry-pick the docs PRs (#145, #153, #157) and the column-promotion PR (#159) first — those are low-risk single-file changes. The architectural PRs need the chain order preserved.
