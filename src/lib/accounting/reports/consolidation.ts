@@ -123,6 +123,58 @@ export interface ConsolidationReport {
   cumulativeTranslationAdjustment: Decimal;
 }
 
+// ─── HISTORICAL account translator ────────────────────────────────────
+//
+// ASC 830 requires equity items (and any other HISTORICAL-classified
+// account) to translate at the rate IN EFFECT WHEN THE CONTRIBUTION
+// WAS ORIGINALLY POSTED — not the period-end rate. The balance in
+// reporting currency is the accumulation of (lineAmount × lineFxRate)
+// across every line that posted to the account.
+//
+// Implementation: query every JournalLine for (entity, book, account,
+// documentDate ≤ asOf) including its parent JE's fxRate. Sum
+// debit × fxRate and credit × fxRate. Returns the translated balance.
+//
+// Performance: one query per HISTORICAL row per entity per report run.
+// Equity is sparse in real data (a handful of accounts at most) so
+// this is acceptable. The Phase 4c rate cache (per-entity, per-
+// category) handles the CR + WA hot paths; HISTORICAL is its own
+// per-account query.
+async function translateHistoricalAccount(
+  prisma: PrismaClient,
+  input: {
+    entityId: string;
+    bookCode: string;
+    accountCode: string;
+    asOf: Date;
+  }
+): Promise<{ debit: Decimal; credit: Decimal }> {
+  const lines = await prisma.journalLine.findMany({
+    where: {
+      account: { code: input.accountCode },
+      entry: {
+        entityId: input.entityId,
+        book: { code: input.bookCode },
+        documentDate: { lte: input.asOf },
+      },
+    },
+    select: {
+      debit: true,
+      credit: true,
+      entry: { select: { fxRate: true } },
+    },
+  });
+  let debit = new Decimal(0);
+  let credit = new Decimal(0);
+  for (const l of lines) {
+    const rate = new Decimal(l.entry.fxRate.toString());
+    // Prisma Decimals → decimal.js for arithmetic per CLAUDE.md.
+    debit = debit.plus(new Decimal(l.debit.toString()).times(rate));
+    credit = credit.plus(new Decimal(l.credit.toString()).times(rate));
+  }
+  return { debit, credit };
+}
+
 export async function getConsolidatedTrialBalance(
   prisma: PrismaClient,
   input: {
@@ -310,12 +362,30 @@ export async function getConsolidatedTrialBalance(
           // CURRENT_RATE / WEIGHTED_AVG / EXCLUDED / same_currency path.
           debit = row.debit.times(rate);
           credit = row.credit.times(rate);
+        } else if (
+          entity.functionalCurrencyId !== bookReportingCurrencyId
+        ) {
+          // HISTORICAL path — walk each JE line for this (entity,
+          // book, account) and translate at the line's source-JE
+          // fxRate (the rate AT THE TIME the contribution was posted).
+          // Equity items don't re-translate at period-end under
+          // ASC 830; they stay frozen at the contribution rate. The
+          // accumulation of those frozen rates IS the equity-side
+          // balance in reporting currency.
+          //
+          // Same-currency case never enters this branch (rate=1 above);
+          // we explicit-check to short-circuit anyway.
+          const translated = await translateHistoricalAccount(prisma, {
+            entityId: entity.id,
+            bookCode,
+            accountCode: row.accountCode,
+            asOf: input.asOf,
+          });
+          debit = translated.debit;
+          credit = translated.credit;
         }
-        // HISTORICAL path (rate === null) — for v0.8 we don't walk
-        // per-line history yet (rare in NS-imported data; equity
-        // transactions are sparse). Pass through untranslated as the
-        // pragmatic approximation. Phase 5 polish: walk JE lines and
-        // use line.entry.fxRate. The CTA plug catches any imbalance.
+        // Same-currency HISTORICAL: pass through untranslated. The
+        // entity already records in reporting currency.
       }
       const existing = aggregates.get(row.accountCode);
       if (existing) {

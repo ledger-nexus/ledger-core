@@ -268,15 +268,23 @@ describe("FX consolidation translation (Phase 4c)", () => {
       asOf: new Date("2026-06-30"),
       periodStart: new Date("2026-04-01"),
     });
-    // Asset 1000 (CURRENT_RATE × 1.30) ≠ Equity 3100 (HISTORICAL → null
-    // → untranslated as the v0.8 pragma). The mismatch yields a CTA
-    // that re-balances the consolidated TB. Sign convention: positive
-    // = debit (FX loss), negative = credit (FX gain).
+    // Asset 1000 (CURRENT_RATE @ 1.30) ≠ Equity 3100 (HISTORICAL, walked
+    // per-line at posting rate 1.20). The mismatch between current and
+    // historical rates yields a genuine CTA that re-balances the
+    // consolidated TB. Sign convention: positive = debit (FX loss),
+    // negative = credit (FX gain).
     //
-    // Per our wiring: cash 1200 × 1.30 = 1560; equity 1200 untranslated
-    // = 1200; DR=1560, CR=1200, CTA = 1560 - 1200 = 360 → credit
-    // (debits exceed credits, CTA balances on the credit side).
-    expect(r.cumulativeTranslationAdjustment.toString()).toBe("360");
+    // Per the line-walked arithmetic:
+    //   cash    1200 (txn ccy) × 1.30 = 1560 USD
+    //   equity  1200 (txn ccy) × 1.20 = 1440 USD  ← line-walked
+    //   DR=1560, CR=1440, CTA = 120 → credit (FX gain).
+    //
+    // Pre line-walking (v0.8 Phase 4c pragma), this read CTA=360
+    // because equity passed through untranslated at storage value 1200.
+    // The line-walk shrinks the spurious CTA from 360 → 120; the 240
+    // difference was the unaccounted historical-rate translation of the
+    // equity contribution.
+    expect(r.cumulativeTranslationAdjustment.toString()).toBe("120");
     // Report total balances after CTA applied.
     expect(r.balances).toBe(true);
   });
