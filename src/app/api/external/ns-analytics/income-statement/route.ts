@@ -15,6 +15,7 @@ import {
   auditExternalReportAccess,
   resolveScopeFromQuery,
 } from "@/lib/external/ns-analytics-auth";
+import { toNsIncomeStatement } from "@/lib/external/ns-report-shapes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const fromDate = url.searchParams.get("fromDate") ?? "";
   const toDate = url.searchParams.get("toDate") ?? "";
   const format = url.searchParams.get("format") ?? "json";
+  // v0.9 Phase 3.5 — shape discriminator mirrors trial-balance.
+  const shape = url.searchParams.get("shape") ?? "native";
 
   if (!ISO_DATE_RX.test(fromDate) || !ISO_DATE_RX.test(toDate)) {
     return NextResponse.json(
@@ -50,6 +53,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (format !== "json" && format !== "csv") {
     return NextResponse.json(
       { error: 'Invalid format. Required: "json" or "csv".' },
+      { status: 400 }
+    );
+  }
+  if (shape !== "native" && shape !== "ns") {
+    return NextResponse.json(
+      { error: 'Invalid shape. Required: "native" or "ns".' },
+      { status: 400 }
+    );
+  }
+  if (shape === "ns" && scope.source !== "ns") {
+    return NextResponse.json(
+      {
+        error:
+          'shape=ns requires NS-side scope (subsidiary + accountingBook). Use shape=native with entityCode + bookCode.',
+      },
       { status: 400 }
     );
   }
@@ -81,6 +99,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ipAddress,
     userAgent,
   });
+
+  // v0.9 Phase 3.5 — NS-canonical shape branch (mirror of TB route).
+  if (shape === "ns") {
+    const nsBody = toNsIncomeStatement(
+      report.revenue,
+      report.expenses,
+      {
+        totalRevenue: report.totalRevenue,
+        totalExpenses: report.totalExpenses,
+        netIncome: report.netIncome,
+      },
+      { fromDate, toDate },
+      {
+        subsidiaryInternalid: url.searchParams.get("subsidiary") ?? "",
+        accountingBookInternalid: url.searchParams.get("accountingBook") ?? "",
+      }
+    );
+    return NextResponse.json(nsBody);
+  }
 
   const body = {
     _meta: {

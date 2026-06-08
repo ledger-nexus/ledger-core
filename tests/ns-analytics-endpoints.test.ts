@@ -276,7 +276,7 @@ describe("v0.9 NS SuiteAnalytics Phase 2: NS-side scope resolution", () => {
   });
 });
 
-describe("v0.9 NS SuiteAnalytics Phase 3: shape=ns guard", () => {
+describe("v0.9 NS SuiteAnalytics Phase 3: shape=ns guard (TB)", () => {
   it("returns 400 for invalid shape value", async () => {
     const res = await getTrialBalance(
       makeReq(
@@ -294,6 +294,63 @@ describe("v0.9 NS SuiteAnalytics Phase 3: shape=ns guard", () => {
     const res = await getTrialBalance(
       makeReq(
         "/api/external/ns-analytics/trial-balance",
+        { ...VALID_QUERY, shape: "ns" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/shape=ns requires NS-side scope/);
+  });
+});
+
+describe("v0.9 NS SuiteAnalytics Phase 3.5: shape=ns wired into IS + BS", () => {
+  const IS_QUERY = {
+    entityCode: "DUMMY_ENTITY",
+    bookCode: "US_GAAP",
+    fromDate: "2026-04-01",
+    toDate: "2026-04-30",
+  };
+
+  it("income-statement returns 400 for invalid shape value", async () => {
+    const res = await getIncomeStatement(
+      makeReq(
+        "/api/external/ns-analytics/income-statement",
+        { ...IS_QUERY, shape: "xml" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("income-statement rejects shape=ns when scope is native", async () => {
+    const res = await getIncomeStatement(
+      makeReq(
+        "/api/external/ns-analytics/income-statement",
+        { ...IS_QUERY, shape: "ns" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/shape=ns requires NS-side scope/);
+  });
+
+  it("balance-sheet returns 400 for invalid shape value", async () => {
+    const res = await getBalanceSheet(
+      makeReq(
+        "/api/external/ns-analytics/balance-sheet",
+        { ...VALID_QUERY, shape: "xml" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("balance-sheet rejects shape=ns when scope is native", async () => {
+    const res = await getBalanceSheet(
+      makeReq(
+        "/api/external/ns-analytics/balance-sheet",
         { ...VALID_QUERY, shape: "ns" },
         `Bearer ${token}`
       )
