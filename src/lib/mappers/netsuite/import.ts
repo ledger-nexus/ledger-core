@@ -159,8 +159,20 @@ export async function importFromNs(
     transactionCurrencyId: string;
     documentDate: Date;
     lines: L[];
+    /**
+     * v0.8 FX Phase 2 — NS-supplied transaction-time exchangerate.
+     * When present (a number or a string like "1.27000"), this rate is
+     * used directly. The seeded FxRate is the fallback for older NS
+     * exports that omit the field. The fallback path is also what the
+     * test fixtures (which don't carry exchangerate) exercise — this
+     * keeps the FX wiring usable end-to-end without operators having to
+     * load synthetic rates into NS first.
+     */
+    nsExchangeRate?: number | string;
   }): Promise<{
     fxRate: Decimal;
+    /** Where the rate came from — useful for tests + audit-log telemetry. */
+    fxRateSource: "ns_exchangerate" | "seeded_fx_rate" | "same_currency";
     lines: Array<L & {
       debit: Decimal;
       credit: Decimal;
@@ -168,13 +180,32 @@ export async function importFromNs(
       reportingAmount: Decimal;
     }>;
   }> {
-    const fxRate = await getFxRateOrDefault(prisma, {
-      fromCurrencyId: input.transactionCurrencyId,
-      toCurrencyId: bookReportingCurrencyId,
-      asOf: input.documentDate,
-    });
+    let fxRate: Decimal;
+    let fxRateSource: "ns_exchangerate" | "seeded_fx_rate" | "same_currency";
+    if (input.transactionCurrencyId === bookReportingCurrencyId) {
+      fxRate = new Decimal(1);
+      fxRateSource = "same_currency";
+    } else if (
+      input.nsExchangeRate !== undefined &&
+      input.nsExchangeRate !== null &&
+      String(input.nsExchangeRate).trim() !== ""
+    ) {
+      // Trust NS's posting-time rate. ASC 830 requires recording at
+      // the rate in effect at the transaction date; that's what NS
+      // recorded. The seeded FxRate is a fallback, not a check.
+      fxRate = new Decimal(String(input.nsExchangeRate));
+      fxRateSource = "ns_exchangerate";
+    } else {
+      fxRate = await getFxRateOrDefault(prisma, {
+        fromCurrencyId: input.transactionCurrencyId,
+        toCurrencyId: bookReportingCurrencyId,
+        asOf: input.documentDate,
+      });
+      fxRateSource = "seeded_fx_rate";
+    }
     return {
       fxRate,
+      fxRateSource,
       lines: input.lines.map((l) => {
         // Coerce mapper-output (string | Decimal | undefined) to Decimal.
         // Mapper layer produces strings; we need Decimal for arithmetic.
@@ -616,6 +647,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: nsJe.exchangerate,
     });
 
     await postJournalEntry(prisma, {
@@ -685,6 +717,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: inv.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
@@ -763,6 +796,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: bill.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
@@ -823,6 +857,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: m.lines,
+      nsExchangeRate: pmt.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "CustomerPayment", pmt.internalid),
@@ -876,6 +911,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: m.lines,
+      nsExchangeRate: pmt.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "VendorPayment", pmt.internalid),
