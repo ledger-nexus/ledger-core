@@ -5,10 +5,12 @@ import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { openApBalance } from "@/lib/accounting/sub-ledgers/ap";
+import { listEntityBooksWithOpenItems } from "@/lib/accounting/sub-ledgers/cross-book";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { MultiBookBanner } from "@/components/multi-book-banner";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { ApplyApPaymentRow } from "./apply-payment-row";
 import { ReassignApRow } from "./reassign-ap-row";
@@ -18,7 +20,7 @@ export default async function ApPage() {
   // Tenant scope (Phase 4c).
   const tenant = await getCurrentTenant();
   const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
-  const [openItems, total, cashAccounts, users, queues] = await Promise.all([
+  const [openItems, total, cashAccounts, users, queues, entityBooks] = await Promise.all([
     prisma.apOpenItem.findMany({
       where: {
         ...tenantFilter,
@@ -62,6 +64,8 @@ export default async function ApPage() {
       select: { id: true, code: true, name: true },
       orderBy: { code: "asc" },
     }),
+    // v0.9 Phase 3.5.E — multi-book entity discovery (mirror of AR).
+    listEntityBooksWithOpenItems(prisma, scope.entityCode),
   ]);
 
   // Resolve owner labels.
@@ -78,6 +82,12 @@ export default async function ApPage() {
           <span className="font-mono">{formatMoney(total)}</span>
         </p>
       </div>
+
+      <MultiBookBanner
+        side="AP"
+        activeBookCode={scope.bookCode}
+        books={entityBooks}
+      />
 
       <Card>
         <CardHeader>
