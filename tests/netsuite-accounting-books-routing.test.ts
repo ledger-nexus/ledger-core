@@ -33,7 +33,7 @@ async function ensureUsd(): Promise<void> {
 }
 
 async function ensureBooks(): Promise<void> {
-  for (const code of ["US_GAAP", "US_TAX"]) {
+  for (const code of ["US_GAAP", "US_TAX"] as const) {
     await prisma.book.upsert({
       where: { code },
       create: {
