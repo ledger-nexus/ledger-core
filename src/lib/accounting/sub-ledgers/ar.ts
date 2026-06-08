@@ -12,6 +12,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../post-journal";
+import { CrossBookApplicationError } from "../types";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 
 function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
@@ -168,10 +169,37 @@ export async function applyArPayment(
     const item = await tx.arOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
       // tenantId pulled so the application row inherits the same scope.
-      select: { currentBalance: true, originalAmount: true, status: true, tenantId: true },
+      // bookId pulled for the Phase 3.5.D cross-book guard below.
+      select: {
+        currentBalance: true,
+        originalAmount: true,
+        status: true,
+        tenantId: true,
+        bookId: true,
+        book: { select: { code: true } },
+      },
     });
     if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
       throw new Error(`Cannot apply payment to AR item in ${item.status} state`);
+    }
+
+    // v0.9 NS Books Phase 3.5.D — cross-book application guard. The
+    // payment-side JE must post on the SAME book as the OpenItem; an
+    // application across books would corrupt per-book trial balance
+    // invariants (the AR Cr line on the payment JE balances the AR Dr
+    // line on the invoice JE; cross-book pairing leaves both sides
+    // imbalanced). Pattern 2 multi-book demands one book per posting.
+    const appliedByEntry = await tx.journalEntry.findUniqueOrThrow({
+      where: { id: input.appliedByEntryId },
+      select: { bookId: true, book: { select: { code: true } } },
+    });
+    if (appliedByEntry.bookId !== item.bookId) {
+      throw new CrossBookApplicationError(
+        input.openItemId,
+        item.book.code,
+        input.appliedByEntryId,
+        appliedByEntry.book.code
+      );
     }
 
     const applied = toDecimal(input.appliedAmount);
