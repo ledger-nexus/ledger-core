@@ -185,3 +185,31 @@ export class EntityMissingTenantError extends Error {
     this.name = "EntityMissingTenantError";
   }
 }
+
+// v0.9 NS Books Phase 3.5.D — raised when an AR/AP application attempts
+// to bind a payment-side JE on one book to an OpenItem on a different
+// book. In Pattern 2 multi-book ledger semantics, each book is its own
+// independent GL — an application must stay within a single book or the
+// per-book trial balance gets corrupted.
+//
+// Typical trigger: hand-built or AI-suggested apply that picked the
+// wrong OpenItem from a multi-book set. The NS importer's Phase 3.5.B
+// path matches book correctly via the per-book lookup map, but Server
+// Actions / API endpoints calling applyArPayment / applyApPayment
+// directly need this guard.
+export class CrossBookApplicationError extends Error {
+  constructor(
+    public openItemId: string,
+    public openItemBookCode: string,
+    public appliedByEntryId: string,
+    public appliedByEntryBookCode: string
+  ) {
+    super(
+      `Cross-book application refused: payment JE ${appliedByEntryId} ` +
+        `posted on book ${appliedByEntryBookCode} cannot apply to ` +
+        `open item ${openItemId} on book ${openItemBookCode}. ` +
+        `Apply on the matching-book payment JE instead.`
+    );
+    this.name = "CrossBookApplicationError";
+  }
+}
