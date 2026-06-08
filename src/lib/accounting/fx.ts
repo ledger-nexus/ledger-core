@@ -112,3 +112,139 @@ export async function getFxRateOrDefault(
   // per CLAUDE.md money-math rules).
   return new Decimal(row.rate.toString());
 }
+
+// ─── v0.8 FX Phase 4b — translation rate per ASC 830 category ──────────
+//
+// The consolidation report (Phase 4c) translates each account's period-
+// end balance from the sub's functional currency to the parent's
+// reporting currency. ASC 830 dictates a different rate per account
+// category — see TranslationCategory in the schema for the four
+// possible values.
+//
+// This helper centralizes the rate selection so the consolidation
+// report doesn't have to know which rate to use for each account. It
+// returns:
+//   - CURRENT_RATE   → the rate at periodEnd (looks up SPOT)
+//   - WEIGHTED_AVG   → the average of (rate at periodStart, rate at
+//                      periodEnd). When only one rate exists in the
+//                      seeded FxRate table within the period, WA = CR
+//                      (mathematically correct given the data).
+//   - HISTORICAL     → null. The caller MUST walk each posting line
+//                      and use that line's transaction-date rate (the
+//                      rate that was in effect when the equity
+//                      contribution was originally recorded). Equity
+//                      contributions don't translate at the period-end
+//                      rate; they're frozen at the contribution rate.
+//   - EXCLUDED       → Decimal(1). The account is already in
+//                      reporting currency at posting time (e.g.
+//                      Realized FX Gain/Loss). Multiplication by 1 is
+//                      a no-op.
+
+export interface TranslationContext {
+  /** Source: the sub's functional currency (e.g. "GBP"). */
+  fromCurrencyId: string;
+  /** Target: the parent's reporting currency (e.g. "USD"). */
+  toCurrencyId: string;
+  /** First day of the consolidation period. */
+  periodStart: Date;
+  /** Last day of the consolidation period (= the as-of date for CR). */
+  periodEnd: Date;
+}
+
+/**
+ * Source of the rate, surfaced for tests + audit-log telemetry.
+ *
+ *   - "current_rate"        : CURRENT_RATE category; rate from periodEnd lookup
+ *   - "weighted_avg"        : WEIGHTED_AVG category; mean of period start + end
+ *   - "historical_per_line" : HISTORICAL category; caller computes per line
+ *   - "excluded"            : EXCLUDED category; rate locked to 1
+ *   - "same_currency"       : transactionCurrency === reportingCurrency;
+ *                             no lookup needed, rate = 1 (short-circuit
+ *                             that fires regardless of category)
+ */
+export type TranslationRateSource =
+  | "current_rate"
+  | "weighted_avg"
+  | "historical_per_line"
+  | "excluded"
+  | "same_currency";
+
+export interface TranslationRateResult {
+  /**
+   * The rate to apply, or null when HISTORICAL (caller walks lines).
+   * For CURRENT_RATE + WEIGHTED_AVG: the looked-up rate.
+   * For EXCLUDED + same-currency: Decimal(1).
+   */
+  rate: Decimal | null;
+  /** Where this rate came from — useful for tests + audit telemetry. */
+  source: TranslationRateSource;
+}
+
+/**
+ * Look up the ASC 830 translation rate for an account category.
+ *
+ * Same-currency short-circuit fires regardless of category: if the sub
+ * already posts in the parent's reporting currency, no translation
+ * needed, rate = 1.
+ */
+export async function getTranslationRate(
+  prisma: PrismaClient,
+  input: {
+    category: "CURRENT_RATE" | "HISTORICAL" | "WEIGHTED_AVG" | "EXCLUDED";
+    ctx: TranslationContext;
+  }
+): Promise<TranslationRateResult> {
+  // Universal short-circuit: same currency → no translation, rate = 1.
+  // Fires regardless of category — a USD sub of a USD parent never
+  // translates anything, no matter how the chart classifies each account.
+  if (input.ctx.fromCurrencyId === input.ctx.toCurrencyId) {
+    return { rate: new Decimal(1), source: "same_currency" };
+  }
+
+  if (input.category === "EXCLUDED") {
+    // The account is already in reporting currency at posting time
+    // (e.g. Realized FX Gain/Loss, 8300). No translation.
+    return { rate: new Decimal(1), source: "excluded" };
+  }
+
+  if (input.category === "HISTORICAL") {
+    // Equity items are translated at the rate when each contribution
+    // was ORIGINALLY recorded. The consolidation report's caller must
+    // walk each line and use line.entry.fxRate. We return null so the
+    // caller can detect this path explicitly — no per-account rate
+    // lookup is sensible.
+    return { rate: null, source: "historical_per_line" };
+  }
+
+  if (input.category === "CURRENT_RATE") {
+    const rate = await getFxRateOrDefault(prisma, {
+      fromCurrencyId: input.ctx.fromCurrencyId,
+      toCurrencyId: input.ctx.toCurrencyId,
+      asOf: input.ctx.periodEnd,
+      rateType: "SPOT",
+    });
+    return { rate, source: "current_rate" };
+  }
+
+  // WEIGHTED_AVG: simple average of (start rate, end rate). A more
+  // sophisticated implementation would weight by transaction activity
+  // within the period, but the simple average matches ASC 830's
+  // intent (the spirit is "approximate average rate over the period")
+  // and works correctly when operators seed daily/weekly rates.
+  const startRate = await getFxRateOrDefault(prisma, {
+    fromCurrencyId: input.ctx.fromCurrencyId,
+    toCurrencyId: input.ctx.toCurrencyId,
+    asOf: input.ctx.periodStart,
+    rateType: "SPOT",
+  });
+  const endRate = await getFxRateOrDefault(prisma, {
+    fromCurrencyId: input.ctx.fromCurrencyId,
+    toCurrencyId: input.ctx.toCurrencyId,
+    asOf: input.ctx.periodEnd,
+    rateType: "SPOT",
+  });
+  // Use Decimal arithmetic throughout — never reach for Number per
+  // CLAUDE.md money-math rules.
+  const avg = startRate.plus(endRate).dividedBy(2);
+  return { rate: avg, source: "weighted_avg" };
+}
