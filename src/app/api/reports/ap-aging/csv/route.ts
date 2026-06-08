@@ -78,7 +78,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return new NextResponse(toCsv(rows), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${csvFilename("ap-aging", asOf)}"`,
+      // v0.9 NS Books Phase 3.5.C — book code in filename to prevent
+      // collision across per-book downloads. Mirror of the AR route.
+      "Content-Disposition": `attachment; filename="${csvFilename("ap-aging", `${scope.bookCode}-${asOf}`)}"`,
     },
   });
 }

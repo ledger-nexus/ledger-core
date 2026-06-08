@@ -78,7 +78,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return new NextResponse(toCsv(rows), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${csvFilename("ar-aging", asOf)}"`,
+      // v0.9 NS Books Phase 3.5.C — include the book code in the
+      // filename so multi-book operators downloading two CSVs (one per
+      // book) don't have them collide on disk. Books like "US_GAAP"
+      // and "US_TAX" are operator-controlled and shape-validated, so
+      // safe to embed in the filename.
+      "Content-Disposition": `attachment; filename="${csvFilename("ar-aging", `${scope.bookCode}-${asOf}`)}"`,
     },
   });
 }
