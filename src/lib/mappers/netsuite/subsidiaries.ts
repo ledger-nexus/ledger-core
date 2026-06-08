@@ -168,6 +168,10 @@ export async function setupSubsidiaries(
         code: m.code,
         name: m.name,
         functionalCurrencyId: m.functionalCurrencyCode,
+        // v0.9 NS Books — populate the promoted column AND keep the
+        // JSON flag during transition. Future migration drops the
+        // JSON side after all callers have migrated to the column.
+        isEliminationEntity: m.isElimination,
         extensions: {
           nsIsImported: true,
           nsInternalid: m.internalid,
@@ -184,6 +188,7 @@ export async function setupSubsidiaries(
         // Don't reassign functionalCurrencyId on update — NS sub currency
         // changes are rare and would require re-translating historical
         // postings (out of scope here). The warning below catches drift.
+        isEliminationEntity: m.isElimination,
         extensions: {
           nsIsImported: true,
           nsInternalid: m.internalid,
