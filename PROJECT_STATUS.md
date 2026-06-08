@@ -8,7 +8,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-06-08
 
-**Current state:** **v0.8 ASC 830 FX translation arc closed today.** The cross-currency multi-sub demo (Vandelay UK GBP + USA USD + parent USD) is now CPA-credible end-to-end. NS transactions post at their original posting-time rate, AR/AP settlement at a different rate produces a realized FX gain/loss line, the consolidated trial balance translates each account at its ASC 830 category (CURRENT_RATE / WEIGHTED_AVG / HISTORICAL / EXCLUDED), and a CTA plug rebalances the consolidated TB. The page surfaces translation status + per-entity rates + CTA. The v0.7 disclosure banner ("treat cross-currency consolidated balances as indicative only") is replaced by accurate translated numbers and visible methodology.
+**Current state:** **v0.9 NS Accounting Books arc — Phase 3 (per-tx routing through importer) shipped.** Multi-book parallel posting from real NS exports now works end-to-end at the JournalEntry path. A 2-book NS export creates N JEs per NS JournalEntry transaction (one per mapped ledger-core book), and the existing Book-Tax-Difference report sees both books' postings. The Phase 2 schema unblock (scoping the lineage-uniq index to `(tenantId, bookId)`) also fixed a long-standing multi-tenant collision bug as a side effect.
+
+Earlier today (also captured below): **v0.8 ASC 830 FX translation arc** closed. The cross-currency multi-sub demo is CPA-credible end-to-end — transactions post at posting-time rate, AR/AP settlement at a different rate posts realized FX gain/loss, consolidated TB translates per ASC 830 category with a CTA plug.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -199,12 +201,37 @@ Running log of where this project is, what's next, and key decisions. Updated at
   - Disclosure banner replaced with two modes: positive-tone "FX translation active" (showing per-entity CR rates inline + CTA amount + sign interpretation) when active; warning banner only when operator explicitly skipped periodStart.
   - End-to-end live verification on VANDEMO_NS1: translationActive=true, NS3 GBP @ 1.30, consolidated DR 299,060 = CR 299,060 balanced.
 
+### v0.9 — NS Accounting Books arc (shipped 2026-06-08)
+> The 3rd NS architectural axis after multi-sub (v0.7) and FX translation (v0.8). Real OneWorld tenants carry multiple books per company (US_GAAP / US_TAX / IFRS / MGMT); each book is an independent GL view. ledger-core's Pattern 2 multi-book substrate already supported this — the importer just needed to drive it from NS data.
+
+- [x] **Phase 1: design + types + mapper + setupBooks** (PR #154)
+  - `docs/netsuite-accounting-books-design.md` — 5-phase arc designed. Open questions resolved: lineage unique index scope (verified before Phase 2), adjustment-only books (defer to phase 4+), per-book currency divergence (defer).
+  - `NsAccountingBook` + `NsBookSpecific` types in `src/lib/mappers/netsuite/types.ts`.
+  - `NsExport.AccountingBook?: NsAccountingBook[]`.
+  - `src/lib/mappers/netsuite/books.ts` — `BookResolution` discriminator (mirror of `EntityResolution`), `resolveBookCodes`, `BookNotMappedError`, `mapNsBook`, `setupBooks`, `resolveBookResolution` (backward-compat fold).
+  - `setupBooks` validates every NS book maps to an existing ledger-core Book row. Doesn't create Book rows itself — Book metadata is operator-configurable.
+  - 19 unit tests (5 `resolveBookCodes` + 4 `resolveBookResolution` + 3 `mapNsBook` + 7 `setupBooks` integration).
+- [x] **Phase 2: lineage-uniq scoped to (tenantId, bookId)** (PR #155)
+  - Migration 0009 drops the old global `gl_entry_header_lineage_uniq` and re-creates it scoped to `(tenantId, bookId, sourceSystem, sourceRecordType, sourceRecordId)`.
+  - Fixes TWO defects: (1) the multi-tenant collision bug where tenant A importing NS Invoice 10001 blocked tenant B from doing the same; (2) the multi-book blocker where a second per-book post on the same NS source record hit the unique.
+  - 3 integration tests prove cross-book posts succeed, same-book duplicates throw, normal records pass through.
+- [x] **Phase 3: per-transaction routing through importer** (PR #156)
+  - `ImportFromNsInput.bookResolution?` — single mode (backward compat) or multi mode (NS internalid → ledger-core book code mapping).
+  - At orchestrator top: `resolveBookResolution` + `setupBooks` validate the mapping.
+  - JournalEntry path: `for (const perBookCode of journalEntryBookCodes)` loop posts to each distinct mapped book. Pattern 2 multi-book driven by NS data.
+  - 4 sub-ledger paths (Invoice/VendorBill/CustomerPayment/VendorPayment) swap `bookCode` → `primaryBookCode` (first mapped book in multi mode). Sub-ledger multi-book is Phase 3.5+.
+  - `attachDimensionSets` called once after the loop (operates by (sourceRecordId, lineNo) across all per-book JE rows).
+  - 2 routing tests: 2 NS JEs × 2 books = 4 ledger-core JEs; idempotent re-import.
+  - 17/17 v0.7+v0.8 regression preserved.
+
 ### v1.2+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
 - [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
 - [ ] **HISTORICAL category line-walking** — currently passes through untranslated (CTA catches the imbalance). A more sophisticated implementation walks `line.entry.fxRate` per equity line. Mostly cosmetic for the v0.8 demo since NS-imported data rarely has equity transactions.
-- [ ] **NS Accounting Books** — exercise multi-book parallel posting through NS data (the next NS architectural axis after multi-sub + FX)
+- [ ] **NS Books Phase 3.5+** — sub-ledger multi-book (Invoice/Bill/Payment per-book) + per-tx `bookspecific[]` exchangerate + per-book idempotency check
+- [ ] **NS Books Phase 4** — reverse exporter reconstructs `bookspecific[]` for roundtrip proof
+- [ ] **NS Books Phase 5** — UI book-mapping editor on `/import/netsuite`
 - [ ] `isEliminationEntity` column migration (currently flagged via `extensions.nsIsElimination`)
 - [ ] **NS SuiteAnalytics → report endpoints** — proves the lineage layer roundtrip works for derived reports, not just transactional data
 
