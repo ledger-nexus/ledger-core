@@ -281,6 +281,9 @@ export async function importFromNs(
         type: "EXPENSE",
         normalBalance: "DEBIT",
         subtype: "FX_GAIN_LOSS_REALIZED",
+        // FX gain/loss is the translation plug's OUTPUT — never
+        // re-translated itself (chart override: EXCLUDED).
+        translationCategory: "EXCLUDED",
         // Native account; lineage stays null even when imported NS
         // transactions reference it. FX_GAIN_LOSS is a ledger-core
         // ASC 830 mechanic, not an NS-sourced concept.
@@ -661,6 +664,36 @@ export async function importFromNs(
     });
     if (existing) {
       result.accountsSkipped += 1;
+      continue;
+    }
+    // ADOPT before create: a row may already occupy (entityId, code)
+    // WITHOUT a lineage triple — e.g. a neutralized residue row from a
+    // test cleanup, or a hand-created account that predates the import.
+    // Same code on the same scope IS the same account; re-attach the
+    // lineage instead of failing the (entityId, code) unique.
+    const adoptable = await prisma.account.findFirst({
+      where: {
+        tenantId: entity.tenantId,
+        entityId: accountEntityIdForCreate,
+        code: m.code,
+        sourceSystem: null,
+      },
+      select: { id: true },
+    });
+    if (adoptable) {
+      await prisma.account.update({
+        where: { id: adoptable.id },
+        data: {
+          sourceSystem: "NETSUITE",
+          sourceRecordType: "Account",
+          sourceRecordId: m.sourceRecordId,
+          sourcePayload: m.sourcePayload as unknown as object,
+          mappingVersion,
+        },
+      });
+      // Adopted = newly NS-attached, so it counts as imported (skipped
+      // is reserved for rows whose lineage already matched).
+      result.accountsImported += 1;
       continue;
     }
     await prisma.account.create({
