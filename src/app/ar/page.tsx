@@ -6,10 +6,12 @@ import { getScope } from "@/lib/scope";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { tenantScopeOrNone } from "@/lib/db-sentinels";
 import { openArBalance } from "@/lib/accounting/sub-ledgers/ar";
+import { listEntityBooksWithOpenItems } from "@/lib/accounting/sub-ledgers/cross-book";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { MultiBookBanner } from "@/components/multi-book-banner";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { ApplyArPaymentRow } from "./apply-payment-row";
 import { ReassignArRow } from "./reassign-ar-row";
@@ -19,7 +21,7 @@ export default async function ArPage() {
   // Tenant scope (Phase 4c) — defense in depth against cross-tenant reads.
   const tenant = await getCurrentTenant();
   const tenantFilter = tenantScopeOrNone(tenant?.id);
-  const [openItems, total, cashAccounts, users, queues] = await Promise.all([
+  const [openItems, total, cashAccounts, users, queues, entityBooks] = await Promise.all([
     prisma.arOpenItem.findMany({
       where: {
         ...tenantFilter,
@@ -63,6 +65,11 @@ export default async function ArPage() {
       select: { id: true, code: true, name: true },
       orderBy: { code: "asc" },
     }),
+    // v0.9 Phase 3.5.E — discover other books on this entity that have
+    // open AR/AP items, so the banner can surface multi-book reality
+    // when the operator is on `(entity, US_GAAP)` while `US_TAX` also
+    // has open items.
+    listEntityBooksWithOpenItems(prisma, scope.entityCode),
   ]);
 
   // Resolve owner display labels (user displayName or queue name).
@@ -79,6 +86,12 @@ export default async function ArPage() {
           <span className="font-mono">{formatMoney(total)}</span>
         </p>
       </div>
+
+      <MultiBookBanner
+        side="AR"
+        activeBookCode={scope.bookCode}
+        books={entityBooks}
+      />
 
       <Card>
         <CardHeader>
