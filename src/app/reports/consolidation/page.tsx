@@ -18,10 +18,24 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate, formatMoney, moneyClass } from "@/lib/utils/format";
 
+/**
+ * Derive a sensible periodStart default from asOf when the operator
+ * doesn't supply one. We pick "asOf - 3 months" (calendar-aligned to
+ * the 1st) — captures a quarter's worth of FX rate movement for the
+ * weighted-average computation. Operators with strict period
+ * boundaries (e.g. fiscal-year-end) can override via the form.
+ */
+function deriveDefaultPeriodStart(asOf: string): string {
+  const d = new Date(asOf);
+  // 3 months back, day 1 of that month
+  const start = new Date(d.getFullYear(), d.getMonth() - 3, 1);
+  return start.toISOString().slice(0, 10);
+}
+
 export default async function ConsolidationPage({
   searchParams,
 }: {
-  searchParams: { root?: string; asOf?: string };
+  searchParams: { root?: string; asOf?: string; periodStart?: string };
 }) {
   // Tenant-verified scope (closes the cross-tenant read leak the raw
   // lc-scope cookie used to enable).
@@ -35,6 +49,7 @@ export default async function ConsolidationPage({
     );
   }
   const asOf = searchParams.asOf ?? "2026-06-30";
+  const periodStart = searchParams.periodStart ?? deriveDefaultPeriodStart(asOf);
 
   // List entities that have at least one descendant — those are the only
   // sensible roots. Tenant-scoped (Phase 4c): only show the current
@@ -66,6 +81,12 @@ export default async function ConsolidationPage({
     rootEntityCode: root,
     bookCode: scope.bookCode,
     asOf: new Date(asOf),
+    // v0.8 FX Phase 5 — pass periodStart so the consolidation engine
+    // runs ASC 830 translation when the included entities have mixed
+    // functional currencies. Same-currency hierarchies are a no-op:
+    // translationActive stays false and the disclosure banner stays
+    // gone (it never fires for single-currency cases).
+    periodStart: new Date(periodStart),
   });
 
   const csvUrl = `/api/reports/consolidation/csv?root=${root}&asOf=${asOf}`;
@@ -96,6 +117,15 @@ export default async function ConsolidationPage({
               </Select>
             </div>
             <div>
+              <Label htmlFor="periodStart">Period start</Label>
+              <Input
+                type="date"
+                name="periodStart"
+                id="periodStart"
+                defaultValue={periodStart}
+              />
+            </div>
+            <div>
               <Label htmlFor="asOf">As of</Label>
               <Input type="date" name="asOf" id="asOf" defaultValue={asOf} />
             </div>
@@ -115,13 +145,71 @@ export default async function ConsolidationPage({
         </div>
       </div>
 
-      {/* Multi-currency disclosure (CPA credibility). When the included
-          entities span more than one functional currency, the
-          consolidated totals are NOT FX-translated — they're naïve sums
-          of debit/credit values in each entity's own currency. Show the
-          limitation rather than hide it. The proper ASC 830 translation
-          (current rate / temporal / CTA accounting) is a follow-up arc. */}
-      {report.hasMultiCurrency && (
+      {/* FX translation status. v0.8 Phase 5 — when translation IS
+          active (mixed-currency hierarchy + periodStart provided),
+          show the rates used + the CTA. When translation is NOT
+          active because the operator skipped periodStart (the
+          backward-compat path), fall back to the v1.0 disclosure
+          banner so the page still surfaces the limitation honestly. */}
+      {report.translationActive && (
+        <Card>
+          <CardContent className="border-l-4 border-positive bg-positive/5 px-5 py-4">
+            <div className="flex items-start gap-3">
+              <Badge tone="positive">FX translation active</Badge>
+              <div className="text-sm text-ink-900">
+                <div>
+                  ASC 830 translation applied to{" "}
+                  {report.distinctCurrencies.length} currencies:{" "}
+                  {report.distinctCurrencies.map((c, i) => (
+                    <span key={c}>
+                      <code className="rounded bg-white px-1.5 py-0.5 text-xs ring-1 ring-ink-200">
+                        {c}
+                      </code>
+                      {i < report.distinctCurrencies.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                  . Balance-sheet items use current rate, income statement
+                  uses period-weighted average, equity uses historical.
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-700">
+                  {report.entitiesIncluded.map((e) => {
+                    const r = report.translationRateByEntity[e.code];
+                    return (
+                      <span key={e.code}>
+                        <code className="rounded bg-white px-1.5 py-0.5 ring-1 ring-ink-200">
+                          {e.code}
+                        </code>{" "}
+                        ({e.functionalCurrencyId}){" "}
+                        {r ? `@ ${r}` : "— no translation"}
+                      </span>
+                    );
+                  })}
+                </div>
+                {!report.cumulativeTranslationAdjustment.isZero() && (
+                  <div className="mt-2 text-xs text-ink-700">
+                    <strong>
+                      CTA plug:{" "}
+                      {formatMoney(
+                        report.cumulativeTranslationAdjustment.abs()
+                      )}{" "}
+                      USD
+                    </strong>{" "}
+                    {report.cumulativeTranslationAdjustment.gt(0)
+                      ? "(FX loss — debits exceed credits post-translation; equity decreases)"
+                      : "(FX gain — credits exceed debits post-translation; equity increases)"}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {/* Legacy multi-currency disclosure — shown only when translation
+          DID NOT run. Operators who hit /reports/consolidation with no
+          periodStart (e.g. legacy bookmarks) still see the limitation
+          surface honestly. Once auto-period-start derivation is the
+          norm (above), this branch should be rare. */}
+      {report.hasMultiCurrency && !report.translationActive && (
         <Card>
           <CardContent className="border-l-4 border-warning bg-warning/5 px-5 py-4">
             <div className="flex items-start gap-3">
@@ -139,18 +227,8 @@ export default async function ConsolidationPage({
                       {i < report.distinctCurrencies.length - 1 ? ", " : ""}
                     </span>
                   ))}
-                  . The consolidated totals below are{" "}
-                  <strong>naïve sums of debit/credit values in each
-                    entity's own currency</strong>{" "}
-                  — they are NOT FX-translated to a single reporting
-                  currency.
-                </div>
-                <div className="mt-1.5 text-xs text-ink-500">
-                  Proper ASC 830 translation (current rate / temporal /
-                  CTA accounting) is on the roadmap. Until then, treat
-                  cross-currency consolidated balances as indicative
-                  only. Per-entity TBs (in their own currency) are
-                  accurate.
+                  . Set a <strong>period start</strong> above to enable
+                  ASC 830 translation (Phase 5).
                 </div>
               </div>
             </div>
