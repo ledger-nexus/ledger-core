@@ -51,6 +51,15 @@ const ENTITY_CODE_PREFIX_RX = /^[A-Z0-9_]{1,16}$/i;
 const ENTITY_CODE_RX = /^[A-Z0-9_-]{1,32}$/i;
 // bookCode must reference an existing Book.code.
 const BOOK_CODE_RX = /^[A-Z0-9_]{1,32}$/i;
+// NS book internalid is a numeric/short string. Used as the keys of
+// bookMapping. We constrain shape to prevent JSON injection through
+// the dictionary keys.
+const NS_INTERNALID_RX = /^[A-Z0-9_-]{1,16}$/i;
+// Multi-book mapping cap. Real NS deployments have a handful of
+// AccountingBook entries (GAAP + TAX + sometimes IFRS + adjustment);
+// 32 is well above any reasonable upper bound and protects against
+// memory blowup from a malformed mapping.
+const MAX_BOOK_MAPPING_ENTRIES = 32;
 
 export interface ImportNsActionInput {
   exportJson: string;
@@ -66,8 +75,22 @@ export interface ImportNsActionInput {
    * LegalEntity.code from the NS Subsidiary internalid.
    */
   entityCodePrefix?: string;
-  /** Defaults to US_GAAP in the mapper. */
+  /** Defaults to US_GAAP in the mapper. Used only when bookMode is "single". */
   bookCode?: string;
+  /**
+   * v0.9 Phase 5 — book strategy discriminator. Defaults to "single"
+   * for backward compat with v0.6/v0.7/v0.8 callers. "multi" enables
+   * per-NS-book routing via bookMapping (each NS AccountingBook
+   * internalid maps to a ledger-core Book.code).
+   */
+  bookMode?: "single" | "multi";
+  /**
+   * Required when bookMode === "multi". Dictionary of
+   * `{ [nsBookInternalid]: ledgerCoreBookCode }`. Every NS book in
+   * the export must be declared; the importer throws BookNotMappedError
+   * otherwise. Empty values are rejected.
+   */
+  bookMapping?: Record<string, string>;
 }
 
 export type ImportNsActionState =
@@ -202,6 +225,64 @@ export async function importNsAction(
     };
   }
 
+  // v0.9 Phase 5 — multi-book mode validation. The mapping shape comes
+  // from operator input via the UI, so we validate it as untrusted: cap
+  // size, validate every key (NS internalid shape) + every value
+  // (ledger-core Book.code shape). The importer's setupBooks step does
+  // a second-stage check that each value references an existing Book
+  // row + raises BookNotMappedError if a transaction references an
+  // un-mapped book; that's a contract error worth letting bubble.
+  const bookMode = input.bookMode ?? "single";
+  if (bookMode === "multi") {
+    if (!input.bookMapping || typeof input.bookMapping !== "object") {
+      return {
+        ok: false,
+        error:
+          "Multi-book mode requires a bookMapping object. Each NS book internalid must map to a ledger-core book code.",
+      };
+    }
+    const mappingKeys = Object.keys(input.bookMapping);
+    if (mappingKeys.length === 0) {
+      return {
+        ok: false,
+        error:
+          "Multi-book mode requires at least one entry in bookMapping.",
+      };
+    }
+    if (mappingKeys.length > MAX_BOOK_MAPPING_ENTRIES) {
+      return {
+        ok: false,
+        error: `bookMapping has ${mappingKeys.length} entries; max is ${MAX_BOOK_MAPPING_ENTRIES}.`,
+      };
+    }
+    for (const k of mappingKeys) {
+      if (!NS_INTERNALID_RX.test(k)) {
+        return {
+          ok: false,
+          error: `Invalid NS book internalid "${k.slice(0, 32)}" in bookMapping. Keys must be 1–16 ASCII letters/digits/underscores/dashes.`,
+        };
+      }
+      const v = input.bookMapping[k];
+      if (typeof v !== "string" || !BOOK_CODE_RX.test(v)) {
+        return {
+          ok: false,
+          error: `Invalid book code "${String(v).slice(0, 32)}" for NS book "${k}". Values must be 1–32 ASCII letters/digits/underscores.`,
+        };
+      }
+    }
+    // A multi-book import that doesn't declare any AccountingBook in the
+    // NS export is operator confusion — they want multi-book but the
+    // payload doesn't have multi-book data. setupBooks will warn, but
+    // surface it up front so the page error is clear.
+    if (!nsExport.AccountingBook?.length) {
+      return {
+        ok: false,
+        error:
+          "Multi-book mode requires an AccountingBook array in the NS export, but found none. Use single book mode instead, or re-export with AccountingBook included.",
+      };
+    }
+  }
+
   // Run the importer.
   try {
     const entityResolution =
@@ -212,11 +293,26 @@ export async function importNsAction(
             entityCodePrefix: input.entityCodePrefix!,
           } as const);
 
-    const result = await importFromNs(prisma, {
-      entityResolution,
-      bookCode: input.bookCode,
-      export: nsExport,
-    });
+    // v0.9 Phase 5 — pass bookResolution OR bookCode depending on mode.
+    // The importer accepts either (resolveBookResolution folds the legacy
+    // bookCode shape into a canonical single-mode BookResolution).
+    const importInput =
+      bookMode === "multi"
+        ? {
+            entityResolution,
+            bookResolution: {
+              mode: "multi" as const,
+              bookMapping: input.bookMapping!,
+            },
+            export: nsExport,
+          }
+        : {
+            entityResolution,
+            bookCode: input.bookCode,
+            export: nsExport,
+          };
+
+    const result = await importFromNs(prisma, importInput);
 
     if (result.errors.length > 0) {
       // Importer-domain errors are operator-actionable (account doesn't
@@ -273,7 +369,12 @@ export async function importNsAction(
       resource: "netsuite-import",
       metadata: {
         mode: input.mode,
-        bookCode: input.bookCode ?? "US_GAAP",
+        bookMode,
+        bookCode: bookMode === "single" ? (input.bookCode ?? "US_GAAP") : undefined,
+        bookMappingSize:
+          bookMode === "multi"
+            ? Object.keys(input.bookMapping!).length
+            : undefined,
         subsidiariesUpserted: result.subsidiariesUpserted,
         accountsImported: result.accountsImported,
         journalEntriesImported: result.journalEntriesImported,
