@@ -32,23 +32,31 @@ beforeAll(async () => {
   // The env fallback path interferes with negative test assertions.
   delete process.env.INTERNAL_API_TOKEN;
 
-  // Tenant requires an owner user. Create a throwaway one.
-  const user = await prisma.user.create({
-    data: {
+  // Tenant requires an owner user. Upserts by natural key so a prior
+  // run's silently-failed cleanup (FK'd audit rows) can't break reruns.
+  const user = await prisma.user.upsert({
+    where: { email: `nsa-${SUFFIX}@example.test` },
+    create: {
       email: `nsa-${SUFFIX}@example.test`,
       displayName: "NSA test owner",
       isActive: true,
     },
+    update: { isActive: true },
   });
   ownerUserId = user.id;
-  const tenant = await prisma.tenant.create({
-    data: {
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: TENANT_SLUG },
+    create: {
       slug: TENANT_SLUG,
       name: "NS Analytics auth-test tenant",
       ownerUserId: user.id,
     },
+    update: {},
   });
   tenantId = tenant.id;
+  // Drop stale tokens from prior runs so provision below is the only
+  // live credential for this tenant.
+  await prisma.tenantApiToken.deleteMany({ where: { tenantId } });
   const prov = await provisionTenantApiToken({
     tenantId,
     label: `nsa-${SUFFIX}`,
@@ -201,6 +209,78 @@ describe("v0.9 NS SuiteAnalytics Phase 1: query-shape validation", () => {
       )
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("v0.9 NS SuiteAnalytics Phase 2: NS-side scope resolution", () => {
+  // Phase 1 accepted entityCode + bookCode. Phase 2 also accepts
+  // subsidiary + accountingBook (NS internalids) and resolves via
+  // lineage tables. Mixing the two is an explicit operator error.
+
+  it("returns 400 when neither scope param set is provided", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        { asOf: "2026-04-30" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/Missing scope|either/i);
+  });
+
+  it("returns 400 when BOTH scope param sets are provided", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        {
+          entityCode: "DUMMY",
+          bookCode: "US_GAAP",
+          subsidiary: "1",
+          accountingBook: "1",
+          asOf: "2026-04-30",
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/not both|either/i);
+  });
+
+  it("returns 400 for an invalid subsidiary internalid shape", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        {
+          subsidiary: "1'; DROP TABLE",
+          accountingBook: "1",
+          asOf: "2026-04-30",
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 with structured error body when subsidiary internalid doesn't resolve", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        {
+          subsidiary: "999",
+          accountingBook: "1",
+          asOf: "2026-04-30",
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("Subsidiary not found.");
+    expect(body.nsInternalid).toBe("999");
+    expect(body.hint).toBeTruthy();
   });
 });
 

@@ -13,13 +13,12 @@ import { getBalanceSheet } from "@/lib/accounting/reports";
 import {
   authenticateExternalRequest,
   auditExternalReportAccess,
+  resolveScopeFromQuery,
 } from "@/lib/external/ns-analytics-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ENTITY_CODE_RX = /^[A-Z0-9_-]{1,32}$/i;
-const BOOK_CODE_RX = /^[A-Z0-9_]{1,32}$/i;
 const ISO_DATE_RX = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -34,23 +33,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   );
   if (auth instanceof NextResponse) return auth;
 
-  const entityCode = url.searchParams.get("entityCode") ?? "";
-  const bookCode = url.searchParams.get("bookCode") ?? "";
+  const scope = await resolveScopeFromQuery(prisma, auth, url);
+  if (scope instanceof NextResponse) return scope;
+  const { entityCode, bookCode } = scope;
+
   const asOf = url.searchParams.get("asOf") ?? "";
   const format = url.searchParams.get("format") ?? "json";
 
-  if (!ENTITY_CODE_RX.test(entityCode)) {
-    return NextResponse.json(
-      { error: "Invalid or missing entityCode." },
-      { status: 400 }
-    );
-  }
-  if (!BOOK_CODE_RX.test(bookCode)) {
-    return NextResponse.json(
-      { error: "Invalid or missing bookCode." },
-      { status: 400 }
-    );
-  }
   if (!ISO_DATE_RX.test(asOf)) {
     return NextResponse.json(
       { error: "Invalid or missing asOf. Required: ISO YYYY-MM-DD." },

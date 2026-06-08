@@ -14,8 +14,13 @@
 // detail to support quarterly access reviews.
 
 import { NextRequest, NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
 import { resolveBearerToken } from "@/lib/auth/token";
 import { logAuditEvent } from "@/lib/audit/log";
+import {
+  resolveNsSubsidiary,
+  resolveNsAccountingBook,
+} from "./ns-id-resolver";
 
 export interface AuthenticatedExternalRequest {
   /** Tenant the token resolves to. All queries scope to this. */
@@ -114,6 +119,120 @@ export async function authenticateExternalRequest(
     tenantId: identity.tenantId,
     tokenLabel: identity.label,
     tokenId: identity.tokenId,
+  };
+}
+
+// ─── Dual-mode scope resolution ─────────────────────────────────────
+//
+// Phase 2 adds NS-side param resolution. Callers can pass EITHER:
+//   subsidiary=1 & accountingBook=2     (NS-side; resolved via lineage)
+//   entityCode=ACME_NS1 & bookCode=US_GAAP   (ledger-core-native; Phase 1)
+// Mixing the two is an explicit operator error → 400.
+
+const ENTITY_CODE_RX = /^[A-Z0-9_-]{1,32}$/i;
+const BOOK_CODE_RX = /^[A-Z0-9_]{1,32}$/i;
+const NS_INTERNALID_RX = /^[A-Z0-9_-]{1,16}$/i;
+
+export interface ResolvedScope {
+  entityCode: string;
+  bookCode: string;
+  /** "ns" if the caller used NS-side params; "native" for entityCode/bookCode. */
+  source: "ns" | "native";
+}
+
+export async function resolveScopeFromQuery(
+  prisma: PrismaClient,
+  auth: AuthenticatedExternalRequest,
+  url: URL
+): Promise<ResolvedScope | NextResponse> {
+  const entityCode = url.searchParams.get("entityCode") ?? "";
+  const bookCode = url.searchParams.get("bookCode") ?? "";
+  const subsidiary = url.searchParams.get("subsidiary") ?? "";
+  const accountingBook = url.searchParams.get("accountingBook") ?? "";
+
+  const hasNative = entityCode !== "" || bookCode !== "";
+  const hasNs = subsidiary !== "" || accountingBook !== "";
+
+  if (hasNative && hasNs) {
+    return NextResponse.json(
+      {
+        error:
+          "Use EITHER (entityCode + bookCode) OR (subsidiary + accountingBook) — not both.",
+      },
+      { status: 400 }
+    );
+  }
+  if (!hasNative && !hasNs) {
+    return NextResponse.json(
+      {
+        error:
+          "Missing scope params. Pass either (entityCode + bookCode) OR (subsidiary + accountingBook).",
+      },
+      { status: 400 }
+    );
+  }
+
+  if (hasNative) {
+    if (!ENTITY_CODE_RX.test(entityCode)) {
+      return NextResponse.json(
+        { error: "Invalid entityCode shape." },
+        { status: 400 }
+      );
+    }
+    if (!BOOK_CODE_RX.test(bookCode)) {
+      return NextResponse.json(
+        { error: "Invalid bookCode shape." },
+        { status: 400 }
+      );
+    }
+    return { entityCode, bookCode, source: "native" };
+  }
+
+  // NS-side path: validate shape, resolve, 404 on miss with structured
+  // error body that names the unresolved id (operator-actionable).
+  if (!NS_INTERNALID_RX.test(subsidiary)) {
+    return NextResponse.json(
+      { error: "Invalid subsidiary internalid shape." },
+      { status: 400 }
+    );
+  }
+  if (!NS_INTERNALID_RX.test(accountingBook)) {
+    return NextResponse.json(
+      { error: "Invalid accountingBook internalid shape." },
+      { status: 400 }
+    );
+  }
+  const ent = await resolveNsSubsidiary(prisma, {
+    tenantId: auth.tenantId,
+    nsInternalid: subsidiary,
+  });
+  if (!ent) {
+    return NextResponse.json(
+      {
+        error: "Subsidiary not found.",
+        nsInternalid: subsidiary,
+        hint: "Verify the subsidiary was imported via /import/netsuite for this tenant.",
+      },
+      { status: 404 }
+    );
+  }
+  const book = await resolveNsAccountingBook(prisma, {
+    nsInternalid: accountingBook,
+  });
+  if (!book) {
+    return NextResponse.json(
+      {
+        error: "AccountingBook not found.",
+        nsInternalid: accountingBook,
+        hint: "Verify the accounting book was imported via multi-book NS import.",
+      },
+      { status: 404 }
+    );
+  }
+  return {
+    entityCode: ent.entityCode,
+    bookCode: book.bookCode,
+    source: "ns",
   };
 }
 
