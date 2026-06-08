@@ -25,6 +25,7 @@ import {
   auditExternalReportAccess,
   resolveScopeFromQuery,
 } from "@/lib/external/ns-analytics-auth";
+import { toNsTrialBalance } from "@/lib/external/ns-report-shapes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,6 +54,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const asOf = url.searchParams.get("asOf") ?? "";
   const format = url.searchParams.get("format") ?? "json";
+  // v0.9 Phase 3 — shape discriminator. "native" keeps the ledger-core
+  // shape from Phase 1; "ns" returns the SuiteAnalytics-canonical
+  // JSON (accttype / acctnumber / subsidiary.internalid / etc.).
+  // Default stays "native" so Phase 1 callers see no change.
+  const shape = url.searchParams.get("shape") ?? "native";
 
   if (!ISO_DATE_RX.test(asOf)) {
     return NextResponse.json(
@@ -63,6 +69,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (format !== "json" && format !== "csv") {
     return NextResponse.json(
       { error: 'Invalid format. Required: "json" or "csv".' },
+      { status: 400 }
+    );
+  }
+  if (shape !== "native" && shape !== "ns") {
+    return NextResponse.json(
+      { error: 'Invalid shape. Required: "native" or "ns".' },
+      { status: 400 }
+    );
+  }
+  // NS shape requires NS-side scope (so subsidiary.internalid /
+  // accountingBook.internalid in the response are real NS ids that the
+  // operator passed). Mixing shape=ns with native-mode scope params is
+  // operator confusion → 400.
+  if (shape === "ns" && scope.source !== "ns") {
+    return NextResponse.json(
+      {
+        error:
+          'shape=ns requires NS-side scope (subsidiary + accountingBook). Use shape=native with entityCode + bookCode.',
+      },
       { status: 400 }
     );
   }
@@ -96,6 +121,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ipAddress,
     userAgent,
   });
+
+  // v0.9 Phase 3 — NS-canonical shape branch. The mapper is a pure
+  // function — no DB access — so this is just a shape transform.
+  if (shape === "ns") {
+    // scope.source === "ns" by the guard above; pull NS internalids
+    // from query params for the response context.
+    const nsBody = toNsTrialBalance(
+      report.rows,
+      { totalDebit: report.totalDebit, totalCredit: report.totalCredit },
+      asOf,
+      {
+        subsidiaryInternalid: url.searchParams.get("subsidiary") ?? "",
+        accountingBookInternalid: url.searchParams.get("accountingBook") ?? "",
+      }
+    );
+    return NextResponse.json(nsBody);
+  }
 
   const body = {
     _meta: {
