@@ -12,6 +12,39 @@
 
 import { AccountType, NormalBalance } from "../accounting/types";
 
+// v0.8 FX Phase 4a — ASC 830 translation method. Mirrors the Prisma
+// enum. Default per account type (when seed leaves it undefined):
+//   ASSET / LIABILITY → CURRENT_RATE
+//   EQUITY            → HISTORICAL
+//   REVENUE / EXPENSE → WEIGHTED_AVG
+// FX_GAIN_LOSS subtype overrides to EXCLUDED — that account is
+// already in reporting currency at posting time, must not re-translate.
+export type TranslationCategory =
+  | "CURRENT_RATE"
+  | "HISTORICAL"
+  | "WEIGHTED_AVG"
+  | "EXCLUDED";
+
+/**
+ * Derive the default translation category from an account's type
+ * and subtype. The migration backfill uses the same logic; the chart
+ * seed code uses this so new accounts get a sensible default without
+ * the seed author having to remember the ASC 830 mechanics.
+ */
+export function defaultTranslationCategory(input: {
+  type: AccountType;
+  subtype?: string;
+}): TranslationCategory {
+  // The realized-FX account is itself the translation result; do not
+  // re-translate. Same rule applies to any account that's denominated
+  // in reporting currency at posting time.
+  if (input.subtype === "FX_GAIN_LOSS") return "EXCLUDED";
+  if (input.type === "ASSET" || input.type === "LIABILITY") return "CURRENT_RATE";
+  if (input.type === "EQUITY") return "HISTORICAL";
+  // REVENUE + EXPENSE
+  return "WEIGHTED_AVG";
+}
+
 export interface SeedAccount {
   code: string;
   name: string;
@@ -21,6 +54,14 @@ export interface SeedAccount {
   isControlAccount?: boolean;
   isBank?: boolean;
   subtype?: string;
+  /**
+   * v0.8 FX Phase 4a — explicit override for ASC 830 translation
+   * method. When omitted, the seed path computes the default from
+   * type + subtype via defaultTranslationCategory. Set explicitly only
+   * to override the default (rare — most accounts follow the
+   * type-based pattern).
+   */
+  translationCategory?: TranslationCategory;
 }
 
 // Shared chart (entityId = null at seed time). Mark control accounts and bank

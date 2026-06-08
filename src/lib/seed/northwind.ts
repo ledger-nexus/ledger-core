@@ -10,7 +10,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "../accounting/post-journal";
-import { CHART_OF_ACCOUNTS } from "../db/chart-of-accounts";
+import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../db/chart-of-accounts";
 import { openArItem, applyArPayment } from "../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../accounting/sub-ledgers/ap";
 import { getDefaultTenantId } from "./default-tenant";
@@ -195,6 +195,12 @@ async function seedAccounts(prisma: PrismaClient) {
         isControlAccount: acct.isControlAccount ?? false,
         isBank: acct.isBank ?? false,
         subtype: acct.subtype,
+        // v0.8 FX Phase 4a — explicit override on the seed wins;
+        // otherwise compute the default from type + subtype. Setting
+        // it at seed time means the chart is intentional from day 1.
+        translationCategory:
+          acct.translationCategory ??
+          defaultTranslationCategory({ type: acct.type, subtype: acct.subtype }),
       },
     });
   }
