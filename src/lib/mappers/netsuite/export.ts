@@ -85,18 +85,55 @@ export async function exportToNs(
       ? [bookResolution.bookCode]
       : Array.from(new Set(Object.values(bookResolution.bookMapping)));
   // For Subsidiary-style "where do AccountingBook entries come from"
-  // reconstruction. In multi mode each NS internalid is paired with its
-  // ledger-core book code from the mapping.
-  const accountingBooksReconstructed: NsAccountingBook[] =
-    bookResolution.mode === "multi"
-      ? Object.entries(bookResolution.bookMapping).map(([nsId, ledgerCode]) => ({
+  // reconstruction. In multi mode read each Book row's stashed NS
+  // sourcePayload (Phase 4.5 — written by setupBooks on the way in)
+  // and emit byref. Falls back to synthesis from the bookMapping for
+  // any internalid that has no stash (e.g. native-seeded books, or
+  // books imported before Phase 4.5 landed).
+  let accountingBooksReconstructed: NsAccountingBook[] = [];
+  if (bookResolution.mode === "multi") {
+    const booksWithExtensions = await prisma.book.findMany({
+      where: { code: { in: bookCodesToQuery } },
+      select: { code: true, extensions: true },
+    });
+    // Flatten every Book's stash dictionary into a single map. The
+    // many-to-one fold case (multiple NS books → one ledger-core book)
+    // is preserved: a Book's stash can hold N entries, all emitted.
+    const stashByInternalid = new Map<string, NsAccountingBook>();
+    for (const b of booksWithExtensions) {
+      const ext = (b.extensions ?? {}) as Record<string, unknown>;
+      const stash =
+        (ext.nsAccountingBookSourcePayloads as
+          | Record<string, NsAccountingBook>
+          | undefined) ?? {};
+      for (const [id, payload] of Object.entries(stash)) {
+        if (!stashByInternalid.has(id)) {
+          stashByInternalid.set(id, payload);
+        }
+      }
+    }
+    // Walk the operator's full bookMapping (which is the
+    // declared-on-the-way-in NS-book→ledger-book pairing). Prefer the
+    // stash; synthesize { internalid, name } for any internalid
+    // missing a stash entry.
+    for (const [nsId, ledgerCode] of Object.entries(
+      bookResolution.bookMapping
+    )) {
+      const stashed = stashByInternalid.get(nsId);
+      if (stashed) {
+        accountingBooksReconstructed.push(stashed);
+      } else {
+        accountingBooksReconstructed.push({
           internalid: nsId,
-          // Reverse the ledger-core book code → an NS-style "US GAAP"
-          // name. Operators can override by passing the original NS
-          // AccountingBook[] back via the import side (Phase 4.5 polish).
           name: ledgerCode.replace(/_/g, " "),
-        }))
-      : [];
+        });
+      }
+    }
+    // NS conventionally orders AccountingBook by internalid ascending.
+    accountingBooksReconstructed.sort(
+      (a, b) => Number(a.internalid) - Number(b.internalid)
+    );
+  }
 
   // Resolve the entity exporter strategy. Single mode keeps the v0.6
   // behavior; multi mode discovers every NS-imported entity matching

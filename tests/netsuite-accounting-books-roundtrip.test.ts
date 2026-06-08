@@ -36,9 +36,15 @@ const NS_EXPORT: NsExport = {
       country: "US",
     },
   ],
+  // Phase 4.5 fixture: include the `isadjustment` flag on each book.
+  // The Phase 4 synthesis path emitted only { internalid, name }, so
+  // any flag on the original was DROPPED on roundtrip. Phase 4.5
+  // stashes the full payload on Book.extensions and replays byref.
+  // If `isadjustment` survives the roundtrip the stash fired; if it's
+  // missing the synthesis fallback fired (a regression).
   AccountingBook: [
-    { internalid: "1", name: "US GAAP" },
-    { internalid: "2", name: "US TAX" },
+    { internalid: "1", name: "US GAAP", isadjustment: false },
+    { internalid: "2", name: "US TAX", isadjustment: true },
   ],
   Account: [
     {
@@ -123,6 +129,23 @@ async function cleanup(): Promise<void> {
   await prisma.legalEntity.deleteMany({
     where: { tenantId, code: { in: [`${PREFIX}_NS1`] } },
   });
+  // Phase 4.5: clear the NS AccountingBook stash from Book.extensions
+  // so re-runs don't see residue from prior runs.
+  for (const code of ["US_GAAP", "US_TAX"] as const) {
+    const b = await prisma.book.findUnique({
+      where: { code },
+      select: { extensions: true },
+    });
+    if (!b?.extensions) continue;
+    const ext = b.extensions as Record<string, unknown>;
+    if ("nsAccountingBookSourcePayloads" in ext) {
+      delete ext.nsAccountingBookSourcePayloads;
+      await prisma.book.update({
+        where: { code },
+        data: { extensions: ext as unknown as object },
+      });
+    }
+  }
 }
 
 describe("v0.9 NS Accounting Books Phase 4: reverse exporter roundtrip", () => {
@@ -168,6 +191,19 @@ describe("v0.9 NS Accounting Books Phase 4: reverse exporter roundtrip", () => {
     expect(reexport.AccountingBook?.length).toBe(2);
     const reIds = reexport.AccountingBook!.map((b) => b.internalid).sort();
     expect(reIds).toEqual(["1", "2"]);
+
+    // Phase 4.5: byte-perfect AccountingBook replay. The `isadjustment`
+    // flag on each book must survive the roundtrip — the synthesis
+    // path dropped it (only emitted { internalid, name }). The stash-
+    // first path reads the frozen NsAccountingBook payload off
+    // Book.extensions.nsAccountingBookSourcePayloads.
+    const bookById = new Map(
+      reexport.AccountingBook!.map((b) => [b.internalid, b])
+    );
+    expect(bookById.get("1")?.isadjustment).toBe(false);
+    expect(bookById.get("2")?.isadjustment).toBe(true);
+    expect(bookById.get("1")?.name).toBe("US GAAP");
+    expect(bookById.get("2")?.name).toBe("US TAX");
 
     // JEs: 2 distinct source records (deduped from the 4 ledger-core rows).
     expect(reexport.JournalEntry?.length).toBe(2);
