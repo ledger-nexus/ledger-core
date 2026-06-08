@@ -66,7 +66,7 @@ describe("v0.9 NS Books: isEliminationEntity column", () => {
     await prisma.$disconnect();
   });
 
-  it("setupSubsidiaries populates the column AND the JSON flag (dual-write transition)", async () => {
+  it("setupSubsidiaries populates the column; JSON flag is NOT written (dual-write dropped)", async () => {
     const result = await setupSubsidiaries(prisma, {
       subsidiaries: SUBSIDIARIES,
       resolution: { mode: "multi", entityCodePrefix: PREFIX },
@@ -88,18 +88,30 @@ describe("v0.9 NS Books: isEliminationEntity column", () => {
     });
     expect(entities.length).toBe(3);
 
+    // Column is the source of truth.
     const elimSub = entities.find((e) => e.code === `${PREFIX}_NS99`)!;
     expect(elimSub.isEliminationEntity).toBe(true);
-    // Dual-write: JSON flag also true
-    expect(
-      (elimSub.extensions as Record<string, unknown>).nsIsElimination
-    ).toBe(true);
-
     const nonElim = entities.find((e) => e.code === `${PREFIX}_NS2`)!;
     expect(nonElim.isEliminationEntity).toBe(false);
+
+    // The dual-write JSON flag was dropped in this PR. New writes do
+    // NOT set extensions.nsIsElimination — the column is canonical.
+    // (Pre-existing rows from before the migration may still have the
+    // JSON flag; this assertion only verifies the WRITE side dropped it
+    // on rows written by this run.)
     expect(
-      (nonElim.extensions as Record<string, unknown>).nsIsElimination
+      "nsIsElimination" in (elimSub.extensions as Record<string, unknown>)
     ).toBe(false);
+    expect(
+      "nsIsElimination" in (nonElim.extensions as Record<string, unknown>)
+    ).toBe(false);
+
+    // The reverse-export path is unaffected: the original NS view of
+    // "iselimination" is still preserved in extensions.nsSourcePayload.
+    const sourcePayload = (elimSub.extensions as Record<string, unknown>)
+      .nsSourcePayload as Record<string, unknown> | undefined;
+    expect(sourcePayload).toBeDefined();
+    expect(sourcePayload!.iselimination).toBe(true);
   });
 
   it("re-running setupSubsidiaries preserves the column on update path", async () => {
@@ -119,8 +131,11 @@ describe("v0.9 NS Books: isEliminationEntity column", () => {
   });
 
   it("migration backfill: every existing entity has a column value (no NULLs)", async () => {
-    // The migration sets the column on every row. Even rows that have
-    // no extensions.nsIsElimination flag get the default false.
+    // The 0010 migration backfilled isEliminationEntity from
+    // extensions.nsIsElimination (when present), then enforced NOT NULL
+    // with a default of false. This invariant must hold even after we
+    // dropped the write side of the JSON flag — the column never goes
+    // null on new writes either (the default catches that).
     const nullCount = await prisma.$queryRawUnsafe<{ count: bigint }[]>(
       `SELECT COUNT(*)::bigint AS count FROM "legal_entity" WHERE "isEliminationEntity" IS NULL`
     );

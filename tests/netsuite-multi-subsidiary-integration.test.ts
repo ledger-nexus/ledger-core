@@ -130,10 +130,12 @@ describe("setupSubsidiaries (integration vs real Postgres)", () => {
       where: { tenantId, code: "VANTEST_NS2" },
       select: { extensions: true },
     });
+    // Note: `nsIsElimination` JSON flag was retired in the v0.9 cleanup
+    // arc (the isEliminationEntity column is canonical). Only the
+    // remaining import-identity flags are written to extensions.
     expect(usSub.extensions).toMatchObject({
       nsIsImported: true,
       nsInternalid: "2",
-      nsIsElimination: false,
     });
   });
 
