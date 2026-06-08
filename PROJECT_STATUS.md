@@ -6,11 +6,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-08
 
-**Current state:** **v0.7 NS multi-subsidiary arc landed today.** A real OneWorld NS export (3-sub group: USD parent + USD USA + GBP UK) now imports end-to-end through the UI, routes per-tx through each subsidiary, and renders a consolidated trial balance with intercompany elimination logic active. Library + CLI (`pnpm demo:ns-multi-sub`) + UI (`/import/netsuite`) + hardened Server Action + multi-currency disclosure banner all shipped. The architecture proof is complete: NS multi-sub mapping + multi-entity consolidation work together.
-
-**Repo:** https://github.com/ledger-nexus/ledger-core
+**Current state:** **v0.8 ASC 830 FX translation arc closed today.** The cross-currency multi-sub demo (Vandelay UK GBP + USA USD + parent USD) is now CPA-credible end-to-end. NS transactions post at their original posting-time rate, AR/AP settlement at a different rate produces a realized FX gain/loss line, the consolidated trial balance translates each account at its ASC 830 category (CURRENT_RATE / WEIGHTED_AVG / HISTORICAL / EXCLUDED), and a CTA plug rebalances the consolidated TB. The page surfaces translation status + per-entity rates + CTA. The v0.7 disclosure banner ("treat cross-currency consolidated balances as indicative only") is replaced by accurate translated numbers and visible methodology.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -161,14 +159,54 @@ Running log of where this project is, what's next, and key decisions. Updated at
   - 13/13 validation tests pass (6 baseline + 7 adversarial — spaces, path traversal, SQL chars, length overflow, Cyrillic homoglyph, null byte, shell metacharacters)
 - [x] **Multi-currency disclosure banner** (PR #144) — `ConsolidationReport` now exposes `hasMultiCurrency` + `distinctCurrencies`. Page surfaces a warning banner when entities use mismatched functional currencies, explaining the consolidated totals are NOT FX-translated. Closes the CPA-credibility gap before the full ASC 830 arc lands.
 
+### v0.8 — ASC 830 FX translation arc (shipped 2026-06-08)
+> The arc that replaces the v0.7 disclosure banner with accurate translation. Five core architectural phases + UI polish; 7 PRs in the FX series alone.
+
+- [x] **Phase 1 + 1.5: helper + Northwind seed + importer wiring** (PR #146)
+  - `src/lib/accounting/fx.ts` — `getFxRateOrDefault` helper. Same-currency short-circuits to 1 without DB hit. Cross-currency does most-recent-on-or-before lookup. Throws `FxRateNotSeededError` on miss (operator-actionable message).
+  - Northwind seed gains 4 baseline FxRate rows (GBP↔USD @ 1.27/0.7874, EUR↔USD @ 1.05/0.9524).
+  - NS importer plumbs `fxRate` + `transactionAmount` + `transactionCurrencyId` through to `postJournalEntry` for all 5 callsites (JE, Invoice, VendorBill, CustomerPayment, VendorPayment). Same-currency case short-circuits.
+  - 5 unit tests pass.
+- [x] **Phase 2: NS exchangerate precedence** (PR #147)
+  - NS transaction types extended with optional `exchangerate?: number | string`.
+  - `convertLinesForFx` resolution order: same-currency → 1; NS `exchangerate` present → use it; else `getFxRateOrDefault`.
+  - `fxRateSource` enum surfaced for tests + audit telemetry.
+  - 2 tests prove the precedence (1.50 NS override beats 1.20 seed; fallback works).
+- [x] **Phase 3: realized FX gain/loss on AR/AP** (PR #148)
+  - Chart-of-accounts gains 8300 "Realized FX Gain/Loss" (subtype FX_GAIN_LOSS, normal balance DEBIT).
+  - `ensureFxGainLossAccount(entityIdForCreate)` idempotently creates 8300 in the right scope (global chart in multi-sub mode, named entity in single mode) at orchestrator start.
+  - `injectFxGainLossAdjustment({lines, paymentFxRate, side, applications})`: for each application, looks up original-invoice fxRate from `openedByEntry`, computes delta × applied amount, accumulates. Adjusts the AR/AP control line + injects a balancing FX_GAIN_LOSS line.
+  - CustomerPayment + VendorPayment paths call the helper. Same-currency case is a no-op.
+  - 2 tests: gain (CC payment at higher rate than invoice) + loss (VP payment at higher rate than bill).
+- [x] **Phase 4a: translationCategory schema** (PR #149)
+  - Prisma migration 0008 adds `TranslationCategory` enum (CURRENT_RATE / HISTORICAL / WEIGHTED_AVG / EXCLUDED) + `Account.translationCategory` nullable column.
+  - Backfill: ASSET/LIABILITY → CURRENT_RATE; EQUITY → HISTORICAL; REVENUE/EXPENSE → WEIGHTED_AVG; FX_GAIN_LOSS subtype override → EXCLUDED.
+  - `defaultTranslationCategory({type, subtype})` pure helper used by seed paths so new accounts get sensible defaults.
+  - 9 tests: pure-logic cases + dev DB backfill invariants.
+- [x] **Phase 4b: getTranslationRate per ASC 830 category** (PR #150)
+  - `getTranslationRate({category, ctx})` → `{rate, source}`. Same-currency → 1 regardless of category; EXCLUDED → 1; HISTORICAL → null (caller walks lines); CURRENT_RATE → rate at periodEnd; WEIGHTED_AVG → mean of (start, end) rates.
+  - `TranslationContext` type: `{fromCurrencyId, toCurrencyId, periodStart, periodEnd}`.
+  - 8 tests covering each branch + sparse-rate behavior + error bubbling.
+- [x] **Phase 4c: consolidation translation + CTA** (PR #151)
+  - `getConsolidatedTrialBalance` gains optional `periodStart`. When set + entities have mixed currencies → translation runs. When omitted → v1.0 naïve-sum (backward compat).
+  - `ConsolidationReport` gains `translationActive: boolean`, `translationRateByEntity: Record<code, string | null>`, `cumulativeTranslationAdjustment: Decimal`.
+  - Per-entity rate cache; HISTORICAL passes through untranslated (CTA catches imbalance).
+  - **CTA** = post-elim debit − credit total. Positive = FX loss (equity decrease), negative = FX gain (equity increase). The plug is added on the appropriate side so the consolidated TB balances.
+  - 4 tests including the CPA-grade scenario (Cash 1200 × 1.30 CR = 1560; Equity 1200 untranslated HR; CTA = 360 USD credit; TB balances after CTA).
+- [x] **Phase 5: page wires periodStart + replaces banner** (PR #152)
+  - `/reports/consolidation` page now accepts `?periodStart=` (defaults to `asOf - 3 months, day 1` so legacy bookmarks still get translation).
+  - Form gains a "Period start" date input alongside "As of."
+  - Disclosure banner replaced with two modes: positive-tone "FX translation active" (showing per-entity CR rates inline + CTA amount + sign interpretation) when active; warning banner only when operator explicitly skipped periodStart.
+  - End-to-end live verification on VANDEMO_NS1: translationActive=true, NS3 GBP @ 1.30, consolidated DR 299,060 = CR 299,060 balanced.
+
 ### v1.2+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
 - [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
-- [ ] **ASC 830 FX translation arc** (4-6 PR build) — read NS `sub.exchangerate`, pass `fxRate` to `postJournalEntry` (field exists), translation method picker per account type (current rate / temporal / historical), CTA account auto-generation, post-translation consolidation
-- [ ] FX gain/loss accounts wired into journal lines properly
-- [ ] **NS Accounting Books** — exercise multi-book parallel posting through NS data (the next NS architectural axis after multi-sub)
+- [ ] **HISTORICAL category line-walking** — currently passes through untranslated (CTA catches the imbalance). A more sophisticated implementation walks `line.entry.fxRate` per equity line. Mostly cosmetic for the v0.8 demo since NS-imported data rarely has equity transactions.
+- [ ] **NS Accounting Books** — exercise multi-book parallel posting through NS data (the next NS architectural axis after multi-sub + FX)
 - [ ] `isEliminationEntity` column migration (currently flagged via `extensions.nsIsElimination`)
+- [ ] **NS SuiteAnalytics → report endpoints** — proves the lineage layer roundtrip works for derived reports, not just transactional data
 
 ---
 
