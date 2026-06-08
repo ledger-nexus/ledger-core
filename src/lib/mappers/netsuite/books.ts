@@ -202,7 +202,7 @@ export async function setupBooks(
 
   const existingBooks = await prisma.book.findMany({
     where: { code: { in: Array.from(distinctTargetCodes) } },
-    select: { code: true },
+    select: { code: true, extensions: true },
   });
   const existingCodes = new Set(existingBooks.map((b) => b.code));
   for (const target of distinctTargetCodes) {
@@ -216,6 +216,40 @@ export async function setupBooks(
           `NS books that map to it.`
       );
     }
+  }
+
+  // v0.9 NS Books Phase 4.5 — stash each NS AccountingBook's frozen
+  // sourcePayload on the target ledger-core Book row's extensions
+  // under `nsAccountingBookSourcePayloads[internalid]`. Mirrors the
+  // lineage-replay pattern subsidiaries.ts established: the reverse
+  // exporter reads byref instead of synthesizing { internalid, name }
+  // from the bookMapping (which drops operator-supplied custom fields
+  // like isadjustment, custom segments, etc.).
+  //
+  // Many-to-one fold case (multiple NS books → one ledger-core book)
+  // is preserved: the dictionary holds entries for EACH NS internalid,
+  // so reverse export emits N AccountingBook records for one Book row.
+  const extensionsByCode = new Map<string, Record<string, unknown>>();
+  for (const b of existingBooks) {
+    extensionsByCode.set(b.code, (b.extensions ?? {}) as Record<string, unknown>);
+  }
+  for (const ns of input.books) {
+    const target = input.resolution.bookMapping[ns.internalid]!;
+    const ext = extensionsByCode.get(target) ?? {};
+    const stash =
+      (ext.nsAccountingBookSourcePayloads as Record<string, unknown> | undefined) ??
+      {};
+    stash[ns.internalid] = ns;
+    ext.nsAccountingBookSourcePayloads = stash;
+    extensionsByCode.set(target, ext);
+  }
+  for (const [code, ext] of extensionsByCode) {
+    await prisma.book.update({
+      where: { code },
+      // Cast through `unknown` to satisfy Prisma's InputJsonValue.
+      // The shape is a plain JSON-serializable object.
+      data: { extensions: ext as unknown as object },
+    });
   }
 
   return {
