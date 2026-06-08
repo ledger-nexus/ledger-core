@@ -23,6 +23,11 @@ import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../../accounting/post-journal";
 import { getFxRateOrDefault } from "../../accounting/fx";
 import { getDefaultTenantId } from "../../seed/default-tenant";
+import {
+  resolveBookResolution,
+  setupBooks,
+  type BookResolution,
+} from "./books";
 import { openArItem, applyArPayment } from "../../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../../accounting/sub-ledgers/ap";
 import {
@@ -67,6 +72,22 @@ export interface ImportFromNsInput {
    */
   entityResolution?: EntityResolution;
   bookCode?: string;
+  /**
+   * v0.8 NS Accounting Books Phase 3 — multi-book resolution.
+   *
+   * Single mode (default, backward compat): every transaction posts
+   * to ONE ledger-core book — either `bookCode` or "US_GAAP".
+   *
+   * Multi mode: each NS AccountingBook maps to a ledger-core book.
+   * For each transaction declared in the NS export, the JournalEntry
+   * path posts ONE JE per mapped book. The other 4 NS paths
+   * (Invoice/Bill/CustomerPayment/VendorPayment) still post to a
+   * single "primary" book in Phase 3 — sub-ledger multi-book lands
+   * in Phase 3.5+.
+   *
+   * `bookResolution` takes precedence over `bookCode` when both are set.
+   */
+  bookResolution?: BookResolution;
   export: NsExport;
   mappingVersion?: string;
   source?: "MANUAL" | "SEED" | "SYSTEM" | "AI_APPROVED" | "IMPORT";
@@ -126,6 +147,42 @@ export async function importFromNs(
   const bookCode = input.bookCode ?? "US_GAAP";
   const mappingVersion = input.mappingVersion ?? "ns-v1";
   const source = input.source ?? "IMPORT";
+
+  // v0.8 NS Books Phase 3 — resolve the book strategy. Single mode
+  // (backward compat) maps everything to one bookCode. Multi mode
+  // declares which ledger-core book each NS AccountingBook maps to.
+  //
+  // In multi mode we run setupBooks first to validate the mapping
+  // and verify every ledger-core target book exists. The result map
+  // (NS internalid → ledger-core book code) drives per-tx routing on
+  // the JournalEntry path. Sub-ledger paths use `primaryBookCode` —
+  // either the named bookCode in single mode, or the first mapped
+  // book in multi mode (sub-ledger multi-book lands in Phase 3.5+).
+  const bookResolution = resolveBookResolution({
+    bookCode: input.bookCode,
+    bookResolution: input.bookResolution,
+  });
+  const booksSetup = await setupBooks(prisma, {
+    books: input.export.AccountingBook ?? [],
+    resolution: bookResolution,
+  });
+  // Surface any setupBooks warnings to the caller's result.
+  // (`result.warnings.push(...)` happens after `result` is initialized
+  // below; defer to that point.)
+  const primaryBookCode =
+    bookResolution.mode === "single"
+      ? bookResolution.bookCode
+      : // Multi mode: pick the first mapped ledger-core book as the
+        // "primary" book for sub-ledger paths. Operators get a
+        // deterministic primary; multi-book sub-ledger arrives in Phase 3.5.
+        (Object.values(bookResolution.bookMapping)[0] ?? bookCode);
+  // The distinct list of book codes the JournalEntry path posts to.
+  // In single mode this is `[primaryBookCode]`. In multi mode this is
+  // every distinct target in the mapping (de-duplicated).
+  const journalEntryBookCodes: string[] =
+    bookResolution.mode === "single"
+      ? [primaryBookCode]
+      : Array.from(new Set(Object.values(bookResolution.bookMapping)));
 
   // v0.8 FX Phase 1.5 — look up the book's reporting currency ONCE so
   // every per-tx FX rate lookup knows the target currency. Without
@@ -832,41 +889,46 @@ export async function importFromNs(
       nsExchangeRate: nsJe.exchangerate,
     });
 
-    await postJournalEntry(prisma, {
-      entityCode: resolveEntityCodeForTransaction(nsJe.subsidiary, "JournalEntry", nsJe.internalid),
-      bookCode,
-      currencyCode: m.currencyCode,
-      fxRate,
-      documentDate: m.documentDate,
-      memo: m.memo,
-      source,
-      sourceSystem: "NETSUITE",
-      sourceRecordType: "JournalEntry",
-      sourceRecordId: nsJe.internalid,
-      sourcePayload: m.sourcePayload as any,
-      mappingVersion,
-      lines: fxLines.map((l, idx) => ({
-        accountCode: l.accountCode,
-        debit: l.debit,
-        credit: l.credit,
-        transactionAmount: l.transactionAmount,
-        reportingAmount: l.reportingAmount,
-        description: l.description,
-        partyCode: l.partyCode,
-        itemCode: l.itemCode,
-        extensions: resolvedLines[idx].dimensionSetId
-          ? ({ dimensionSetId: resolvedLines[idx].dimensionSetId } as any)
-          : undefined,
-      })),
-    });
-    result.journalEntriesImported += 1;
+    // v0.8 NS Books Phase 3 — post the JE to every book in the
+    // resolution. Single mode: one iteration with the named book.
+    // Multi mode: one iteration per distinct mapped ledger-core book.
+    // Each iteration uses the same lineage triple — the Phase 2
+    // (tenantId, bookId) scope on the lineage unique index lets the
+    // per-book posts coexist.
+    for (const perBookCode of journalEntryBookCodes) {
+      await postJournalEntry(prisma, {
+        entityCode: resolveEntityCodeForTransaction(nsJe.subsidiary, "JournalEntry", nsJe.internalid),
+        bookCode: perBookCode,
+        currencyCode: m.currencyCode,
+        fxRate,
+        documentDate: m.documentDate,
+        memo: m.memo,
+        source,
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "JournalEntry",
+        sourceRecordId: nsJe.internalid,
+        sourcePayload: m.sourcePayload as any,
+        mappingVersion,
+        lines: fxLines.map((l, idx) => ({
+          accountCode: l.accountCode,
+          debit: l.debit,
+          credit: l.credit,
+          transactionAmount: l.transactionAmount,
+          reportingAmount: l.reportingAmount,
+          description: l.description,
+          partyCode: l.partyCode,
+          itemCode: l.itemCode,
+          extensions: resolvedLines[idx].dimensionSetId
+            ? ({ dimensionSetId: resolvedLines[idx].dimensionSetId } as any)
+            : undefined,
+        })),
+      });
+      result.journalEntriesImported += 1;
+    }
 
-    // Attach dimensionSetId to the line rows post-creation. The post-
-    // journal API doesn't accept dimensionSetId in v0.6; we patch it on
-    // each line by sourceRecordId + lineNo, immediately after posting.
-    // (This is the one place where the NS mapper has to touch line rows
-    // directly; a v0.7 enhancement is to add dimensionSetId support to
-    // postJournalEntry input shape so this becomes unnecessary.)
+    // Attach dimensionSetId to the line rows post-creation. Same as
+    // before — this hits ALL JE rows for this sourceRecordId regardless
+    // of book, so it's a single call that covers every per-book post.
     await attachDimensionSets(prisma, nsJe.internalid, resolvedLines);
   }
 
@@ -903,7 +965,7 @@ export async function importFromNs(
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
-      bookCode,
+      bookCode: primaryBookCode,
       currencyCode: m.currencyCode,
       fxRate: invFxRate,
       documentDate: m.documentDate,
@@ -931,7 +993,7 @@ export async function importFromNs(
 
     const openItem = await openArItem(prisma, {
       entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
-      bookCode,
+      bookCode: primaryBookCode,
       partyCode: arOpening.customerCode,
       openedByEntryId: je.id,
       referenceNumber: arOpening.referenceNumber,
@@ -982,7 +1044,7 @@ export async function importFromNs(
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
-      bookCode,
+      bookCode: primaryBookCode,
       currencyCode: m.currencyCode,
       fxRate: billFxRate,
       documentDate: m.documentDate,
@@ -1008,7 +1070,7 @@ export async function importFromNs(
 
     const openItem = await openApItem(prisma, {
       entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
-      bookCode,
+      bookCode: primaryBookCode,
       partyCode: apOpening.vendorCode,
       openedByEntryId: je.id,
       referenceNumber: apOpening.referenceNumber,
@@ -1073,7 +1135,7 @@ export async function importFromNs(
 
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "CustomerPayment", pmt.internalid),
-      bookCode,
+      bookCode: primaryBookCode,
       currencyCode: m.currencyCode,
       fxRate: pmtFxRate,
       documentDate: m.documentDate,
@@ -1156,7 +1218,7 @@ export async function importFromNs(
 
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "VendorPayment", pmt.internalid),
-      bookCode,
+      bookCode: primaryBookCode,
       currencyCode: m.currencyCode,
       fxRate: vpFxRate,
       documentDate: m.documentDate,
