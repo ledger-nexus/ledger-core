@@ -159,8 +159,20 @@ export async function importFromNs(
     transactionCurrencyId: string;
     documentDate: Date;
     lines: L[];
+    /**
+     * v0.8 FX Phase 2 — NS-supplied transaction-time exchangerate.
+     * When present (a number or a string like "1.27000"), this rate is
+     * used directly. The seeded FxRate is the fallback for older NS
+     * exports that omit the field. The fallback path is also what the
+     * test fixtures (which don't carry exchangerate) exercise — this
+     * keeps the FX wiring usable end-to-end without operators having to
+     * load synthetic rates into NS first.
+     */
+    nsExchangeRate?: number | string;
   }): Promise<{
     fxRate: Decimal;
+    /** Where the rate came from — useful for tests + audit-log telemetry. */
+    fxRateSource: "ns_exchangerate" | "seeded_fx_rate" | "same_currency";
     lines: Array<L & {
       debit: Decimal;
       credit: Decimal;
@@ -168,17 +180,44 @@ export async function importFromNs(
       reportingAmount: Decimal;
     }>;
   }> {
-    // CLOSE on-or-before the document date — the daily-close proxy for
-    // the transaction-date spot rate (ASC 830 initial measurement).
-    // resolveFxRate throws FxRateNotFoundError when unseeded (fail loud,
-    // never silently 1) and inverts the opposite-direction row if needed.
-    const { rate: fxRate } = await resolveFxRate(prisma, {
-      fromCurrency: input.transactionCurrencyId,
-      toCurrency: bookReportingCurrencyId,
-      asOf: input.documentDate,
-    });
+    let fxRate: Decimal;
+    let fxRateSource: "ns_exchangerate" | "seeded_fx_rate" | "same_currency";
+    if (input.transactionCurrencyId === bookReportingCurrencyId) {
+      fxRate = new Decimal(1);
+      fxRateSource = "same_currency";
+    } else if (
+      input.nsExchangeRate !== undefined &&
+      input.nsExchangeRate !== null &&
+      String(input.nsExchangeRate).trim() !== ""
+    ) {
+      // Trust NS's posting-time rate. ASC 830 requires recording at
+      // the rate in effect at the transaction date; that's what NS
+      // recorded. The seeded FxRate is a fallback, not a check.
+      fxRate = new Decimal(String(input.nsExchangeRate));
+      if (fxRate.lte(0)) {
+        // A zero/negative NS rate would zero out (or flip) every line
+        // amount — malformed export data fails loud, never posts.
+        throw new Error(
+          `NS exchangerate "${String(input.nsExchangeRate)}" is not a positive rate`
+        );
+      }
+      fxRateSource = "ns_exchangerate";
+    } else {
+      // CLOSE on-or-before the document date — the daily-close proxy
+      // for the transaction-date spot rate. resolveFxRate throws
+      // FxRateNotFoundError when unseeded (fail loud, never silently 1)
+      // and inverts the opposite-direction row if needed.
+      const resolved = await resolveFxRate(prisma, {
+        fromCurrency: input.transactionCurrencyId,
+        toCurrency: bookReportingCurrencyId,
+        asOf: input.documentDate,
+      });
+      fxRate = resolved.rate;
+      fxRateSource = "seeded_fx_rate";
+    }
     return {
       fxRate,
+      fxRateSource,
       lines: input.lines.map((l) => {
         // Coerce mapper-output (string | Decimal | undefined) to Decimal.
         // Mapper layer produces strings; we need Decimal for arithmetic.
@@ -628,6 +667,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: nsJe.exchangerate,
     });
 
     await postJournalEntry(prisma, {
@@ -697,6 +737,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: inv.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
@@ -775,6 +816,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: bill.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
@@ -835,6 +877,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: m.lines,
+      nsExchangeRate: pmt.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "CustomerPayment", pmt.internalid),
@@ -888,6 +931,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: m.lines,
+      nsExchangeRate: pmt.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "VendorPayment", pmt.internalid),
