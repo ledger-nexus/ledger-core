@@ -204,6 +204,78 @@ describe("v0.9 NS SuiteAnalytics Phase 1: query-shape validation", () => {
   });
 });
 
+describe("v0.9 NS SuiteAnalytics Phase 2: NS-side scope resolution", () => {
+  // Phase 1 accepted entityCode + bookCode. Phase 2 also accepts
+  // subsidiary + accountingBook (NS internalids) and resolves via
+  // lineage tables. Mixing the two is an explicit operator error.
+
+  it("returns 400 when neither scope param set is provided", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        { asOf: "2026-04-30" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/Missing scope|either/i);
+  });
+
+  it("returns 400 when BOTH scope param sets are provided", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        {
+          entityCode: "DUMMY",
+          bookCode: "US_GAAP",
+          subsidiary: "1",
+          accountingBook: "1",
+          asOf: "2026-04-30",
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/not both|either/i);
+  });
+
+  it("returns 400 for an invalid subsidiary internalid shape", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        {
+          subsidiary: "1'; DROP TABLE",
+          accountingBook: "1",
+          asOf: "2026-04-30",
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 with structured error body when subsidiary internalid doesn't resolve", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        {
+          subsidiary: "999",
+          accountingBook: "1",
+          asOf: "2026-04-30",
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("Subsidiary not found.");
+    expect(body.nsInternalid).toBe("999");
+    expect(body.hint).toBeTruthy();
+  });
+});
+
 describe("v0.9 NS SuiteAnalytics Phase 1: audit log", () => {
   it("a failed auth attempt writes an ACCESS_DENIED audit row", async () => {
     // Snapshot current count of ACCESS_DENIED for the NS_ANALYTICS_AUTH
