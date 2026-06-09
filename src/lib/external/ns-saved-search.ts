@@ -27,7 +27,12 @@ import type { PrismaClient } from "@prisma/client";
 
 // ─── Public types ─────────────────────────────────────────────────────
 
-export type SearchType = "Account" | "Transaction";
+export type SearchType =
+  | "Account"
+  | "Transaction"
+  | "Customer"
+  | "Vendor"
+  | "Item";
 
 export type FilterOperator =
   | "EQUALS"
@@ -93,6 +98,26 @@ const FIELDS_BY_SEARCH_TYPE: Record<SearchType, FieldDef[]> = {
     { name: "memo", type: "string" },
     { name: "amount", type: "number" },
   ],
+  // Customer + Vendor map to Party with role discriminator. NS uses
+  // entityid for the operator-facing code and companyname for the
+  // display. Same shape per record type — only the role filter
+  // differs at adapter time.
+  Customer: [
+    { name: "internalid", type: "string" },
+    { name: "entityid", type: "string" },
+    { name: "companyname", type: "string" },
+  ],
+  Vendor: [
+    { name: "internalid", type: "string" },
+    { name: "entityid", type: "string" },
+    { name: "companyname", type: "string" },
+  ],
+  Item: [
+    { name: "internalid", type: "string" },
+    { name: "itemid", type: "string" },      // NS's itemid = ledger-core code
+    { name: "displayname", type: "string" }, // = ledger-core name
+    { name: "itemtype", type: "string" },    // NS uses InvtPart/Service/etc.
+  ],
 };
 
 const OPS_BY_TYPE: Record<FieldDef["type"], FilterOperator[]> = {
@@ -119,13 +144,25 @@ export function validateRequest(input: unknown): SavedSearchRequest {
   }
   const r = input as Partial<SavedSearchRequest>;
 
-  // searchType (whitelisted)
-  if (r.searchType !== "Account" && r.searchType !== "Transaction") {
+  // searchType (whitelisted). Explicit narrowing predicate so r.searchType
+  // is typed as SearchType in subsequent uses.
+  const VALID_SEARCH_TYPES = [
+    "Account",
+    "Transaction",
+    "Customer",
+    "Vendor",
+    "Item",
+  ] as const;
+  const isValidSearchType = (s: unknown): s is SearchType =>
+    typeof s === "string" &&
+    (VALID_SEARCH_TYPES as readonly string[]).includes(s);
+  if (!isValidSearchType(r.searchType)) {
     throw new SavedSearchValidationError(
-      'Invalid searchType. Required: "Account" or "Transaction".'
+      `Invalid searchType. Required: one of ${VALID_SEARCH_TYPES.join(", ")}.`
     );
   }
-  const knownFields = FIELDS_BY_SEARCH_TYPE[r.searchType];
+  const searchType: SearchType = r.searchType;
+  const knownFields = FIELDS_BY_SEARCH_TYPE[searchType];
   const fieldsByName = new Map(knownFields.map((f) => [f.name, f]));
 
   // filters
@@ -219,7 +256,7 @@ export function validateRequest(input: unknown): SavedSearchRequest {
   }
 
   return {
-    searchType: r.searchType,
+    searchType,
     filters,
     columns,
     page,
@@ -249,6 +286,73 @@ function buildAccountWhere(
         f.field === "isinactive" ? f.values[0] !== "T" : f.values[0];
     } else if (f.operator === "ANYOF") {
       where[prismaField] = { in: f.values };
+    }
+  }
+  return where;
+}
+
+/**
+ * Customer + Vendor map to Party with a role discriminator. Same
+ * adapter, parameterized by the NS-side `searchType` (which is also
+ * the prefix on the NS source-record-type for lineage matching).
+ */
+function buildPartyWhere(
+  filters: SavedSearchFilter[],
+  nsRoleKind: "CUSTOMER" | "VENDOR"
+): Record<string, unknown> {
+  // Party uses sourceSystem="NETSUITE" + sourceRecordType="Customer"|"Vendor"
+  // — the NS importer sets that at v0.6.
+  const where: Record<string, unknown> = {
+    sourceSystem: "NETSUITE",
+    sourceRecordType: nsRoleKind === "CUSTOMER" ? "Customer" : "Vendor",
+    // The party-role table backs the role discriminator at ledger-core
+    // model time. The NS importer registers a PartyRole row for each
+    // Customer/Vendor; we filter by it for defense in depth (catches
+    // any party that has lineage but lost the role row).
+    roles: {
+      some: { role: nsRoleKind },
+    },
+  };
+  for (const f of filters) {
+    if (f.field === "internalid") {
+      if (f.operator === "EQUALS") where.sourceRecordId = f.values[0];
+      else if (f.operator === "ANYOF") where.sourceRecordId = { in: f.values };
+    } else if (f.field === "entityid") {
+      if (f.operator === "EQUALS") where.code = f.values[0];
+      else if (f.operator === "ANYOF") where.code = { in: f.values };
+    } else if (f.field === "companyname") {
+      if (f.operator === "EQUALS") where.displayName = f.values[0];
+      else if (f.operator === "ANYOF") where.displayName = { in: f.values };
+    }
+  }
+  return where;
+}
+
+function buildItemWhere(
+  filters: SavedSearchFilter[]
+): Record<string, unknown> {
+  const where: Record<string, unknown> = {
+    sourceSystem: "NETSUITE",
+    sourceRecordType: "Item",
+  };
+  for (const f of filters) {
+    if (f.field === "internalid") {
+      if (f.operator === "EQUALS") where.sourceRecordId = f.values[0];
+      else if (f.operator === "ANYOF") where.sourceRecordId = { in: f.values };
+    } else if (f.field === "itemid") {
+      if (f.operator === "EQUALS") where.code = f.values[0];
+      else if (f.operator === "ANYOF") where.code = { in: f.values };
+    } else if (f.field === "displayname") {
+      if (f.operator === "EQUALS") where.name = f.values[0];
+      else if (f.operator === "ANYOF") where.name = { in: f.values };
+    } else if (f.field === "itemtype") {
+      // ledger-core's ItemType enum is INVENTORY / SERVICE / etc.
+      // NS uses InvtPart / Service / NonInvtPart / etc. The mapping
+      // is one-shot per import (v0.6) — the saved-search filter
+      // matches by ledger-core's enum value, not NS's. Operators
+      // wanting NS-side values run a follow-up enum-translation step.
+      if (f.operator === "EQUALS") where.itemType = f.values[0];
+      else if (f.operator === "ANYOF") where.itemType = { in: f.values };
     }
   }
   return where;
@@ -339,6 +443,89 @@ export async function runSavedSearch(
           acctname: a.name,
           accttype: a.type,
           isinactive: a.active ? "F" : "T",
+        };
+        if (includeAll) return full;
+        const projected: Record<string, unknown> = {};
+        for (const c of cols) projected[c] = full[c];
+        return projected;
+      }),
+      total,
+      page: request.page!,
+      pageSize: request.pageSize!,
+    };
+  }
+
+  if (request.searchType === "Customer" || request.searchType === "Vendor") {
+    const where = {
+      ...buildPartyWhere(
+        request.filters ?? [],
+        request.searchType === "Customer" ? "CUSTOMER" : "VENDOR"
+      ),
+      tenantId: input.tenantId,
+    };
+    const [total, parties] = await Promise.all([
+      prisma.party.count({ where }),
+      prisma.party.findMany({
+        where,
+        select: {
+          sourceRecordId: true,
+          code: true,
+          displayName: true,
+        },
+        orderBy: { code: "asc" },
+        skip,
+        take,
+      }),
+    ]);
+    const cols = (request.columns ?? []).map((c) => c.field);
+    const includeAll = cols.length === 0;
+    return {
+      rows: parties.map((p) => {
+        const full: Record<string, unknown> = {
+          internalid: p.sourceRecordId ?? "",
+          entityid: p.code,
+          companyname: p.displayName,
+        };
+        if (includeAll) return full;
+        const projected: Record<string, unknown> = {};
+        for (const c of cols) projected[c] = full[c];
+        return projected;
+      }),
+      total,
+      page: request.page!,
+      pageSize: request.pageSize!,
+    };
+  }
+
+  if (request.searchType === "Item") {
+    const where = {
+      ...buildItemWhere(request.filters ?? []),
+      tenantId: input.tenantId,
+    };
+    const [total, items] = await Promise.all([
+      prisma.item.count({ where }),
+      prisma.item.findMany({
+        where,
+        select: {
+          sourceRecordId: true,
+          code: true,
+          name: true,
+          itemType: true,
+        },
+        orderBy: { code: "asc" },
+        skip,
+        take,
+      }),
+    ]);
+    const cols = (request.columns ?? []).map((c) => c.field);
+    const includeAll = cols.length === 0;
+    return {
+      rows: items.map((i) => {
+        const full: Record<string, unknown> = {
+          internalid: i.sourceRecordId ?? "",
+          itemid: i.code,
+          displayname: i.name,
+          itemtype: i.itemType,
         };
         if (includeAll) return full;
         const projected: Record<string, unknown> = {};
