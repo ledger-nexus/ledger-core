@@ -50,6 +50,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import type { ReconStatus } from "@prisma/client";
+import { resolveSupportingBalance } from "@/lib/recon/supporting-balance";
 import PreparerForm from "./preparer-form";
 import ReviewerActions from "./reviewer-actions";
 import WaiveButton from "./waive-button";
@@ -162,6 +163,20 @@ export default async function ReconciliationDetailPage({
       : null;
   const tolerance = new Decimal(recon.tolerance.toString());
   const overTolerance = diff ? diff.abs().greaterThan(tolerance) : false;
+
+  // Sub-ledger auto-pull suggestion. Only computed for statuses where
+  // the preparer form will show (no point pulling for RECONCILED/WAIVED).
+  // The form decides whether to USE the suggestion as the default; we
+  // just expose it.
+  const suggestion = PREPARER_STATUSES.includes(recon.status)
+    ? await resolveSupportingBalance(prisma, {
+        tenantId: tenant.id,
+        entityId: recon.entityId,
+        bookId: recon.bookId,
+        accountId: recon.accountId,
+        asOf: recon.period.endsOn,
+      })
+    : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -289,6 +304,14 @@ export default async function ReconciliationDetailPage({
                 supporting ? supporting.toString() : ""
               }
               defaultNotes={recon.notes ?? ""}
+              suggestion={
+                suggestion && suggestion.amount
+                  ? {
+                      amount: suggestion.amount.toFixed(2),
+                      label: suggestion.label,
+                    }
+                  : null
+              }
             />
           </CardContent>
         </Card>

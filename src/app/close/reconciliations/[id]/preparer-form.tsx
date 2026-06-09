@@ -24,6 +24,11 @@ interface Props {
   glBalance: string;
   defaultSupporting: string;
   defaultNotes: string;
+  // Sub-ledger auto-pull suggestion. Null when the account has no
+  // sub-ledger linkage (cash, prepaid, accrued, etc. — operator types
+  // the number manually). Non-null when the system can pre-compute the
+  // tie-out from AR/AP open items or the fixed-asset register.
+  suggestion: { amount: string; label: string } | null;
 }
 
 export default function PreparerForm({
@@ -31,11 +36,17 @@ export default function PreparerForm({
   glBalance,
   defaultSupporting,
   defaultNotes,
+  suggestion,
 }: Props) {
   const [supporting, setSupporting] = useState(defaultSupporting);
   const [notes, setNotes] = useState(defaultNotes);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Track whether the current value came from the suggestion (vs typed
+  // by hand) so we can annotate the audit trail in the notes. The
+  // auditor cares: a rubber-stamped sub-ledger number is different
+  // evidence than an operator-typed bank-statement number.
+  const [usedSuggestion, setUsedSuggestion] = useState(false);
 
   // Live preview: if the user types a number, show the diff client-side
   // so they can see whether they're about to hit EXCEPTION or not. This
@@ -59,12 +70,32 @@ export default function PreparerForm({
       setError("Supporting balance is required");
       return;
     }
+    // If the operator used the suggestion verbatim, annotate the notes
+    // so the audit trail captures provenance — "pulled from AR sub-
+    // ledger" is materially different evidence than "typed from bank
+    // statement". If they OVERRODE the suggestion (typed something
+    // else after clicking "Use this"), don't annotate; their notes
+    // should explain the override.
+    let notesToSend = notes.trim();
+    if (
+      usedSuggestion &&
+      suggestion &&
+      supporting.trim() === suggestion.amount
+    ) {
+      const prefix = `[Source: ${suggestion.label}] `;
+      // Avoid double-prefixing on a re-prep that already has the tag.
+      if (!notesToSend.startsWith(prefix)) {
+        notesToSend = notesToSend
+          ? `${prefix}${notesToSend}`
+          : prefix.trim();
+      }
+    }
     startTransition(async () => {
       const r = await markPrepared({
         reconId,
         glBalance,
         supportingBalance: supporting.trim(),
-        notes: notes.trim() ? notes.trim() : undefined,
+        notes: notesToSend ? notesToSend : undefined,
       });
       if (!r.ok) setError(r.error);
     });
@@ -92,10 +123,40 @@ export default function PreparerForm({
             type="text"
             inputMode="decimal"
             value={supporting}
-            onChange={(e) => setSupporting(e.target.value)}
+            onChange={(e) => {
+              setSupporting(e.target.value);
+              // Typing breaks the "this number came from the
+              // suggestion" provenance — clear the flag so the audit
+              // tag won't get appended on submit.
+              setUsedSuggestion(false);
+            }}
             placeholder="e.g. 12345.67"
             disabled={pending}
           />
+          {suggestion && (
+            <div className="mt-1 flex items-center gap-2 text-xs">
+              <span className="text-ink-500">
+                {suggestion.label}: ${suggestion.amount}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSupporting(suggestion.amount);
+                  setUsedSuggestion(true);
+                  setError(null);
+                }}
+                disabled={pending}
+                className="text-accent-600 hover:underline disabled:opacity-50"
+              >
+                Use this
+              </button>
+              {usedSuggestion && supporting === suggestion.amount && (
+                <span className="text-ink-400">
+                  · audit tag will be added to notes
+                </span>
+              )}
+            </div>
+          )}
           {preview && (
             <div className="mt-1 text-xs text-ink-500">{preview}</div>
           )}
