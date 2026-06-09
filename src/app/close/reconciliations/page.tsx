@@ -42,6 +42,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import type { ReconStatus } from "@prisma/client";
+import AutoOpenButton from "./auto-open-button";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Status → badge tone. Single source of truth so the list page, the
@@ -144,6 +145,20 @@ export default async function ReconciliationsListPage({
     const latestOpen = allPeriods.find((p) => !closedIds.has(p.id));
     if (latestOpen) selectedPeriod = latestOpen;
   }
+
+  // Is the selected period closed? Auto-open refuses on closed periods,
+  // so we hide the affordance there.
+  const selectedClose = await prisma.periodClose.findUnique({
+    where: {
+      entityId_bookId_periodId: {
+        entityId: entity.id,
+        bookId: book.id,
+        periodId: selectedPeriod.id,
+      },
+    },
+    select: { closedAt: true },
+  });
+  const periodIsClosed = !!selectedClose;
 
   // Status filter — optional.
   const statusFilter =
@@ -328,6 +343,22 @@ export default async function ReconciliationsListPage({
         </Link>
       </div>
 
+      {/* When the period has some recons already, hide auto-open in the
+          header strip but keep it available as a "refresh from chart of
+          accounts" command. Useful when a new BS account was added
+          mid-period. */}
+      {total > 0 && !periodIsClosed && (
+        <div className="flex justify-end">
+          <AutoOpenButton
+            entityId={entity.id}
+            bookId={book.id}
+            periodId={selectedPeriod.id}
+            periodCode={selectedPeriod.code}
+            label="Sync recons from chart of accounts"
+          />
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>
@@ -376,18 +407,30 @@ export default async function ReconciliationsListPage({
         </CardHeader>
         <CardContent className={sorted.length === 0 ? "" : "p-0"}>
           {sorted.length === 0 ? (
-            <EmptyState
-              title={
-                statusFilter
-                  ? `No ${statusFilter} reconciliations`
-                  : "No reconciliations for this period"
-              }
-              description={
-                statusFilter
-                  ? "Try clearing the status filter."
-                  : "Reconciliations are auto-instantiated for every BS account at period-open (Phase 1 PR 6 — not yet shipped). For now, open one from an account detail page."
-              }
-            />
+            <div className="flex flex-col items-center gap-3 p-8">
+              <div className="text-center">
+                <div className="text-sm font-medium text-ink-900">
+                  {statusFilter
+                    ? `No ${statusFilter} reconciliations`
+                    : "No reconciliations for this period"}
+                </div>
+                <div className="mt-1 text-xs text-ink-500">
+                  {statusFilter
+                    ? "Try clearing the status filter."
+                    : periodIsClosed
+                      ? "This period is closed. Reopen it to instantiate recons."
+                      : "Auto-instantiates one OPEN row per BS account using the requiresReview + tolerance cascade."}
+                </div>
+              </div>
+              {!statusFilter && !periodIsClosed && (
+                <AutoOpenButton
+                  entityId={entity.id}
+                  bookId={book.id}
+                  periodId={selectedPeriod.id}
+                  periodCode={selectedPeriod.code}
+                />
+              )}
+            </div>
           ) : (
             <Table>
               <THead>
