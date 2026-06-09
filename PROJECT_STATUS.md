@@ -6,9 +6,11 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-05-21
+**Last updated:** 2026-06-09
 
-**Current state:** **v1.0 just landed.** Multi-entity consolidation report with intercompany elimination, AP aging report, M-1/M-3 detail report grouping BTD deltas by IRS Form 1120 Schedule M-3 lines. The portfolio's headline architecture is now complete: substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. Consolidation demo seed (Acme Group + 2 subs) ships with the Northwind seed so the report has data to render out of the box.
+**Current state:** **Report Builder arc complete (7 PRs on `report-builder-design` → PR #201).** Universal report-builder engine: 4-layer architecture (math primitive → row engine → column engine → presentation), 4 GAAP system templates rendering through a dynamic `/reports/builder/[code]` matrix renderer. Statement of Stockholders' Equity (the missing 4th GAAP statement) ships built ENTIRELY via the builder as proof the engine handles brand-new report shapes, not just refactors. Legacy IS / BS callers have compatibility shims that prove decimal equivalence. CSV export route is template-agnostic — works for any RenderedMatrix shape. SOC 2 CC6.1 cross-tenant Account read gap (surfaced during the arc) closed in PR 7 with a two-tenant regression test. Tests: 67 / 67 across 7 builder test files plus 4 tenant-isolation tests.
+
+**Previous milestone:** v1.0 — multi-entity consolidation report with intercompany elimination, AP aging report, M-1/M-3 detail report grouping BTD deltas by IRS Form 1120 Schedule M-3 lines. The portfolio's headline architecture is now complete: substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. Consolidation demo seed (Acme Group + 2 subs) ships with the Northwind seed so the report has data to render out of the box.
 
 **Repo:** https://github.com/ledger-nexus/ledger-core
 
@@ -121,6 +123,23 @@ Running log of where this project is, what's next, and key decisions. Updated at
 **Deliberately deferred (post-v1.0):**
 - NS Accounting Books (multi-book parallel posting from one NS transaction) — niche refinement; deferred because it requires fixture + mapper expansion with low portfolio payoff.
 - ASC 842 cash flow presentation polish — the indirect method shows the right total but mis-classifies lease principal. Real-world refinement, not a portfolio differentiator.
+
+### Report Builder arc — 7 PRs on `report-builder-design` → PR #201 (shipped 2026-06-09)
+4-layer universal report-builder engine — operators can clone + customize per-tenant once persistence ships (post-arc PR 7+).
+
+- [x] **PR 1** (`b4dd602`) — schema (`ReportTemplate` table) + types (`RowDef`, `ColumnDef`, `PeriodOffset`, `AccountFilter`) + 4 GAAP system templates (IS, BS, CF, EQ). 9 template-registry tests.
+- [x] **PR 2** (`5ac31a9`) — math primitive (`getAccountBalances` returns `Map<code, AccountBalance>`) + row engine (`runRowEngine` evaluates ACCOUNTS / SUBTOTAL / FORMULA / PERIOD_DELTA / SPACER / HEADER). 20 row-engine tests including Northwind fixture integration.
+- [x] **PR 3** (`e994636`) — column engine (`runColumnEngine` resolves `PeriodOffset`, dedupes balance fetches per scope, wires PERIOD_DELTA opening+closing maps) + `renderTemplate` orchestrator (resolves cross-template `@IS.ni` refs). 12 column-engine + render-orchestrator tests.
+- [x] **PR 4** (`e06acf3`) — Statement of Stockholders' Equity ships ENTIRELY via the builder. Brand-new GAAP-4 statement, never coded by hand. Matrix layout (Common Stock | APIC | RE | Total) with column-level `accountFilter`. Cross-statement tie-out: BS equity total = EQ Total column total. 6 proof tests.
+- [x] **PR 5** (`efbff72`) — Compatibility shims (`getIncomeStatementViaBuilder` / `getBalanceSheetViaBuilder`) with same return shapes as legacy. 6 equivalence tests against a Q1 2026 fixture. ALSO fixed BS_TEMPLATE noncurrent_liabilities double-counting bug by adding `excludeSubtypes` to AccountFilter. Surfaced the legacy cross-tenant Account read gap.
+- [x] **PR 6** (`b0c56a2`) — Template-agnostic CSV serializer (`renderedMatrixToCsv`) + dynamic UI matrix renderer at `/reports/builder/[code]` + CSV route at `/api/reports/builder/[code]/csv`. SOC 2 baseline: scope from `getCurrentScope`, audit logged via `auditDataExport`, CSV formula-leader injection (CWE-1236) handled at the shared `toCsv` helper. Hostile-label defense-in-depth test. 10 CSV tests.
+- [x] **PR 7** (`8fb3c38`) — Closed legacy cross-tenant Account read gap (SOC 2 CC6.1, deficiency #13). All 7 legacy `Account.findMany` call sites (`getTrialBalance`, `getIncomeStatement`, `getBalanceSheet`, `getCashFlowStatement`, `getBookTaxDifference`, `getM3Detail`, `getConsolidatedTrialBalance`) now tenant-scope. `resolveEntityBook` returns `tenantId` from the resolved entity. 4 regression tests with two-tenant fixture asserting metadata never bleeds.
+
+**Total**: 67 builder tests + 4 tenant-isolation tests, all green. Full builder + invariants suite passes (24 / 24 invariants).
+
+**Deferred (post-arc PR 7+):**
+- Per-tenant `ReportTemplate` persistence + UI editor for cloning + customizing
+- PDF export via `@react-pdf/renderer` (matches existing month-end packet path)
 
 ---
 
