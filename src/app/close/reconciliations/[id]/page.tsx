@@ -53,6 +53,8 @@ import type { ReconStatus } from "@prisma/client";
 import PreparerForm from "./preparer-form";
 import ReviewerActions from "./reviewer-actions";
 import WaiveButton from "./waive-button";
+import UploadForm from "./upload-form";
+import AttachmentRow from "./attachment-row";
 
 const STATUS_TONES: Record<
   ReconStatus,
@@ -124,6 +126,7 @@ export default async function ReconciliationDetailPage({
           contentType: true,
           sizeBytes: true,
           uploadedAt: true,
+          uploadedById: true,
           uploader: { select: { displayName: true } },
         },
         orderBy: { uploadedAt: "desc" },
@@ -382,8 +385,9 @@ export default async function ReconciliationDetailPage({
         </CardContent>
       </Card>
 
-      {/* Attachments — read-only list for now. Upload form ships PR 5
-          (needs the encrypted-bytes Server Action wire-up). */}
+      {/* Attachments — upload form + per-row download + uploader/admin
+          delete. Bytes live in BYTEA, auth-gated download route writes
+          a DATA_EXPORT audit row on each pull. */}
       <Card>
         <CardHeader>
           <CardTitle>
@@ -391,36 +395,36 @@ export default async function ReconciliationDetailPage({
           </CardTitle>
           <span className="text-xs text-ink-500">
             Bank statement screenshots, sub-ledger reports, anything backing
-            the certified number. Stored encrypted at rest.
+            the certified number.
           </span>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
           {recon.attachments.length === 0 ? (
             <p className="text-sm text-ink-500">
-              No supporting documents attached yet. Upload UI ships next.
+              No supporting documents attached yet.
             </p>
           ) : (
             <ul className="flex flex-col gap-2 text-sm">
-              {recon.attachments.map((a) => (
-                <li
-                  key={a.id}
-                  className="flex items-center justify-between rounded-md border border-ink-100 px-3 py-2"
-                >
-                  <div>
-                    <div className="font-mono text-xs text-ink-900">
-                      {a.filename}
-                    </div>
-                    <div className="text-xs text-ink-500">
-                      {a.contentType} · {(a.sizeBytes / 1024).toFixed(1)} KB ·
-                      uploaded by{" "}
-                      {a.uploader?.displayName ?? "—"} on{" "}
-                      {formatDate(a.uploadedAt)}
-                    </div>
-                  </div>
-                </li>
-              ))}
+              {recon.attachments.map((a) => {
+                // Delete is allowed for the uploader or for any tenant
+                // admin. Server-side `deleteAttachment` re-checks; the
+                // page-level gate is presentational — non-deletable
+                // rows hide the button rather than tease.
+                const canDelete = admin || a.uploadedById === user.id;
+                return (
+                  <AttachmentRow
+                    key={a.id}
+                    reconId={recon.id}
+                    attachment={a}
+                    canDelete={canDelete}
+                  />
+                );
+              })}
             </ul>
           )}
+          <div className="border-t border-ink-100 pt-4">
+            <UploadForm reconId={recon.id} />
+          </div>
         </CardContent>
       </Card>
     </div>
