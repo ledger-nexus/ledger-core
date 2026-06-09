@@ -34,6 +34,10 @@ import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 
 import { SYSTEM_TEMPLATES } from "@/lib/accounting/reports/builder/templates";
+import {
+  ReportTemplateDefinitionSchema,
+  validateDefinitionIntegrity,
+} from "@/lib/accounting/reports/builder/schema";
 
 const CloneInputSchema = z.object({
   sourceCode: z.string().min(1).max(60),
@@ -52,6 +56,13 @@ const RenameInputSchema = z.object({
 
 const DeleteInputSchema = z.object({
   templateId: z.string().uuid(),
+});
+
+const UpdateDefinitionInputSchema = z.object({
+  templateId: z.string().uuid(),
+  // JSON-stringified ReportTemplateDefinition. Stored separately
+  // because <textarea> values pre-serialize cleanly.
+  definitionJson: z.string().min(2).max(64_000),
 });
 
 export type ActionResult =
@@ -196,6 +207,119 @@ export async function renameReportTemplate(
 /**
  * Delete a user-defined template. System templates cannot be deleted.
  */
+/**
+ * Replace the JSON definition of a user-defined template. System
+ * templates cannot be edited from this surface — clone first.
+ *
+ * Validation pipeline:
+ *   1. Server Action Zod (UUID + JSON-string envelope)
+ *   2. JSON.parse — reject malformed JSON
+ *   3. ReportTemplateDefinitionSchema — structural shape check
+ *   4. validateDefinitionIntegrity — cross-ref integrity
+ *   5. Persist + bump version
+ *   6. Audit-log the change with row count delta in metadata
+ *
+ * Returning structured errors at each step keeps the editor UI useful.
+ */
+export async function updateReportTemplateDefinition(
+  input: z.infer<typeof UpdateDefinitionInputSchema>
+): Promise<ActionResult> {
+  const parsed = UpdateDefinitionInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.errors[0]?.message ?? "Invalid input" };
+  }
+  const { templateId, definitionJson } = parsed.data;
+
+  const user = await requireCurrentUser();
+  const tenant = await requireCurrentTenant();
+
+  // Step 2: JSON.parse.
+  let raw: unknown;
+  try {
+    raw = JSON.parse(definitionJson);
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Invalid JSON: ${(e as Error).message}`,
+    };
+  }
+
+  // Step 3: structural Zod validation.
+  const defParse = ReportTemplateDefinitionSchema.safeParse(raw);
+  if (!defParse.success) {
+    return {
+      ok: false,
+      error: `Schema validation failed: ${defParse.error.errors
+        .slice(0, 3)
+        .map((e) => `${e.path.join(".")}: ${e.message}`)
+        .join("; ")}`,
+    };
+  }
+  const definition = defParse.data;
+
+  // Step 4: cross-reference integrity.
+  const integrity = validateDefinitionIntegrity(definition);
+  if (integrity.length > 0) {
+    return {
+      ok: false,
+      error: `Integrity errors: ${integrity
+        .slice(0, 3)
+        .map((i) => `[${i.rowOrColumnId}] ${i.message}`)
+        .join("; ")}`,
+    };
+  }
+
+  // Step 5: authorize + persist.
+  const existing = await prisma.reportTemplate.findFirst({
+    where: { id: templateId, tenantId: tenant.id },
+    select: {
+      id: true,
+      isSystem: true,
+      code: true,
+      name: true,
+      version: true,
+    },
+  });
+  if (!existing) {
+    return { ok: false, error: "Template not found" };
+  }
+  if (existing.isSystem) {
+    return {
+      ok: false,
+      error: "Cannot edit a system template. Clone it first.",
+    };
+  }
+
+  await prisma.reportTemplate.update({
+    where: { id: templateId },
+    data: {
+      definition: definition as unknown as Prisma.InputJsonValue,
+      version: existing.version + 1,
+    },
+  });
+
+  // Step 6: audit. Include row/column counts so reviewers can quickly
+  // see whether the change was a "small tweak" or "wholesale replace."
+  await auditPrivilegedAction({
+    actor: { id: user.id, email: user.email },
+    action: "report-template.update-definition",
+    resource: "ReportTemplate",
+    resourceId: templateId,
+    tenantId: tenant.id,
+    metadata: {
+      code: existing.code,
+      oldVersion: existing.version,
+      newVersion: existing.version + 1,
+      rowCount: definition.rows.length,
+      columnCount: definition.columns.length,
+    },
+  });
+
+  revalidatePath("/reports/builder");
+  revalidatePath(`/reports/builder/${existing.code}`);
+  return { ok: true, templateId };
+}
+
 export async function deleteReportTemplate(
   input: z.infer<typeof DeleteInputSchema>
 ): Promise<ActionResult> {

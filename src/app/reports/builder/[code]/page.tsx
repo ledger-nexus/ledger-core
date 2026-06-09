@@ -106,6 +106,14 @@ export default async function ReportBuilderPage({ params, searchParams }: PagePr
           >
             Download PDF
           </Link>
+          {!template.isSystem && (
+            <Link
+              href={`/reports/builder/${template.code}/edit`}
+              className="rounded border border-ink-300 bg-white px-3 py-1.5 text-sm font-medium text-ink-700 hover:bg-ink-50"
+            >
+              Edit
+            </Link>
+          )}
         </div>
       </div>
 
