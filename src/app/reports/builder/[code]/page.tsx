@@ -100,6 +100,12 @@ export default async function ReportBuilderPage({ params, searchParams }: PagePr
           >
             Download CSV
           </Link>
+          <Link
+            href={`/api/reports/builder/${template.code}/pdf?asOf=${asOfStr}`}
+            className="rounded border border-ink-300 bg-white px-3 py-1.5 text-sm font-medium text-ink-700 hover:bg-ink-50"
+          >
+            Download PDF
+          </Link>
         </div>
       </div>
 
