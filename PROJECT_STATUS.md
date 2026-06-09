@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-06-09
 
-**Current state:** **Report Builder arc complete (7 PRs on `report-builder-design` → PR #201).** Universal report-builder engine: 4-layer architecture (math primitive → row engine → column engine → presentation), 4 GAAP system templates rendering through a dynamic `/reports/builder/[code]` matrix renderer. Statement of Stockholders' Equity (the missing 4th GAAP statement) ships built ENTIRELY via the builder as proof the engine handles brand-new report shapes, not just refactors. Legacy IS / BS callers have compatibility shims that prove decimal equivalence. CSV export route is template-agnostic — works for any RenderedMatrix shape. SOC 2 CC6.1 cross-tenant Account read gap (surfaced during the arc) closed in PR 7 with a two-tenant regression test. Tests: 67 / 67 across 7 builder test files plus 4 tenant-isolation tests.
+**Current state:** **Report Builder arc complete (11 PRs on `report-builder-design` → PR #201).** Universal report-builder engine: 4-layer architecture (math primitive → row engine → column engine → presentation), 4 GAAP system templates rendering through a dynamic `/reports/builder/[code]` matrix renderer. Statement of Stockholders' Equity (the missing 4th GAAP statement) ships built ENTIRELY via the builder as proof the engine handles brand-new report shapes, not just refactors. Legacy IS / BS callers have compatibility shims that prove decimal equivalence. CSV + PDF export routes are template-agnostic — work for any RenderedMatrix shape. Per-tenant `ReportTemplate` persistence with clone / delete / Zod-validated JSON editor + optimistic-concurrency guards. Two SOC 2 deficiencies surfaced + closed during the arc (#13 cross-tenant Account leak, #14 lost-update race). Tests: 104 / 104 across 11 builder test files. **Tests on branch overall: 104 builder + 4 tenant-isolation + 24 invariants + 23 schema = 155 green.**
 
 **Previous milestone:** v1.0 — multi-entity consolidation report with intercompany elimination, AP aging report, M-1/M-3 detail report grouping BTD deltas by IRS Form 1120 Schedule M-3 lines. The portfolio's headline architecture is now complete: substrate (Layer 1+2), ERP mapping (QBO + NetSuite), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation. Consolidation demo seed (Acme Group + 2 subs) ships with the Northwind seed so the report has data to render out of the box.
 
@@ -124,8 +124,8 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - NS Accounting Books (multi-book parallel posting from one NS transaction) — niche refinement; deferred because it requires fixture + mapper expansion with low portfolio payoff.
 - ASC 842 cash flow presentation polish — the indirect method shows the right total but mis-classifies lease principal. Real-world refinement, not a portfolio differentiator.
 
-### Report Builder arc — 7 PRs on `report-builder-design` → PR #201 (shipped 2026-06-09)
-4-layer universal report-builder engine — operators can clone + customize per-tenant once persistence ships (post-arc PR 7+).
+### Report Builder arc — 11 PRs on `report-builder-design` → PR #201 (shipped 2026-06-09)
+4-layer universal report-builder engine. Operators clone + customize system templates per-tenant via the JSON definition editor; concurrency-safe Server Actions; CSV + PDF exports. Two SOC 2 deficiencies surfaced and closed during the arc.
 
 - [x] **PR 1** (`b4dd602`) — schema (`ReportTemplate` table) + types (`RowDef`, `ColumnDef`, `PeriodOffset`, `AccountFilter`) + 4 GAAP system templates (IS, BS, CF, EQ). 9 template-registry tests.
 - [x] **PR 2** (`5ac31a9`) — math primitive (`getAccountBalances` returns `Map<code, AccountBalance>`) + row engine (`runRowEngine` evaluates ACCOUNTS / SUBTOTAL / FORMULA / PERIOD_DELTA / SPACER / HEADER). 20 row-engine tests including Northwind fixture integration.
@@ -134,12 +134,19 @@ Running log of where this project is, what's next, and key decisions. Updated at
 - [x] **PR 5** (`efbff72`) — Compatibility shims (`getIncomeStatementViaBuilder` / `getBalanceSheetViaBuilder`) with same return shapes as legacy. 6 equivalence tests against a Q1 2026 fixture. ALSO fixed BS_TEMPLATE noncurrent_liabilities double-counting bug by adding `excludeSubtypes` to AccountFilter. Surfaced the legacy cross-tenant Account read gap.
 - [x] **PR 6** (`b0c56a2`) — Template-agnostic CSV serializer (`renderedMatrixToCsv`) + dynamic UI matrix renderer at `/reports/builder/[code]` + CSV route at `/api/reports/builder/[code]/csv`. SOC 2 baseline: scope from `getCurrentScope`, audit logged via `auditDataExport`, CSV formula-leader injection (CWE-1236) handled at the shared `toCsv` helper. Hostile-label defense-in-depth test. 10 CSV tests.
 - [x] **PR 7** (`8fb3c38`) — Closed legacy cross-tenant Account read gap (SOC 2 CC6.1, deficiency #13). All 7 legacy `Account.findMany` call sites (`getTrialBalance`, `getIncomeStatement`, `getBalanceSheet`, `getCashFlowStatement`, `getBookTaxDifference`, `getM3Detail`, `getConsolidatedTrialBalance`) now tenant-scope. `resolveEntityBook` returns `tenantId` from the resolved entity. 4 regression tests with two-tenant fixture asserting metadata never bleeds.
+- [x] **PR 8** (`eee3eca`) — Generic PDF export for any template. `BuilderPdfDocument` React-PDF component, `/api/reports/builder/[code]/pdf` route. Template-agnostic (works for matrix layouts, variance columns, multi-period). Page-N-of-N footer, fixed column-header row. Same SOC 2 audit baseline as CSV. 3 smoke tests asserting actual %PDF- buffer output.
+- [x] **PR 9** (`b15f3b5`) — Per-tenant `ReportTemplate` persistence + clone/delete. `loadTemplate` (DB-then-registry resolution) + `listTemplates` (tenant-scoped). Server Actions `cloneReportTemplate` / `renameReportTemplate` / `deleteReportTemplate` — Zod-validated, audit-logged. System rows immutable. Composite unique `(tenantId, code)` enforced at DB layer. CSV + PDF + matrix routes all switch to the unified resolver. 7 persistence tests including cross-tenant invisibility proof.
+- [x] **PR 10** (`e651d69`) — Definition editor + Zod validation. `ReportTemplateDefinitionSchema` mirrors the TS types as runtime validators. `validateDefinitionIntegrity` catches cross-reference issues (forward row refs, missing children, missing column refs, SCOPE-must-have-scope-or-offset). `updateReportTemplateDefinition` Server Action runs 4-stage validation. JSON-textarea editor at `/reports/builder/[code]/edit` — system templates redirect, error surfacing via ?err=. 23 schema tests including drift guard against all 4 system templates.
+- [x] **PR 11** (`19c5da4`) — Adversarial-pass fixes. HIGH H1: lost-update race in `updateReportTemplateDefinition` (deficiency #14). Defense-in-depth two-layer fix: Server Action requires `expectedVersion` + Prisma `updateMany({where:{id, version:expectedVersion}})` catches true races at the DB. LOW L1: clone button UX gaffe (`IS_IS_COPY` → `IS_COPY`). 4 concurrency tests covering app-layer + DB-layer + true-race-in-transaction.
 
-**Total**: 67 builder tests + 4 tenant-isolation tests, all green. Full builder + invariants suite passes (24 / 24 invariants).
+**Total on branch**: 104 builder tests across 11 builder test files, all green. Full builder + invariants suite passes (24 / 24 invariants on main).
 
-**Deferred (post-arc PR 7+):**
-- Per-tenant `ReportTemplate` persistence + UI editor for cloning + customizing
-- PDF export via `@react-pdf/renderer` (matches existing month-end packet path)
+**Deficiencies surfaced + closed during the arc**:
+- #13 (Medium, CC6.1) — Legacy reports leak Account metadata across tenants. Closed PR 7.
+- #14 (High, CC6.3) — Lost-update race in template definition editor. Closed PR 11.
+
+**Deferred (post-arc, not started)**:
+- Per-row form editor — UI sub-arc with form fields per row kind, AccountFilter picker, column DSL builder. Builds entirely on top of PR 10's Zod schema + Server Action; no engine changes needed.
 
 ---
 
