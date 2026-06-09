@@ -97,6 +97,10 @@ model Tenant {
   notifications          Notification[]
   recurringEntries       RecurringEntry[]
   journalEntryNotes      JournalEntryNote[]
+  // BlackLine arc Phase 1: account-reconciliation workflow.
+  reconciliations         Reconciliation[]
+  reconciliationAttachments ReconciliationAttachment[]
+  reconciliationConfig    ReconciliationConfig?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -194,6 +198,7 @@ model LegalEntity {
   arOpenItems      ArOpenItem[]
   apOpenItems      ApOpenItem[]
   recurringEntries RecurringEntry[]
+  reconciliations  Reconciliation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -226,6 +231,7 @@ model Book {
   arOpenItems                   ArOpenItem[]
   apOpenItems                   ApOpenItem[]
   recurringEntries              RecurringEntry[]
+  reconciliations               Reconciliation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -280,8 +286,9 @@ model Period {
   startsOn   DateTime       @db.Date
   endsOn     DateTime       @db.Date
 
-  journalEntries JournalEntry[]
-  closes         PeriodClose[]
+  journalEntries  JournalEntry[]
+  closes          PeriodClose[]
+  reconciliations Reconciliation[]
 
   @@unique([calendarId, code])
   @@unique([calendarId, ordinal])
@@ -499,7 +506,17 @@ model Account {
 
   active Boolean @default(true)
 
-  lines JournalLine[]
+  // BlackLine arc Phase 1: per-account override of the tenant default.
+  // - requiresReconReview: null = inherit ReconciliationConfig.defaultRequiresReview.
+  //   true = always preparer→reviewer chain. false = single sign-off OK.
+  // - reconTolerance: null = inherit tenant default (typically 0 = must tie out
+  //   exactly). Non-null = $-amount diff allowed before marking EXCEPTION.
+  //   Used by cash accounts where rounding differences are common.
+  requiresReconReview Boolean?
+  reconTolerance      Decimal? @db.Decimal(20, 4)
+
+  lines           JournalLine[]
+  reconciliations Reconciliation[]
 
   sourceSystem     String?
   sourceRecordType String?
@@ -1455,6 +1472,13 @@ model User {
   notificationsActed Notification[] @relation("NotificationActor")
   auditEvents        AuditLog[]     @relation("AuditLogActor")
   journalEntryNotes  JournalEntryNote[]
+  // BlackLine arc Phase 1: a user can be the preparer on N recons, the
+  // reviewer on N recons, and the uploader of N attachments. CPA
+  // segregation of duties means preparer != reviewer on the same recon
+  // (enforced at the Server Action layer, not the schema).
+  reconciliationsPrepared    Reconciliation[]           @relation("ReconPreparer")
+  reconciliationsReviewed    Reconciliation[]           @relation("ReconReviewer")
+  reconciliationAttachments  ReconciliationAttachment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1767,3 +1791,137 @@ enum NotificationCategory {
 //
 // See docs/universal-schema.md for the architectural rationale and the
 // remaining layers' build plan.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BlackLine arc — Phase 1: Account Reconciliations
+//
+// The workflow shell BlackLine's whole product is built around. One
+// Reconciliation row per (entity, book, period, account). Preparer ties out
+// GL balance to supporting documentation, signs, hands off to reviewer.
+// Reviewer signs OR sends back. Period close refuses to advance until every
+// active BS account in the tenant is RECONCILED (or WAIVED by admin).
+//
+// Design doc: docs/blackline-arc-design.md
+// Sign-off shape (single vs preparer→reviewer) is per-recon, default from
+// ReconciliationConfig.defaultRequiresReview, overridable per Account.
+// Period-close gate composition with Phases 2 + 3 documented in design doc.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ReconStatus {
+  OPEN          // auto-created, not yet started
+  IN_PROGRESS   // preparer is working
+  PREPARED      // preparer signed; ready for reviewer (only when requiresReview)
+  RECONCILED    // signed off (terminal — closes the period-close gate)
+  EXCEPTION     // diff > tolerance; disposition required
+  WAIVED        // admin marked not-applicable for this period
+}
+
+model Reconciliation {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId  String @db.Uuid
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // The scope tuple. Composite-unique so re-running the auto-instantiator
+  // (Phase 1 PR 6) is idempotent.
+  entityId  String      @db.Uuid
+  entity    LegalEntity @relation(fields: [entityId], references: [id])
+  bookId    String      @db.Uuid
+  book      Book        @relation(fields: [bookId], references: [id])
+  periodId  String      @db.Uuid
+  period    Period      @relation(fields: [periodId], references: [id])
+  accountId String      @db.Uuid
+  account   Account     @relation(fields: [accountId], references: [id])
+
+  // Frozen at sign-off so the reviewer sees the same numbers the preparer
+  // signed against — even if a JE backs into the period afterward.
+  // `glBalance` is the trial-balance number; `supportingBalance` is what
+  // the operator typed in (Phase 1) or what the sub-ledger says (Phase 1
+  // PR 7 auto-pull). `reconciledDiff` is computed = gl − supporting and
+  // stored so a SQL sort by "biggest disagreement" stays cheap.
+  glBalance         Decimal  @db.Decimal(20, 4)
+  supportingBalance Decimal?
+  reconciledDiff    Decimal?
+  // Per-recon tolerance. Inherited from Account.reconTolerance (which
+  // inherits from ReconciliationConfig.defaultTolerance). Stored on the
+  // row so changing the tenant default later doesn't retroactively flip
+  // signed-off recons in or out of EXCEPTION.
+  tolerance         Decimal  @db.Decimal(20, 4) @default(0)
+
+  status ReconStatus @default(OPEN)
+  // Decision #2 wiring: false = single sign-off (preparer's mark =
+  // RECONCILED); true = preparer→reviewer chain (PREPARED waits for
+  // reviewer). Frozen at recon-open time. Default value supplied by the
+  // create-action from Account.requiresReconReview → ReconciliationConfig
+  // → true (BlackLine standard).
+  requiresReview Boolean @default(true)
+
+  preparedBy String?   @db.Uuid
+  preparer   User?     @relation("ReconPreparer", fields: [preparedBy], references: [id])
+  preparedAt DateTime?
+  reviewedBy String?   @db.Uuid
+  reviewer   User?     @relation("ReconReviewer", fields: [reviewedBy], references: [id])
+  reviewedAt DateTime?
+
+  // Encrypted via the existing PrismaExtension confidential-column path
+  // (wired in PR 4 when notes get a real UI). Stays plain Text in schema.
+  notes String?
+
+  // Soft reference: RecordEvent.recordType = "Reconciliation",
+  // .recordId = this id. No Prisma relation — RecordEvent is the
+  // tenant-wide event journal used by ownership, JE notes, etc.
+  attachments ReconciliationAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Idempotent auto-instantiation on first visit to /close/reconciliations.
+  @@unique([entityId, bookId, periodId, accountId])
+  @@index([tenantId, periodId, status])
+  @@index([periodId, status])
+  @@map("reconciliation")
+}
+
+model ReconciliationAttachment {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  reconciliationId String         @db.Uuid
+  reconciliation   Reconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  filename    String
+  contentType String
+  // Encrypted bytes via PrismaExtension (wired in PR 4). Self-contained
+  // storage — no S3 vendor dependency. Worst case: 5 MB CSV × 100
+  // accounts × 12 months = 6 GB tenant-wide. Acceptable at portfolio
+  // scale; revisit if customer onboards with 500+ accounts.
+  payload    Bytes
+  sizeBytes  Int
+
+  uploadedById String   @db.Uuid
+  uploader     User     @relation(fields: [uploadedById], references: [id])
+  uploadedAt   DateTime @default(now())
+
+  @@index([reconciliationId])
+  @@index([tenantId])
+  @@map("reconciliation_attachment")
+}
+
+// Per-tenant default sign-off shape + default tolerance. Per-account
+// override stored on Account.requiresReconReview + Account.reconTolerance.
+// Resolution order documented in docs/blackline-arc-design.md.
+model ReconciliationConfig {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @unique @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  defaultRequiresReview Boolean @default(true)
+  defaultTolerance      Decimal @db.Decimal(20, 4) @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("reconciliation_config")
+}
