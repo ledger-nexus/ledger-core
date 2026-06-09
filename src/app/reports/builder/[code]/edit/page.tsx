@@ -74,13 +74,25 @@ export default async function ReportBuilderEditPage({
   async function save(formData: FormData): Promise<void> {
     "use server";
     const json = String(formData.get("definitionJson") ?? "");
+    // PR 11 adversarial-pass fix: optimistic concurrency. Send the
+    // version the editor was loaded with; the Server Action rejects
+    // the write if the on-disk version moved.
+    const expectedVersionRaw = String(formData.get("expectedVersion") ?? "");
+    const expectedVersion = Number.parseInt(expectedVersionRaw, 10);
+    if (Number.isNaN(expectedVersion)) {
+      const params = new URLSearchParams({
+        err: "Missing or invalid expectedVersion — refresh and retry.",
+      });
+      redirect(`/reports/builder/${dbRow!.code}/edit?${params.toString()}`);
+    }
     const result = await updateReportTemplateDefinition({
       templateId: dbRow!.id,
       definitionJson: json,
+      expectedVersion,
     });
     if (!result.ok) {
       // Surface the error back through ?err= on the URL — no DB write
-      // happens on validation failure.
+      // happens on validation failure OR concurrency conflict.
       const params = new URLSearchParams({ err: result.error });
       redirect(`/reports/builder/${dbRow!.code}/edit?${params.toString()}`);
     }
@@ -125,6 +137,11 @@ export default async function ReportBuilderEditPage({
             validation error above the textarea.
           </p>
           <form action={save} className="flex flex-col gap-3">
+            <input
+              type="hidden"
+              name="expectedVersion"
+              value={dbRow.version}
+            />
             <textarea
               name="definitionJson"
               defaultValue={pretty}

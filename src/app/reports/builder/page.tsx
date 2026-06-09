@@ -86,7 +86,6 @@ export default async function ReportBuilderIndex() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {all.map((t) => {
-            const inUsedCode = t.code.toLowerCase();
             return (
               <Card key={`${t.source}-${t.code}-${t.id ?? "reg"}`}>
                 <CardHeader>
@@ -124,7 +123,7 @@ export default async function ReportBuilderIndex() {
                           "use server";
                           await cloneReportTemplate({
                             sourceCode: t.code,
-                            newCode: `${t.code}_${inUsedCode.toUpperCase()}_COPY`,
+                            newCode: `${t.code}_COPY`,
                             newName: `${t.name} (copy)`,
                           });
                         }}

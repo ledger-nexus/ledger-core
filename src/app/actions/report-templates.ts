@@ -63,6 +63,16 @@ const UpdateDefinitionInputSchema = z.object({
   // JSON-stringified ReportTemplateDefinition. Stored separately
   // because <textarea> values pre-serialize cleanly.
   definitionJson: z.string().min(2).max(64_000),
+  /**
+   * Optimistic concurrency token. Caller passes the `version` value
+   * the editor was loaded with. If the row's current `version` no
+   * longer matches, another operator (or the same operator in a
+   * second tab) edited the template after this editor was loaded.
+   * The Server Action rejects the write with a structured error so
+   * the operator can refresh + retry instead of silently clobbering
+   * the other edit.
+   */
+  expectedVersion: z.number().int().min(1),
 });
 
 export type ActionResult =
@@ -228,7 +238,7 @@ export async function updateReportTemplateDefinition(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.errors[0]?.message ?? "Invalid input" };
   }
-  const { templateId, definitionJson } = parsed.data;
+  const { templateId, definitionJson, expectedVersion } = parsed.data;
 
   const user = await requireCurrentUser();
   const tenant = await requireCurrentTenant();
@@ -290,13 +300,38 @@ export async function updateReportTemplateDefinition(
     };
   }
 
-  await prisma.reportTemplate.update({
-    where: { id: templateId },
+  // Optimistic concurrency check (PR 11 adversarial-pass fix). Without
+  // this, two operators editing the same template in parallel would
+  // silently clobber each other: each loads version N, each writes
+  // version N+1, second write overwrites first. Forces refresh-and-
+  // retry instead.
+  if (existing.version !== expectedVersion) {
+    return {
+      ok: false,
+      error:
+        `Template was modified by another user (now version ${existing.version}, ` +
+        `you loaded version ${expectedVersion}). Refresh + retry.`,
+    };
+  }
+
+  // The Prisma update uses an explicit version filter so a concurrent
+  // write between the read above and this update is also rejected at
+  // the DB level (defense-in-depth — the application-layer check is
+  // the primary gate).
+  const updated = await prisma.reportTemplate.updateMany({
+    where: { id: templateId, version: expectedVersion },
     data: {
       definition: definition as unknown as Prisma.InputJsonValue,
-      version: existing.version + 1,
+      version: expectedVersion + 1,
     },
   });
+  if (updated.count === 0) {
+    return {
+      ok: false,
+      error:
+        "Template was modified concurrently — DB-layer version filter rejected the write. Refresh + retry.",
+    };
+  }
 
   // Step 6: audit. Include row/column counts so reviewers can quickly
   // see whether the change was a "small tweak" or "wholesale replace."
@@ -308,8 +343,8 @@ export async function updateReportTemplateDefinition(
     tenantId: tenant.id,
     metadata: {
       code: existing.code,
-      oldVersion: existing.version,
-      newVersion: existing.version + 1,
+      oldVersion: expectedVersion,
+      newVersion: expectedVersion + 1,
       rowCount: definition.rows.length,
       columnCount: definition.columns.length,
     },
