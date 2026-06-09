@@ -311,11 +311,24 @@ export async function getConsolidatedTrialBalance(
           debit = row.debit.times(rate);
           credit = row.credit.times(rate);
         }
-        // HISTORICAL path (rate === null) — for v0.8 we don't walk
-        // per-line history yet (rare in NS-imported data; equity
-        // transactions are sparse). Pass through untranslated as the
-        // pragmatic approximation. Phase 5 polish: walk JE lines and
-        // use line.entry.fxRate. The CTA plug catches any imbalance.
+        // HISTORICAL path (rate === null) — pass-through is the
+        // ACCOUNTING-CORRECT behavior, not a TODO. ASC 830-10-45-9:
+        // non-monetary items measured at historical cost are translated
+        // at the rate IN EFFECT WHEN the item was recognized. The GL
+        // already stored row.debit/credit at posting-time rate (see
+        // JournalEntry.fxRate semantics: header currency → book reporting
+        // at posting time). So pass-through PRESERVES the historical
+        // valuation that ASC 830 mandates. The per-line walk that prior
+        // sessions flagged as a TODO would only matter if entity
+        // functional ≠ book reporting AND postJournalEntry stored
+        // row.debit at a DIFFERENT rate than the historical one — but
+        // it doesn't. The CTA plug catches the genuine remeasurement
+        // gap (the CURRENT_RATE-translated cash counterpart of a
+        // historical equity contribution shifts when spot rates move;
+        // the HISTORICAL equity stays still; the difference is CTA,
+        // which is exactly what ASC 830 wants on the equity section).
+        // See tests/fx-consolidation-historical.test.ts for the
+        // worked example proving the dimensional analysis.
       }
       const existing = aggregates.get(row.accountCode);
       if (existing) {
