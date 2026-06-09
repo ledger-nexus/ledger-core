@@ -260,9 +260,9 @@ Earlier today (also captured below): **v0.8 ASC 830 FX translation arc** closed.
 
 ### v1.2+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
-- [ ] Recurring journal entry templates
+- [x] ~~Recurring journal entry templates~~ — already shipped. Schema `RecurringEntry` + `RecurringEntryLine` at `prisma/schema.prisma:820-894`. Engine at `src/lib/accounting/recurring.ts` (`runRecurringEntries` + `enumerateDueDates` + `addMonthsAnchored` + `nextDocDate`). Server Action at `src/app/actions/recurring-entries.ts`. UI form at `src/app/recurring-entries/new/new-recurring-form.tsx`. Lineage `(SUBSTRATE, RecurringEntry, "<templateId>:<docDateISO>")` makes re-runs deterministically dedup against the partial-unique on the lineage triple. The deferred-list entry was a stale carry-over from v0.6 planning.
 - [ ] AR / AP aging with sortable columns
-- [ ] **HISTORICAL category line-walking** — currently passes through untranslated (CTA catches the imbalance). A more sophisticated implementation walks `line.entry.fxRate` per equity line. Mostly cosmetic for the v0.8 demo since NS-imported data rarely has equity transactions.
+- [ ] **HISTORICAL category line-walking** — currently passes through untranslated (CTA catches the imbalance). A more sophisticated implementation walks `line.entry.fxRate` per equity line. Mostly cosmetic for the v0.8 demo since NS-imported data rarely has equity transactions. The closure-tail-#161 promise per memory referred to the CTA plug catching the imbalance — the per-line walking is still TODO and consolidation.ts:314 has the comment.
 - [x] ~~**NS Books Phase 3.5+** — sub-ledger multi-book (Invoice/Bill/Payment per-book)~~ shipped 2026-06-08 (Arc 4 + #185)
 - [x] ~~**NS Books Phase 4** — reverse exporter reconstructs `bookspecific[]` for roundtrip proof~~ shipped 2026-06-08 (#158)
 - [x] ~~**NS Books Phase 5** — UI book-mapping editor on `/import/netsuite`~~ shipped 2026-06-08 (#165)
