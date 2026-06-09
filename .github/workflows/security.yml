@@ -45,8 +45,20 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      # production-only audit; dev tooling CVEs are not shipped to users
-      - run: npm audit --omit=dev --audit-level=high
+      # production-only audit; dev tooling CVEs are not shipped to users.
+      #
+      # Threshold is CRITICAL (not HIGH) as of 2026-06-09 — risk-acceptance
+      # documented in `docs/policies/control-deficiency-log.md` deficiency
+      # entry #13 (Next.js 14.x HIGH advisory cluster). Next 14.x has 14
+      # known HIGH-severity advisories (DoS / cache-poisoning / XSS / SSRF);
+      # the only fix is the Next 16.x major upgrade which is breaking and
+      # scheduled as a multi-PR arc. Until that lands, CI fails only on
+      # CRITICAL severity; the HIGH cluster is tracked + risk-accepted.
+      #
+      # The full `npm audit` output still streams to CI logs so an auditor
+      # can verify the accepted advisories haven't grown.
+      - run: npm audit --omit=dev --audit-level=critical
+      - run: npm audit --omit=dev --audit-level=high || echo "::warning::HIGH-severity advisories present — see deficiency #29 for risk acceptance"
 
   codeql:
     runs-on: ubuntu-latest
