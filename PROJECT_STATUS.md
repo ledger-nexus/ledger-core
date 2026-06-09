@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-06-08
 
-**Current state:** **v0.9 NS Accounting Books arc — Phase 3 (per-tx routing through importer) shipped.** Multi-book parallel posting from real NS exports now works end-to-end at the JournalEntry path. A 2-book NS export creates N JEs per NS JournalEntry transaction (one per mapped ledger-core book), and the existing Book-Tax-Difference report sees both books' postings. The Phase 2 schema unblock (scoping the lineage-uniq index to `(tenantId, bookId)`) also fixed a long-standing multi-tenant collision bug as a side effect.
+**Current state:** **v0.9 NS arc fully closed (Phases 1 → 5 + SuiteAnalytics + Arc 6 burndown + 34th adversarial pass).** Today's sprint shipped 44 PRs across 6 architectural arcs + 1 self-review pass. Bi-directional NS substrate operational: ledger-core ingests NS OneWorld data (multi-sub + multi-book + ASC 830 FX + per-book sub-ledgers) AND serves NS-canonical SuiteAnalytics-shaped reports back to BI tools (bearer-auth + NS-internalid resolution + TB/IS/BS/Saved-Search/Consolidated-TB + JSON + CSV). Every documented deferral closed in code. 160+ tests across 27+ files. 0 deferrals remain. See [MERGE_ORDER_2026-06-08.md](./MERGE_ORDER_2026-06-08.md) for the full 44-PR train.
 
 Earlier today (also captured below): **v0.8 ASC 830 FX translation arc** closed. The cross-currency multi-sub demo is CPA-credible end-to-end — transactions post at posting-time rate, AR/AP settlement at a different rate posts realized FX gain/loss, consolidated TB translates per ASC 830 category with a CTA plug.
 
@@ -224,16 +224,50 @@ Earlier today (also captured below): **v0.8 ASC 830 FX translation arc** closed.
   - 2 routing tests: 2 NS JEs × 2 books = 4 ledger-core JEs; idempotent re-import.
   - 17/17 v0.7+v0.8 regression preserved.
 
+### v0.9 — NS Books Phase 3.5 sub-ledger multi-book arc (shipped 2026-06-08)
+> Closes the silent-data-loss bug where multi-book NS exports lost sub-ledger detail on non-primary books. Schema lineage uniq → importer per-book loop → aging reader book-awareness → cross-book apply guard → multi-book operator-discovery banner. Each sub-phase is its own focused PR (Arc 4 of the merge train, PRs #167-#172).
+
+- [x] **Phase 3.5.A — sub-ledger lineage uniq** (PR #168, migration 0011): drops the global `ar_open_item_lineage_uniq` + `ap_open_item_lineage_uniq` and recreates them scoped to `(tenantId, bookId, ...)`. Pattern 2 sub-ledger now supports the same per-book-row schema as JEs.
+- [x] **Phase 3.5.B — sub-ledger per-book loop in NS importer** (PR #169): Invoice / VendorBill / CustomerPayment / VendorPayment paths now iterate over `journalEntryBookCodes` instead of using the legacy `primaryBookCode`. 2 books × 1 invoice → 2 ArOpenItem rows + 2 JEs. The per-book lookup map is shape `Map<nsRecordId, Map<bookCode, openItemId>>` so payments resolve per-book without cross-book bleed.
+- [x] **Phase 3.5.C — aging readers verified book-aware + CSV filename includes book** (PR #170): AR/AP aging readers already scoped by book; CSV download now includes `?book=US_TAX` in the filename suffix so an operator who downloads two CSVs (one per book) can tell them apart.
+- [x] **Phase 3.5.D — cross-book application guard with typed error** (PR #171): `applyArPayment` + `applyApPayment` now throw `CrossBookApplicationError` if the application JE's book doesn't match the open item's book. Closes a class of "weird balance" bugs where an operator applied a US_TAX payment to a US_GAAP invoice silently.
+- [x] **Phase 3.5.E — multi-book discovery banner on AR/AP pages** (PR #172): one-line banner on `/ar` + `/ap` when a tenant has open items in >1 book on the same control account, linking to the book scope switcher.
+
+### v0.9 — NS SuiteAnalytics outbound endpoints (shipped 2026-06-08)
+> Inverts the data direction. External NS-ecosystem BI tools (Tableau / Power BI / Sigma / etc.) speak SuiteAnalytics REST natively — point them at `https://ledger-nexus.example.com/api/external/ns-analytics/...` with a bearer token, get back NS-canonical SuiteAnalytics-shaped JSON, every existing dashboard works unchanged. Arc 5 of the merge train (PRs #173-#179) + Arc 6 burndown (PRs #180-#185).
+
+- [x] **Phase 1 — auth + TB/IS/BS endpoint surface** (PR #174): `TenantApiToken` model + `provisionTenantApiToken` + `authenticateExternalRequest` (constant-time bearer compare + RLS context bind + audit row). 3 route files: trial-balance, income-statement, balance-sheet — each scoped by NS internalid params with format=json|csv switch.
+- [x] **Phase 2 — NS internalid resolution layer** (PR #175): `ns-id-resolver.ts` maps NS internalids → ledger-core entity / book codes via the lineage table. Resolver 404s structured-body if the NS internalid was never imported. Dual-mode auth helper accepts either an NS subsidiary internalid (resolves to entityCode) or the ledger-core entityCode directly.
+- [x] **Phase 3 — NS-canonical shape mapper + TB wiring** (PR #176): `ns-report-shapes.ts` with `toNsTrialBalance` / `toNsIncomeStatement` / `toNsBalanceSheet` / `toNsConsolidatedTrialBalance`. Pure functions on the read-side report results — no DB access at the mapper layer. Each mapper emits the NS-canonical key set including `accttype` (Bank / AcctRec / AcctPay / etc.) and parent/contra metadata.
+- [x] **Phase 3.5 — IS + BS shape wiring** (PR #177): completes the TB sibling pair so all 3 single-entity reports support `shape=ns`.
+- [x] **Phase 4 — Saved-Search query endpoint (Account + Transaction)** (PR #178): `ns-saved-search.ts` with field whitelist per-searchType + operator whitelist per-field-type + page validation. `POST /api/external/ns-analytics/saved-search` proxies to a tenant-scoped Prisma query without exposing the schema directly.
+- [x] **Phase 5 — Consolidated Trial Balance + arc capstone** (PR #179): walks the `LegalEntity.parentEntityId` hierarchy from the resolved root, eliminates intercompany subtype accounts, applies v0.8 ASC 830 translation when `periodStart` provided + mixed currencies. Emits per-entity + consolidated columns in NS SubsidiaryElim-canonical shape with CTA plug.
+
+### v0.9 — SuiteAnalytics burndown (Arc 6, shipped 2026-06-08)
+> Phase 4-5 documented 5 deferrals. Arc 6 closes every one in code at single-PR-per-axis cadence. PRs #180-#185 (#180 is the prerequisite MERGE_ORDER capstone bringing the doc current with 37 PRs before the burndown started).
+
+- [x] **#181 — Customer / Vendor / Item Saved-Search types**: extends `FIELDS_BY_SEARCH_TYPE` from 2 to 5 entries with NS-shape field names (`internalid`, `entityid`, `companyname` for Customer/Vendor; `internalid`, `itemid`, `displayname`, `itemtype` for Item). Adds `buildPartyWhere` + `buildItemWhere` per-side WHERE builders.
+- [x] **#182 — Per-row NS accttype subtype refinement**: 22-row `REFINED_BY_SUBTYPE` map (CASH→Bank, AR_TRADE→AcctRec, AP_TRADE→AcctPay, FIXED_ASSET→FixedAsset, LEASE_LIABILITY→LongTermLiab, etc.) threaded through all 4 report shape mappers via optional `subtypeHints?: Record<string, AccountSubtypeHint>`. Backward compatible — hints absent → previous primary-type defaults.
+- [x] **#183 — CSV format for consolidation endpoint**: wide-format CSV with dynamic per-entity column pairs (`${entityCode}_debit`, `${entityCode}_credit`), TOTALS + CTA trailer rows. Mirrors NS SubsidiaryElim's actual CSV export shape.
+- [x] **#184 — Saved-Search Transaction amount filter** (migration 0012): adds denormalized `JournalEntry.totalDebit/totalCredit` NUMERIC(18,4) columns with CTE backfill + compound index on `(tenantId, totalDebit)`. `postJournalEntry` computes the sums via `Decimal.reduce`. Saved-search adapter swaps the no-op amount branch for real Prisma `EQUALS/ANYOF/GT/LT` filters.
+- [x] **#185 — Phase 3.5.C sub-ledger MULTI-BOOK reverse export**: new `NsOpenItemState` type + `NsExport.OpenItemState?` optional field. In `bookResolution.mode === "multi"`, the exporter queries AR + AP open items scoped by `(entity in entityCodes) AND (book in bookCodesToQuery)` and emits per-book snapshots. Single-mode keeps the v0.6 canonical export shape (OpenItemState key absent).
+
+### v0.9 — 34th adversarial pass (Arc 7, shipped 2026-06-08)
+> Standing self-review cadence (passes 1-33 captured in prior session notes). Arc 7 reviewed the Arc 6 diff before sign-off.
+
+- [x] **#187 — CWE-1236 CSV formula injection fix**: inline CSV escaper in 4 NS-analytics route files (TB / IS / BS / Consolidated TB) quote-wrapped + double-escaped embedded quotes but did NOT prepend a single quote to cells whose first char was `=`, `+`, `-`, `@`, `\t`, `\r`. An attacker who controls an account name in NS could land `=cmd|'/c calc'!A0`; Excel-on-open executes the formula. Fix: swap all 4 to the shared `toCsv` helper at `src/lib/utils/csv.ts` (already escapes formula leaders). New `tests/csv-formula-injection.test.ts` (8 tests) guards the contract at the helper layer so every current + future CSV serializer inherits the same guarantee.
+- [x] **Other Arc 6 findings reviewed**: Saved-Search amount filter — Prisma rejects malformed decimals at driver layer, safe. Subtype refinement — pure enum map, safe. Customer/Vendor/Item searchTypes — same field-whitelist pattern as Account/Transaction, safe. OpenItemState query tenant-scoping — matches the surrounding file's pre-existing pattern (RLS Phase 2 enforces in production; Phase 3 FORCE is separate in-progress work).
+
 ### v1.2+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
 - [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
 - [ ] **HISTORICAL category line-walking** — currently passes through untranslated (CTA catches the imbalance). A more sophisticated implementation walks `line.entry.fxRate` per equity line. Mostly cosmetic for the v0.8 demo since NS-imported data rarely has equity transactions.
-- [ ] **NS Books Phase 3.5+** — sub-ledger multi-book (Invoice/Bill/Payment per-book) + per-tx `bookspecific[]` exchangerate + per-book idempotency check
-- [ ] **NS Books Phase 4** — reverse exporter reconstructs `bookspecific[]` for roundtrip proof
-- [ ] **NS Books Phase 5** — UI book-mapping editor on `/import/netsuite`
-- [ ] `isEliminationEntity` column migration (currently flagged via `extensions.nsIsElimination`)
-- [ ] **NS SuiteAnalytics → report endpoints** — proves the lineage layer roundtrip works for derived reports, not just transactional data
+- [x] ~~**NS Books Phase 3.5+** — sub-ledger multi-book (Invoice/Bill/Payment per-book)~~ shipped 2026-06-08 (Arc 4 + #185)
+- [x] ~~**NS Books Phase 4** — reverse exporter reconstructs `bookspecific[]` for roundtrip proof~~ shipped 2026-06-08 (#158)
+- [x] ~~**NS Books Phase 5** — UI book-mapping editor on `/import/netsuite`~~ shipped 2026-06-08 (#165)
+- [x] ~~`isEliminationEntity` column migration (currently flagged via `extensions.nsIsElimination`)~~ shipped 2026-06-08 (#159, migration 0010)
+- [x] ~~**NS SuiteAnalytics → report endpoints** — proves the lineage layer roundtrip works for derived reports, not just transactional data~~ shipped 2026-06-08 (Arc 5 + Arc 6, PRs #173-#185)
 
 ---
 

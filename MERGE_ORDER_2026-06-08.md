@@ -1,6 +1,6 @@
 # Merge order — 2026-06-08 session
 
-43 PRs landed today across 6 architectural arcs + 4 closure tails + doc capstones. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #185) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`, `books.ts`, `ns-analytics-auth.ts`, `ns-saved-search.ts`, `export.ts`, `post-journal.ts`).
+44 PRs landed today across 6 architectural arcs + 1 adversarial-pass closure + 4 closure tails + doc capstones. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #187) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`, `books.ts`, `ns-analytics-auth.ts`, `ns-saved-search.ts`, `export.ts`, `post-journal.ts`, 4 NS-analytics CSV routes).
 
 ## The 37-PR stack
 
@@ -86,11 +86,20 @@ Closes every deferred item from the original Arc 5 capstone in code. Each PR car
 | 44 | [#184](https://github.com/ledger-nexus/ledger-core/pull/184) | v0.9 NS SuiteAnalytics — Saved-Search Transaction amount filter | migration 0012, `post-journal.ts`, `ns-saved-search.ts`, `ns-saved-search.test.ts` |
 | 45 | [#185](https://github.com/ledger-nexus/ledger-core/pull/185) | v0.9 NS Books Phase 3.5.C — sub-ledger MULTI-BOOK reverse export | `types.ts`, `export.ts`, `ns-sub-ledger-reverse-export.test.ts` |
 
-*(Note: 45 line items above include 3 doc-MERGE_ORDER capstones #160 + #162 + #166 + #180 that are bookkeeping — call the actual code-arc count 41 PRs deployed.)*
+### Arc 7 — 34th adversarial pass closure (PR #187)
 
-## 6 architectural arcs, 6 NS axes
+Burndown self-review. Surfaced one HIGH (CWE-1236 CSV formula injection in 4 NS-analytics CSV serializers); fix swaps to the shared `toCsv` helper that already escapes formula leaders.
 
-The 43 PRs cluster cleanly into 6 NS architectural axes:
+| # | PR | Title | Files of note |
+|---|----|-------|--------------|
+| 46 | [#186](https://github.com/ledger-nexus/ledger-core/pull/186) | docs: MERGE_ORDER → 43 PRs, Arc 6 captured | `MERGE_ORDER_2026-06-08.md` |
+| 47 | [#187](https://github.com/ledger-nexus/ledger-core/pull/187) | Arc 6 adversarial pass — CWE-1236 CSV formula injection fix | 4 NS-analytics route files, `csv-formula-injection.test.ts` |
+
+*(Note: 47 line items above include 5 doc-MERGE_ORDER capstones #160 + #162 + #166 + #180 + #186 that are bookkeeping — call the actual code-arc count 42 PRs deployed.)*
+
+## 6 architectural arcs + 1 adversarial-pass closure
+
+The 44 PRs cluster into 6 NS architectural axes + a 34th-pass self-review:
 
 ### v0.7 NS multi-subsidiary (Arc 1, PRs #141 → #145) — entity axis
 NS multi-sub import end-to-end through to consolidated trial balance. Phase 4 reverse exporter closes the roundtrip. UI + demo + hardened Server Action ship the v0.7 deliverable.
@@ -110,6 +119,9 @@ Inverts the data direction: external NS-ecosystem BI tools call ledger-core with
 ### SuiteAnalytics burndown (Arc 6, PRs #180 → #185) — gap closure axis
 The Arc 5 capstone left 5 documented deferrals. Arc 6 closes every one of them in code, on the same single-PR-per-axis cadence. Customer/Vendor/Item Saved-Search types (drop-in addition on the established Phase 4 pattern); per-row accttype subtype refinement (22-row REFINED_BY_SUBTYPE map threaded through all 4 report shape mappers via optional subtypeHints); CSV format for consolidation (wide-format with per-entity column pairs); Saved-Search amount filter (new denormalized `JournalEntry.totalDebit/Credit` column + migration 0012 + post-write population + adapter wiring); Phase 3.5.C sub-ledger multi-book reverse export (new `OpenItemState` extension to the NS export shape). Every backward-compat invariant preserved; single-mode exports keep the v0.6 canonical shape unchanged.
 
+### 34th adversarial pass (Arc 7, PR #187) — self-review axis
+Standing cadence (memory: passes 1-33 have run). 34th-pass review of Arc 6 found one HIGH and 4 safe-but-flagged findings. HIGH: CWE-1236 CSV formula injection in 4 NS-analytics CSV serializers (TB / IS / BS / Consolidated TB) — the inline escape forgot the formula-leader prefix that the shared `toCsv` helper at `src/lib/utils/csv.ts` already enforces (`escapeFormula` + `FORMULA_LEADERS` regex). Fix: swap all 4 to the shared helper; ship a `csv-formula-injection.test.ts` unit test at the helper layer so every future caller inherits the same contract. Safe-but-flagged: Saved-Search amount filter (Prisma driver rejects malformed decimals); subtype refinement (pure enum map, no user input); Customer/Vendor/Item searchTypes (same whitelist pattern as Account/Transaction); OpenItemState tenant-scoping inherits the exporter-wide pre-existing pattern (RLS Phase 2 enforces in production; Phase 3 FORCE in progress per separate task).
+
 ## Migration dependencies
 
 Five Prisma migrations land in numerical order:
@@ -124,9 +136,9 @@ Each is idempotent (`IF NOT EXISTS` / `WHERE NOT EXISTS`). Production rollout: a
 
 ## Test results across the stack
 
-Verified on dev DB at the head of #185:
+Verified on dev DB at the head of #187:
 
-- **152+ NS + FX + SuiteAnalytics test files green** (19 files, full sequential sweep):
+- **160+ NS + FX + SuiteAnalytics + Arc 7 test files green** (20 files; the Arc 7 CSV-injection unit test brings the total over 160):
   - `netsuite-multi-subsidiary` (v0.7 Phase 1 unit): 15/15
   - `netsuite-multi-subsidiary-integration` (v0.7 Phase 2 Postgres): 6/6
   - `netsuite-import-multi-sub-e2e` (v0.7 Phase 3 e2e): 5/5
@@ -155,7 +167,8 @@ Verified on dev DB at the head of #185:
   - `ns-consolidated-tb-endpoint` (SuiteAnalytics Phase 5 + Arc 6 #183): 7/7
   - `ns-report-shapes` (SuiteAnalytics Phase 3 + 5 + Arc 6 #182): 15/15
   - `ns-sub-ledger-reverse-export` (Arc 6 #185 — Phase 3.5.C reverse export): 3/3
-- **tsc clean** across all 43 PR diffs
+  - `csv-formula-injection` (Arc 7 #187 — CWE-1236 helper-layer guard): 8/8
+- **tsc clean** across all 44 PR diffs
 - **Backward compat preserved** at every layer — every existing v0.7 test passes against the head of the stack
 - **Single-mode export shape unchanged** — Arc 6 additions all gated behind `bookResolution.mode === "multi"` / `format=csv` / explicit searchType, so the v0.6 canonical fixture still diffs to null
 
@@ -185,12 +198,12 @@ No documented deferrals remain. Future v0.10 work (recurring entries, multi-curr
 
 ## The session at a glance
 
-- 43 PRs deployed across 6 architectural arcs + 4 closure tails + 4 doc capstones
+- 44 PRs deployed across 6 architectural arcs + 1 adversarial-pass closure + 4 closure tails + 5 doc capstones
 - 5 Prisma migrations (all idempotent)
-- 26+ test files with full pass count (152+ tests on the final sweep)
+- 27+ test files with full pass count (160+ tests across the final sweep)
 - 0 breaking changes — every v0.7 caller works unchanged at head of stack
-- 0 documented deferrals remaining — Arc 6 closed every documented Arc 5 follow-up
+- 0 documented deferrals remaining — Arc 6 closed every documented Arc 5 follow-up; Arc 7 closed the one HIGH the 34th adversarial pass surfaced
 - Bi-directional NS substrate now operational:
   - **INBOUND**: NS OneWorld exports → ledger-core via 4 mapper paths + multi-sub + multi-book + ASC 830 FX + sub-ledger multi-book
-  - **OUTBOUND**: BI tools with SuiteAnalytics adapters → ledger-core reports via bearer-auth + NS-internalid resolution + NS-canonical shape + Saved-Search (5 searchTypes) + consolidation (JSON + CSV) + amount filter
+  - **OUTBOUND**: BI tools with SuiteAnalytics adapters → ledger-core reports via bearer-auth + NS-internalid resolution + NS-canonical shape + Saved-Search (5 searchTypes) + consolidation (JSON + CSV) + amount filter; all CSV exports CWE-1236-hardened via shared `toCsv` helper
   - **REVERSE-EXPORT**: per-book sub-ledger OpenItem state surfaced in NsExport for downstream consumers
