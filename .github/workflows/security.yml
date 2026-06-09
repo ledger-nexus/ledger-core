@@ -58,7 +58,7 @@ jobs:
       # The full `npm audit` output still streams to CI logs so an auditor
       # can verify the accepted advisories haven't grown.
       - run: npm audit --omit=dev --audit-level=critical
-      - run: npm audit --omit=dev --audit-level=high || echo "::warning::HIGH-severity advisories present — see deficiency #29 for risk acceptance"
+      - run: npm audit --omit=dev --audit-level=high || echo "::warning::HIGH-severity advisories present — see deficiency #13 for risk acceptance"
 
   codeql:
     runs-on: ubuntu-latest
