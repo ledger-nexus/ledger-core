@@ -392,11 +392,21 @@ function buildTransactionWhere(
         where[dateField] = { lt: new Date(String(f.values[0])) };
       }
     } else if (f.field === "amount") {
-      // amount comparisons run against JournalLine.debit/credit; we
-      // approximate by aggregating per-JE in a follow-up. Phase 4
-      // accepts the filter shape but documents that amount filter is
-      // a no-op until the aggregation lands.
-      // Deliberately do nothing for now.
+      // Migration 0012 added denormalized totalDebit + totalCredit
+      // columns on JournalEntry. postJournalEntry's invariant means
+      // totalDebit == totalCredit on every well-formed entry, so
+      // filtering by either column is equivalent. We pick totalDebit
+      // (it's the column the gl_entry_header_total_debit_idx covers).
+      const dec = (v: unknown) => String(v);
+      if (f.operator === "EQUALS") {
+        where.totalDebit = dec(f.values[0]);
+      } else if (f.operator === "ANYOF") {
+        where.totalDebit = { in: f.values.map(dec) };
+      } else if (f.operator === "GREATER_THAN") {
+        where.totalDebit = { gt: dec(f.values[0]) };
+      } else if (f.operator === "LESS_THAN") {
+        where.totalDebit = { lt: dec(f.values[0]) };
+      }
     }
   }
   return where;
@@ -553,6 +563,7 @@ export async function runSavedSearch(
         entryNumber: true,
         documentDate: true,
         memo: true,
+        totalDebit: true,
       },
       orderBy: { documentDate: "desc" },
       skip,
@@ -569,7 +580,9 @@ export async function runSavedSearch(
         tranid: e.entryNumber,
         trandate: e.documentDate.toISOString().slice(0, 10),
         memo: e.memo,
-        amount: null, // Phase 4 placeholder — aggregation in follow-up
+        // Migration 0012 populated this on every existing row + every
+        // new entry. postJournalEntry invariant: totalDebit == totalCredit.
+        amount: e.totalDebit.toString(),
       };
       if (includeAll) return full;
       const projected: Record<string, unknown> = {};

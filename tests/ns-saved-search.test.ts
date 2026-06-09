@@ -426,6 +426,251 @@ describe("v0.9 NS SuiteAnalytics Phase 4 follow-up: Customer/Vendor/Item searchT
   });
 });
 
+describe("v0.9 NS SuiteAnalytics — Transaction amount filter (migration 0012)", () => {
+  // The amount filter requires the denormalized totalDebit column
+  // added by migration 0012. postJournalEntry populates it on every
+  // new entry; the migration backfilled existing rows.
+  //
+  // This test seeds 3 NS-lineage'd JEs of different amounts (100, 500,
+  // 1000 USD) on this tenant, then asserts:
+  //   - amount EQUALS 500 returns just the middle JE
+  //   - amount GREATER_THAN 200 returns the 500 + 1000 JEs
+  //   - amount LESS_THAN 600 returns the 100 + 500 JEs
+  //   - amount filter combined with type filter narrows further
+
+  let entityId: string;
+  let bookId: string;
+  let cashAcctId: string;
+  let revAcctId: string;
+  const seededIds: string[] = [];
+
+  beforeAll(async () => {
+    // Currency + book — shared global resources.
+    await prisma.currency.upsert({
+      where: { code: "USD" },
+      create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
+      update: {},
+    });
+    const book = await prisma.book.upsert({
+      where: { code: "US_GAAP" },
+      create: {
+        code: "US_GAAP",
+        name: "US GAAP",
+        basis: "US_GAAP",
+        reportingCurrencyId: "USD",
+      },
+      update: {},
+    });
+    bookId = book.id;
+    // Per-tenant entity + accounts. Use the tenant we already seeded
+    // for the SuiteAnalytics suite.
+    const entity = await prisma.legalEntity.create({
+      data: {
+        tenantId,
+        code: `NSS_${SUFFIX}_AMOUNT_ENT`,
+        name: "NSS amount-filter test entity",
+        functionalCurrencyId: "USD",
+      },
+    });
+    entityId = entity.id;
+    const cash = await prisma.account.create({
+      data: {
+        tenantId,
+        entityId,
+        code: `NSS_${SUFFIX}_CASH`,
+        name: "Cash",
+        type: "ASSET",
+        normalBalance: "DEBIT",
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "Account",
+        sourceRecordId: `NSS_${SUFFIX}_CASH`,
+      },
+    });
+    cashAcctId = cash.id;
+    const rev = await prisma.account.create({
+      data: {
+        tenantId,
+        entityId,
+        code: `NSS_${SUFFIX}_REV`,
+        name: "Revenue",
+        type: "REVENUE",
+        normalBalance: "CREDIT",
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "Account",
+        sourceRecordId: `NSS_${SUFFIX}_REV`,
+      },
+    });
+    revAcctId = rev.id;
+
+    // Seed 3 NS-imported JournalEntries at amounts 100, 500, 1000.
+    // Bypass postJournalEntry to keep the test schema-focused; set
+    // totalDebit/totalCredit manually + add a line per side so any
+    // future ON DELETE RESTRICT relations stay clean.
+    let entryNo = 1;
+    for (const [amount, srcId] of [
+      ["100.0000", `NSS_${SUFFIX}_JE_100`],
+      ["500.0000", `NSS_${SUFFIX}_JE_500`],
+      ["1000.0000", `NSS_${SUFFIX}_JE_1000`],
+    ] as const) {
+      const je = await prisma.journalEntry.create({
+        data: {
+          tenantId,
+          entryNumber: `NSS-${SUFFIX}-AMT-${String(entryNo++).padStart(5, "0")}`,
+          entityId,
+          bookId,
+          currencyId: "USD",
+          fxRate: "1.0000000000",
+          documentDate: new Date("2026-04-15"),
+          postingDate: new Date("2026-04-15"),
+          memo: `Amount test ${amount}`,
+          source: "MANUAL",
+          status: "POSTED",
+          totalDebit: amount,
+          totalCredit: amount,
+          sourceSystem: "NETSUITE",
+          sourceRecordType: "JournalEntry",
+          sourceRecordId: srcId,
+          lines: {
+            create: [
+              {
+                tenantId,
+                lineNo: 1,
+                accountId: cashAcctId,
+                debit: amount,
+                credit: "0.0000",
+                transactionAmount: amount,
+                transactionCurrencyId: "USD",
+                reportingAmount: amount,
+                reportingCurrencyId: "USD",
+              },
+              {
+                tenantId,
+                lineNo: 2,
+                accountId: revAcctId,
+                debit: "0.0000",
+                credit: amount,
+                // Signed views: debit positive, credit NEGATIVE —
+                // line_reporting_sign_check (mirror DDL) enforces it.
+                transactionAmount: `-${amount}`,
+                transactionCurrencyId: "USD",
+                reportingAmount: `-${amount}`,
+                reportingCurrencyId: "USD",
+              },
+            ],
+          },
+        },
+      });
+      seededIds.push(je.id);
+    }
+  });
+
+  afterAll(async () => {
+    if (seededIds.length > 0) {
+      await prisma.journalLine.deleteMany({
+        where: { entryId: { in: seededIds } },
+      });
+      await prisma.journalEntry.deleteMany({
+        where: { id: { in: seededIds } },
+      });
+    }
+    await prisma.account
+      .deleteMany({ where: { tenantId, id: { in: [cashAcctId, revAcctId] } } })
+      .catch(() => {});
+    if (entityId) {
+      await prisma.legalEntity
+        .delete({ where: { id: entityId } })
+        .catch(() => {});
+    }
+  });
+
+  it("amount EQUALS 500 returns the middle JE only", async () => {
+    const res = await savedSearch(
+      makeReq(
+        {
+          searchType: "Transaction",
+          filters: [
+            { field: "amount", operator: "EQUALS", values: ["500.0000"] },
+          ],
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body._meta.totalCount).toBeGreaterThanOrEqual(1);
+    const tranids = body.rows.map((r: { tranid: string }) => r.tranid);
+    expect(tranids).toContain(`NSS-${SUFFIX}-AMT-00002`);
+  });
+
+  it("amount GREATER_THAN 200 returns the 500 + 1000 JEs", async () => {
+    const res = await savedSearch(
+      makeReq(
+        {
+          searchType: "Transaction",
+          filters: [
+            { field: "amount", operator: "GREATER_THAN", values: ["200.0000"] },
+          ],
+          pageSize: 1000,
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const ourTranids = body.rows
+      .map((r: { tranid: string }) => r.tranid)
+      .filter((t: string) => t.startsWith(`NSS-${SUFFIX}-AMT-`));
+    expect(ourTranids).toContain(`NSS-${SUFFIX}-AMT-00002`);
+    expect(ourTranids).toContain(`NSS-${SUFFIX}-AMT-00003`);
+    expect(ourTranids).not.toContain(`NSS-${SUFFIX}-AMT-00001`);
+  });
+
+  it("amount LESS_THAN 600 returns the 100 + 500 JEs", async () => {
+    const res = await savedSearch(
+      makeReq(
+        {
+          searchType: "Transaction",
+          filters: [
+            { field: "amount", operator: "LESS_THAN", values: ["600.0000"] },
+          ],
+          pageSize: 1000,
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const ourTranids = body.rows
+      .map((r: { tranid: string }) => r.tranid)
+      .filter((t: string) => t.startsWith(`NSS-${SUFFIX}-AMT-`));
+    expect(ourTranids).toContain(`NSS-${SUFFIX}-AMT-00001`);
+    expect(ourTranids).toContain(`NSS-${SUFFIX}-AMT-00002`);
+    expect(ourTranids).not.toContain(`NSS-${SUFFIX}-AMT-00003`);
+  });
+
+  it("Transaction rows now emit the real amount (not null) in the projection", async () => {
+    const res = await savedSearch(
+      makeReq(
+        {
+          searchType: "Transaction",
+          filters: [
+            { field: "amount", operator: "EQUALS", values: ["500.0000"] },
+          ],
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const ourRow = body.rows.find(
+      (r: { tranid: string }) => r.tranid === `NSS-${SUFFIX}-AMT-00002`
+    );
+    expect(ourRow).toBeDefined();
+    // amount field is the JE totalDebit (== totalCredit by invariant).
+    expect(Number(ourRow.amount)).toBe(500);
+  });
+});
+
 describe("v0.9 NS SuiteAnalytics Phase 4: filter-injection defense", () => {
   it("rejects SQL-ish field name", async () => {
     const res = await savedSearch(

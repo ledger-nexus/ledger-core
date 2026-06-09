@@ -687,6 +687,16 @@ model JournalEntry {
   mappingVersion   String?
   extensions       Json?
 
+  // Denormalized line sums. Per the invariant that debits == credits,
+  // these are equal on every well-formed entry (postJournalEntry
+  // enforces this). Stored to make amount-based filtering on the
+  // saved-search endpoint (NS SuiteAnalytics Phase 4 follow-up) and
+  // future reporting queries an O(1) index lookup instead of a JOIN
+  // + aggregate. Backfilled by migration 0012; populated on every
+  // new entry by postJournalEntry.
+  totalDebit  Decimal @default(0) @db.Decimal(18, 4)
+  totalCredit Decimal @default(0) @db.Decimal(18, 4)
+
   lines JournalLine[]
 
   // Sub-ledger backrefs — entries that opened or applied to sub-ledger items.
