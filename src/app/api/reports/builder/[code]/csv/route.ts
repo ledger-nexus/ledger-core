@@ -22,7 +22,7 @@ import { getCurrentTenant } from "@/lib/auth/tenant";
 import { auditDataExport } from "@/lib/audit/log";
 
 import { renderTemplate } from "@/lib/accounting/reports/builder/render";
-import { SYSTEM_TEMPLATES } from "@/lib/accounting/reports/builder/templates";
+import { loadTemplate } from "@/lib/accounting/reports/builder/repository";
 import {
   renderedMatrixToCsv,
   builderCsvFilename,
@@ -40,10 +40,6 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const code = params.code.toUpperCase();
-  const template = SYSTEM_TEMPLATES.find((t) => t.code === code);
-  if (!template) {
-    return new NextResponse(`Unknown template: ${code}`, { status: 404 });
-  }
 
   const scope = await getCurrentScope();
   if (!scope) {
@@ -51,6 +47,12 @@ export async function GET(
       "No scope available — sign in and select a tenant",
       { status: 403 }
     );
+  }
+
+  // PR 9: tenant-scoped template resolution (DB → SYSTEM_TEMPLATES fallback).
+  const template = await loadTemplate(prisma, code, scope.tenantId);
+  if (!template) {
+    return new NextResponse(`Unknown template: ${code}`, { status: 404 });
   }
 
   const url = new URL(req.url);

@@ -29,8 +29,7 @@ import { Input, Label } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils/format";
 
 import { renderTemplate } from "@/lib/accounting/reports/builder/render";
-import { SYSTEM_TEMPLATES } from "@/lib/accounting/reports/builder/templates";
-import type { ReportTemplate } from "@/lib/accounting/reports/builder/types";
+import { loadTemplate } from "@/lib/accounting/reports/builder/repository";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +40,6 @@ interface PageProps {
 
 export default async function ReportBuilderPage({ params, searchParams }: PageProps) {
   const code = params.code.toUpperCase();
-  const template: ReportTemplate | undefined = SYSTEM_TEMPLATES.find(
-    (t) => t.code === code
-  );
-  if (!template) {
-    notFound();
-  }
 
   const scope = await getCurrentScope();
   if (!scope) {
@@ -56,6 +49,13 @@ export default async function ReportBuilderPage({ params, searchParams }: PagePr
         description="Sign in and select a tenant with at least one entity before viewing reports."
       />
     );
+  }
+
+  // PR 9: load through repository — DB row wins, then SYSTEM_TEMPLATES
+  // fallback for tenants that haven't been seeded yet.
+  const template = await loadTemplate(prisma, code, scope.tenantId);
+  if (!template) {
+    notFound();
   }
 
   const asOfStr = searchParams.asOf ?? new Date().toISOString().slice(0, 10);
