@@ -1,6 +1,7 @@
 // AP aging report — mirror of /reports/ar-aging. Wraps apAging().
 
 import Link from "next/link";
+import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { apAging, openApBalance } from "@/lib/accounting/sub-ledgers/ap";
@@ -19,10 +20,29 @@ const BUCKET_LABEL: Record<string, string> = {
   OVER_90: "Over 90 days",
 };
 
+// v0.10 ergonomics: sortable columns via URL params — same shape as
+// /reports/ar-aging. SSR-only, deep-linkable, no client JS.
+const SORTABLE_KEYS = [
+  "reference",
+  "vendor",
+  "opened",
+  "due",
+  "daysOverdue",
+  "status",
+  "original",
+  "balance",
+] as const;
+type SortKey = (typeof SORTABLE_KEYS)[number];
+type SortDir = "asc" | "desc";
+
+function isSortKey(s: string | undefined): s is SortKey {
+  return !!s && (SORTABLE_KEYS as readonly string[]).includes(s);
+}
+
 export default async function ApAgingPage({
   searchParams,
 }: {
-  searchParams: { asOf?: string };
+  searchParams: { asOf?: string; sortKey?: string; sortDir?: string };
 }) {
   // Tenant-verified scope (closes the cross-tenant read leak the raw
   // lc-scope cookie used to enable).
@@ -37,6 +57,10 @@ export default async function ApAgingPage({
   }
   const asOf = searchParams.asOf ?? "2026-06-30";
   const asOfDate = new Date(asOf);
+  const sortKey: SortKey = isSortKey(searchParams.sortKey)
+    ? searchParams.sortKey
+    : "due";
+  const sortDir: SortDir = searchParams.sortDir === "desc" ? "desc" : "asc";
 
   const [buckets, total, items] = await Promise.all([
     apAging(prisma, scope.entityCode, scope.bookCode, asOfDate),
@@ -73,6 +97,58 @@ export default async function ApAgingPage({
     if (d <= 60) return "31_60";
     if (d <= 90) return "61_90";
     return "OVER_90";
+  }
+
+  // In-mem sort — same shape as /reports/ar-aging.
+  const sortedItems = [...items].sort((a, b) => {
+    const mul = sortDir === "desc" ? -1 : 1;
+    let cmp = 0;
+    switch (sortKey) {
+      case "reference":
+        cmp = (a.referenceNumber ?? "").localeCompare(b.referenceNumber ?? "");
+        break;
+      case "vendor":
+        cmp = a.party.displayName.localeCompare(b.party.displayName);
+        break;
+      case "opened":
+        cmp = a.openedDate.getTime() - b.openedDate.getTime();
+        break;
+      case "due":
+        if (a.dueDate === null && b.dueDate === null) cmp = 0;
+        else if (a.dueDate === null) cmp = 1;
+        else if (b.dueDate === null) cmp = -1;
+        else cmp = a.dueDate.getTime() - b.dueDate.getTime();
+        break;
+      case "daysOverdue": {
+        const da = daysOverdue(a) ?? -Infinity;
+        const db = daysOverdue(b) ?? -Infinity;
+        cmp = da - db;
+        break;
+      }
+      case "status":
+        cmp = a.status.localeCompare(b.status);
+        break;
+      case "original":
+        cmp = new Decimal(a.originalAmount.toString())
+          .minus(new Decimal(b.originalAmount.toString()))
+          .toNumber();
+        break;
+      case "balance":
+        cmp = new Decimal(a.currentBalance.toString())
+          .minus(new Decimal(b.currentBalance.toString()))
+          .toNumber();
+        break;
+    }
+    return cmp * mul;
+  });
+
+  function sortHref(key: SortKey): string {
+    const nextDir: SortDir = key === sortKey && sortDir === "asc" ? "desc" : "asc";
+    return `?asOf=${encodeURIComponent(asOf)}&sortKey=${key}&sortDir=${nextDir}`;
+  }
+  function sortIndicator(key: SortKey): string {
+    if (key !== sortKey) return "";
+    return sortDir === "asc" ? " ↑" : " ↓";
   }
 
   return (
@@ -139,19 +215,51 @@ export default async function ApAgingPage({
             <Table>
               <THead>
                 <tr>
-                  <TH>Reference</TH>
-                  <TH>Vendor</TH>
-                  <TH>Opened</TH>
-                  <TH>Due</TH>
-                  <TH>Days overdue</TH>
+                  <TH>
+                    <Link href={sortHref("reference")} className="text-ink-700 hover:underline">
+                      Reference{sortIndicator("reference")}
+                    </Link>
+                  </TH>
+                  <TH>
+                    <Link href={sortHref("vendor")} className="text-ink-700 hover:underline">
+                      Vendor{sortIndicator("vendor")}
+                    </Link>
+                  </TH>
+                  <TH>
+                    <Link href={sortHref("opened")} className="text-ink-700 hover:underline">
+                      Opened{sortIndicator("opened")}
+                    </Link>
+                  </TH>
+                  <TH>
+                    <Link href={sortHref("due")} className="text-ink-700 hover:underline">
+                      Due{sortIndicator("due")}
+                    </Link>
+                  </TH>
+                  <TH>
+                    <Link href={sortHref("daysOverdue")} className="text-ink-700 hover:underline">
+                      Days overdue{sortIndicator("daysOverdue")}
+                    </Link>
+                  </TH>
                   <TH>Bucket</TH>
-                  <TH>Status</TH>
-                  <TH className="text-right">Original</TH>
-                  <TH className="text-right">Balance</TH>
+                  <TH>
+                    <Link href={sortHref("status")} className="text-ink-700 hover:underline">
+                      Status{sortIndicator("status")}
+                    </Link>
+                  </TH>
+                  <TH className="text-right">
+                    <Link href={sortHref("original")} className="text-ink-700 hover:underline">
+                      Original{sortIndicator("original")}
+                    </Link>
+                  </TH>
+                  <TH className="text-right">
+                    <Link href={sortHref("balance")} className="text-ink-700 hover:underline">
+                      Balance{sortIndicator("balance")}
+                    </Link>
+                  </TH>
                 </tr>
               </THead>
               <TBody>
-                {items.map((item) => {
+                {sortedItems.map((item) => {
                   const d = daysOverdue(item);
                   return (
                     <TR key={item.id}>
