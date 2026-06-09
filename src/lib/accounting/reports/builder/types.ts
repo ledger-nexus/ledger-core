@@ -135,6 +135,22 @@ export type ColumnDef =
       // templates so the same template renders for any period.
       scope?: ColumnScope;
       offset?: PeriodOffset;
+      /**
+       * Column-level account filter (PR 4). When set, narrows the
+       * balance map BEFORE the row engine runs for this column.
+       *
+       * Used by matrix layouts like Statement of Stockholders' Equity
+       * where each column scopes to one equity sub-category (Common
+       * Stock, APIC, Retained Earnings). The column-level filter
+       * intersects with the row's ACCOUNTS filter — both must match
+       * for an account to contribute to a cell.
+       *
+       * FORMULA / SUBTOTAL / PERIOD_DELTA rows are unaffected (they
+       * don't query accounts directly). Cross-template @aliases also
+       * bypass column filters — a @IS.ni reference resolves to the
+       * IS template's Net Income regardless of EQ column.
+       */
+      accountFilter?: AccountFilter;
     }
   | {
       id: string;

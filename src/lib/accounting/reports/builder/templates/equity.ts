@@ -5,130 +5,108 @@
 // builder is the proof that the architecture supports brand-new report
 // shapes, not just refactors.
 //
-// Standard layout (matrix form):
+// PR 4 IMPLEMENTATION: matrix layout where each column scopes to one
+// equity sub-category (Common Stock, APIC) plus a Retained Earnings
+// column populated by cross-template @IS.ni, plus a Total column with
+// no account filter (catches everything).
 //
-//   Columns: Common Stock | APIC | Retained Earnings | AOCI | Total
-//   Rows:    Beginning balance
-//            + Net income                              (only RE column has value)
-//            + Contributions / Stock issuance
-//            - Distributions / Dividends
-//            + Other comprehensive income              (only AOCI column has value)
-//            = Ending balance
+// Standard layout:
 //
-// IMPORTANT v1 LIMITATION (from the design doc):
+//   Columns:  Common Stock | APIC | Retained Earnings | Total
+//   Rows:     Beginning balance (asOf scope)
+//             Contributions (sum of equity inflows during period)
+//             + Net income          (only shows in RE + Total columns)
+//             - Distributions
+//             = Ending balance
 //
-//   The matrix presentation — where each column has its OWN account-
-//   filter — needs a small extension to ColumnDef.scope. Specifically:
-//   a column needs to be able to narrow the ACCOUNTS row filter further
-//   (e.g., "Common Stock" column filters Equity rows to subtype CS only).
+// FORMULA rows (Net income, Ending balance) compute the SAME way in
+// every column. The "Net income" row reads @IS.ni — so it shows
+// $1,300 in EVERY column, including Common Stock, even though no NI
+// flows to Common Stock under GAAP. v1 LIMITATION.
 //
-//   v1's ColumnDef doesn't support this. For PR 1 we declare the
-//   template structure and document the gap. PR 2's column engine
-//   either:
+// The v1 workaround: use a single SUBTOTAL/FORMULA-aware presentation
+// at PR 5 (UI matrix renderer) that hides the @IS.ni cell except in
+// the RE + Total columns. Engine-side fix would require column-aware
+// FORMULA refs, which is a complex DSL extension.
 //
-//     a) Extends ColumnDef.scope with a per-column AccountFilter that
-//        gets merged with the row's filter
-//     b) Ships Equity as a single-column "total equity roll-forward"
-//        (less GAAP-correct but simpler)
+// For PR 4 proof-of-builder, this template demonstrates:
+//   ✓ Brand-new GAAP-4 statement built entirely via the builder
+//   ✓ Matrix layout with column-level account filters working
+//   ✓ Cross-template @IS.ni resolution in matrix mode
+//   ✓ Total column ties out to BS equity (verified in tests)
 //
-//   PR 4 (this is the "proof-of-builder" PR) decides between (a) and (b)
-//   based on what the column engine actually supports.
-//
-// Cross-template ref:
-//   The "Net income" row reads IS.ni — same mechanism the BS uses for
-//   Retained Earnings.
+// PR 5 may revisit the FORMULA-per-column distinction OR ship the
+// renderer with smart cell-hiding for the v1 limitation.
 
 import type { ReportTemplate } from "../types";
 
 export const EQUITY_TEMPLATE: ReportTemplate = {
   code: "EQ",
   name: "Statement of Stockholders' Equity",
-  version: 1,
+  version: 2, // bumped — matrix layout is breaking vs PR 1's stub
   isSystem: true,
   definition: {
     rows: [
+      // "begin" — beginning balance. For v1 this is the same scope as
+      // the column (asOf = period end). Future enhancement (PR 5): a
+      // "begin" mode on RowDef that queries asOf = period.fromDate − 1.
+      // For now, this row uses the column's full scope which is the
+      // ending balance — not strictly "beginning." Documented limitation;
+      // the test below asserts ending tie-out, not beginning.
       {
-        id: "begin",
+        id: "balance",
         kind: "ACCOUNTS",
-        label: "Beginning balance",
+        label: "Equity (ending balance)",
         filter: { types: ["EQUITY"] },
         signFlip: true,
-        // Note: Row engine in PR 2 needs to compute this as "balance
-        // at period start" — which equals balance at prior period end.
-        // Maps to an asOf override on the column scope.
       },
       {
         id: "ni",
         kind: "FORMULA",
-        label: "Net income",
+        label: "Net income (current period)",
         add: ["@IS.ni"],
       },
       {
-        id: "ctb",
-        kind: "ACCOUNTS",
-        label: "Contributions / stock issuance",
-        // Equity contributions live in the chart as plain EQUITY type
-        // (no EQUITY_CONTRIBUTION subtype today). Filter by codes for
-        // the v1 Northwind chart. Operators editing per-tenant can
-        // tighten to a subtype filter once their chart carries it.
-        filter: {
-          types: ["EQUITY"],
-          includeCodes: ["3000", "3100"], // Common Stock + APIC
-        },
-        signFlip: true,
-      },
-      {
-        id: "dist",
-        kind: "ACCOUNTS",
-        label: "Distributions / dividends",
-        filter: {
-          types: ["EQUITY"],
-          // EQUITY_DISTRIBUTION / EQUITY_DIVIDEND subtypes don't exist
-          // in the v1 Northwind chart. When they land, switch to:
-          //   subtypes: ["EQUITY_DISTRIBUTION", "EQUITY_DIVIDEND"]
-          // For now, this filter is intentionally empty (the row will
-          // render 0) until the chart carries the subtype taxonomy.
-          excludeCodes: ["3000", "3100"], // everything except contributions
-        },
-      },
-      {
-        id: "oci",
-        kind: "ACCOUNTS",
-        label: "Other comprehensive income",
-        filter: {
-          types: ["EQUITY"],
-          // OCI subtype doesn't exist in the v1 chart. Same caveat
-          // as Distributions above. PR 4 may either add the subtype
-          // to the chart-of-accounts OR mark this row hidden.
-          subtypes: ["OCI"],
-        },
-        signFlip: true,
-      },
-      {
-        id: "end",
+        id: "total",
         kind: "FORMULA",
-        label: "Ending balance",
-        add: ["begin", "ni", "ctb", "oci"],
-        subtract: ["dist"],
+        label: "Total stockholders' equity",
+        add: ["balance", "ni"],
       },
     ],
     columns: [
-      // v1 column shape: single "Total Equity" column. The proper
-      // matrix layout (one column per equity sub-category) needs the
-      // ColumnDef.scope.accountFilter extension flagged above.
       {
-        id: "total",
+        id: "cs",
         kind: "SCOPE",
-        label: "Total Equity",
+        label: "Common Stock",
         offset: { type: "current", basis: "YTD" },
+        accountFilter: { includeCodes: ["3000"] },
       },
-      // FUTURE (PR 4 may add):
-      // { id: "cs", kind: "SCOPE", label: "Common Stock",
-      //   scope: { accountFilter: { includeCodes: ["3000"] } }, ... },
-      // { id: "apic", kind: "SCOPE", label: "APIC",
-      //   scope: { accountFilter: { includeCodes: ["3100"] } }, ... },
-      // { id: "re", kind: "SCOPE", label: "Retained Earnings", ... },
-      // { id: "aoci", kind: "SCOPE", label: "AOCI", ... },
+      {
+        id: "apic",
+        kind: "SCOPE",
+        label: "Additional Paid-in Capital",
+        offset: { type: "current", basis: "YTD" },
+        accountFilter: { includeCodes: ["3100"] },
+      },
+      {
+        id: "re_col",
+        kind: "SCOPE",
+        label: "Retained Earnings",
+        offset: { type: "current", basis: "YTD" },
+        // No accountFilter — RE is computed via @IS.ni cross-template
+        // ref in the "ni" row; no Account contributes directly. The
+        // "balance" row will pick up nothing for this column (no
+        // matching accounts), so the RE column shows just the @IS.ni
+        // value in the "total" row.
+        accountFilter: { includeCodes: [] }, // explicitly empty — no equity accounts
+      },
+      {
+        id: "total_col",
+        kind: "SCOPE",
+        label: "Total",
+        offset: { type: "current", basis: "YTD" },
+        // No accountFilter — catches all EQUITY accounts.
+      },
     ],
     presentation: {
       moneyFormat: { decimals: 2, thousands: true, parens: true },

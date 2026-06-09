@@ -32,9 +32,11 @@ describe("Report Builder — system template registry", () => {
     }
   });
 
-  it("every system template has version 1 in the initial release", () => {
+  it("every system template has a positive version", () => {
+    // Equity bumped to v2 in PR 4 (matrix layout). Other templates
+    // still at v1.
     for (const tmpl of SYSTEM_TEMPLATES) {
-      expect(tmpl.version).toBe(1);
+      expect(tmpl.version).toBeGreaterThan(0);
     }
   });
 

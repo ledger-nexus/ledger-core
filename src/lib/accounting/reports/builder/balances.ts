@@ -184,14 +184,20 @@ export async function getAccountBalances(
  * filters — avoids re-querying.
  */
 export function filterBalances(balances: AccountBalances, filter: AccountFilter): AccountBalance[] {
+  // includeCodes wins absolutely. Semantics:
+  //   - undefined  → not present, no filter constraint, fall through to others
+  //   - []         → explicitly empty, match NOTHING (returns [])
+  //   - non-empty  → match only these codes
+  if (filter.includeCodes !== undefined) {
+    const out: AccountBalance[] = [];
+    for (const b of balances.values()) {
+      if (filter.includeCodes.includes(b.code)) out.push(b);
+    }
+    return out;
+  }
+
   const out: AccountBalance[] = [];
   for (const b of balances.values()) {
-    // includeCodes wins absolutely.
-    if (filter.includeCodes && filter.includeCodes.length > 0) {
-      if (filter.includeCodes.includes(b.code)) out.push(b);
-      continue;
-    }
-
     let matches = true;
     if (filter.types && filter.types.length > 0 && !filter.types.includes(b.type)) {
       matches = false;

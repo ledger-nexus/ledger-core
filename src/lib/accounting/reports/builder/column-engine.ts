@@ -11,7 +11,7 @@
 import { Decimal } from "decimal.js";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
-import { getAccountBalances, type AccountBalances } from "./balances";
+import { getAccountBalances, filterBalances, type AccountBalances } from "./balances";
 import { runRowEngine, formatCell, type FormatOptions, DEFAULT_FORMAT } from "./row-engine";
 import type {
   ColumnDef,
@@ -210,8 +210,21 @@ export async function runColumnEngine(
   for (const col of template.definition.columns) {
     if (col.kind === "VARIANCE") continue;
     const scope = resolvedScopes.get(col.id)!;
-    const balances = await fetchBalances(scope);
-    const opening = await fetchOpening(scope);
+    let balances = await fetchBalances(scope);
+    let opening = await fetchOpening(scope);
+
+    // PR 4: column-level account filter narrows the balance maps
+    // BEFORE the row engine runs. Matrix layouts (Statement of
+    // Stockholders' Equity) use this to scope each column to one
+    // equity sub-category.
+    if (col.accountFilter) {
+      const filtered = filterBalances(balances, col.accountFilter);
+      balances = new Map(filtered.map((b) => [b.code, b]));
+      if (opening) {
+        const filteredOpening = filterBalances(opening, col.accountFilter);
+        opening = new Map(filteredOpening.map((b) => [b.code, b]));
+      }
+    }
 
     const result = runRowEngine({
       rows: template.definition.rows,
