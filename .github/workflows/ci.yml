@@ -42,6 +42,11 @@ jobs:
 
       - run: npm ci
       - run: npx prisma generate
-      - run: npx prisma db push --skip-generate
+      # `migrate deploy` runs every migration including 0002_multi_tenancy,
+      # which inserts the default tenant the Northwind seed requires.
+      # `db push` would only sync the schema, leaving that tenant absent
+      # and causing the seed to fail with `Default tenant (slug="default")
+      # not found`.
+      - run: npx prisma migrate deploy
       - run: npm run db:seed
       - run: npm test
