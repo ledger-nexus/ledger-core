@@ -81,37 +81,47 @@ export async function getBookTaxDifference(
     toBookCode: string;   // e.g. "US_TAX"
     periodStart: Date;
     periodEnd: Date;
+    /**
+     * Tenant the entity must belong to. SOC 2 CC6.1 — every Account
+     * lookup is tenant-scoped via this. Required for any UI caller.
+     * Substrate seeds + tests may omit.
+     */
+    tenantId?: string;
   }
 ): Promise<BookTaxDifferenceReport> {
   const [bookPnl, taxPnl, bookBs, taxBs] = await Promise.all([
     getIncomeStatement(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.fromBookCode },
+      { entityCode: input.entityCode, bookCode: input.fromBookCode, tenantId: input.tenantId },
       input.periodStart,
       input.periodEnd
     ),
     getIncomeStatement(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.toBookCode },
+      { entityCode: input.entityCode, bookCode: input.toBookCode, tenantId: input.tenantId },
       input.periodStart,
       input.periodEnd
     ),
     getBalanceSheet(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.fromBookCode },
+      { entityCode: input.entityCode, bookCode: input.fromBookCode, tenantId: input.tenantId },
       input.periodEnd
     ),
     getBalanceSheet(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.toBookCode },
+      { entityCode: input.entityCode, bookCode: input.toBookCode, tenantId: input.tenantId },
       input.periodEnd
     ),
   ]);
 
   // Build a map of account → (bookAmount, taxAmount) for P&L accounts.
   // Pull subtypes for classification.
+  // SECURITY (SOC 2 CC6.1): tenant-scope the Account lookup. Previously
+  // unscoped — pulled subtypes across all tenants for the classifier.
+  // PR 7 closure of the gap PR 5 documented.
   const accountSubtypeMap = new Map<string, string | null>();
   const accounts = await prisma.account.findMany({
+    where: input.tenantId ? { tenantId: input.tenantId } : {},
     select: { code: true, subtype: true },
   });
   for (const a of accounts) accountSubtypeMap.set(a.code, a.subtype);

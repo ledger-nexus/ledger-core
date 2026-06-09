@@ -29,11 +29,11 @@ async function resolveEntityBook(
   entityCode: string,
   bookCode: string,
   tenantId?: string
-): Promise<{ entityId: string; bookId: string }> {
+): Promise<{ entityId: string; bookId: string; tenantId: string }> {
   const [entity, book] = await Promise.all([
     prisma.legalEntity.findFirst({
       where: tenantId ? { tenantId, code: entityCode } : { code: entityCode },
-      select: { id: true },
+      select: { id: true, tenantId: true },
     }),
     prisma.book.findUnique({
       where: { code: bookCode },
@@ -42,7 +42,11 @@ async function resolveEntityBook(
   ]);
   if (!entity) throw new Error(`Unknown entity: ${entityCode}`);
   if (!book) throw new Error(`Unknown book: ${bookCode}`);
-  return { entityId: entity.id, bookId: book.id };
+  // Return the entity's tenantId so downstream Account queries can
+  // scope to it even when ReportScope.tenantId was not supplied
+  // (substrate seeds, scripts). PR 7 closes the cross-tenant Account
+  // read gap PR 5 documented.
+  return { entityId: entity.id, bookId: book.id, tenantId: entity.tenantId };
 }
 
 export interface ReportScope {
@@ -77,7 +81,7 @@ export async function getTrialBalance(
   scope: ReportScope,
   asOf: Date
 ): Promise<{ rows: TrialBalanceRow[]; totalDebit: Decimal; totalCredit: Decimal }> {
-  const { entityId, bookId } = await resolveEntityBook(
+  const { entityId, bookId, tenantId } = await resolveEntityBook(
     prisma,
     scope.entityCode,
     scope.bookCode ?? DEFAULT_BOOK,
@@ -87,9 +91,15 @@ export async function getTrialBalance(
   // Pull lines for the (entity, book) on/before asOf, grouped by account.
   // Include the parent's code (Phase 7 hierarchy) so reports can render
   // sub-totals without a second query.
+  // SECURITY (SOC 2 CC6.1): tenant-scope the Account query. Without
+  // this, shared accounts (entityId: null) from OTHER tenants with a
+  // colliding `code` would surface — balances stay correct (lines are
+  // entity-filtered) but metadata (name, parentCode) bleed across
+  // tenants. PR 7 closure of the gap PR 5 documented.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
+      tenantId,
       OR: [{ entityId: null }, { entityId }],
     },
     include: {
@@ -184,13 +194,15 @@ export async function getIncomeStatement(
   periodEnd: Date
 ): Promise<IncomeStatement> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, tenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the IS page renderer can
   // build a tree via buildHierarchy() without a second query.
+  // SECURITY (SOC 2 CC6.1): tenant-scope — see getTrialBalance.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
+      tenantId,
       type: { in: ["REVENUE", "EXPENSE"] },
       OR: [{ entityId: null }, { entityId }],
     },
@@ -283,13 +295,15 @@ export async function getBalanceSheet(
   asOf: Date
 ): Promise<BalanceSheet> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, tenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the BS page renderer can
   // build a tree via buildHierarchy() without a second query.
+  // SECURITY (SOC 2 CC6.1): tenant-scope — see getTrialBalance.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
+      tenantId,
       type: { in: ["ASSET", "LIABILITY", "EQUITY"] },
       OR: [{ entityId: null }, { entityId }],
     },

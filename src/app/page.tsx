@@ -8,7 +8,7 @@ import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { listMyTenants } from "@/lib/auth/tenant";
+import { listMyTenants, getCurrentTenant } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -249,12 +249,17 @@ export default async function DashboardPage() {
         })
       : 0;
     if (taxEntries > 0) {
+      // SOC 2 CC6.1: thread tenant id so the BTD report scopes its
+      // Account lookups to this tenant only. Dashboard uses LedgerScope
+      // (cookie-only) — fetch the current tenant separately.
+      const currentTenant = await getCurrentTenant();
       const btd = await getBookTaxDifference(prisma, {
         entityCode: scope.entityCode,
         fromBookCode: scope.bookCode,
         toBookCode: otherBook,
         periodStart: YEAR_START,
         periodEnd: ASOF,
+        tenantId: currentTenant?.id,
       });
       btdSummary = { delta: btd.totalDelta, otherBook };
     }

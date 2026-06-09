@@ -176,7 +176,7 @@ function cashImpactDirection(
 
 export async function getCashFlowStatement(
   prisma: PrismaClient,
-  scope: { entityCode: string; bookCode?: string },
+  scope: { entityCode: string; bookCode?: string; tenantId?: string },
   periodStart: Date,
   periodEnd: Date
 ): Promise<CashFlowStatement> {
@@ -187,14 +187,19 @@ export async function getCashFlowStatement(
   dayBeforeStart.setUTCDate(dayBeforeStart.getUTCDate() - 1);
 
   const [beginBs, endBs, pnl] = await Promise.all([
-    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode }, dayBeforeStart),
-    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode }, periodEnd),
-    getIncomeStatement(prisma, { entityCode: scope.entityCode, bookCode }, periodStart, periodEnd),
+    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode, tenantId: scope.tenantId }, dayBeforeStart),
+    getBalanceSheet(prisma, { entityCode: scope.entityCode, bookCode, tenantId: scope.tenantId }, periodEnd),
+    getIncomeStatement(prisma, { entityCode: scope.entityCode, bookCode, tenantId: scope.tenantId }, periodStart, periodEnd),
   ]);
 
   // Pull account metadata so we can classify each BS row.
+  // SECURITY (SOC 2 CC6.1): tenant-scope the Account lookup. Without
+  // this, accounts in OTHER tenants with the same code surface, and
+  // their `name` / `subtype` / `isBank` bleed into our cash-flow
+  // classification. PR 7 closure of the gap PR 5 documented.
   const accounts = await prisma.account.findMany({
     where: {
+      ...(scope.tenantId ? { tenantId: scope.tenantId } : {}),
       OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
     },
     select: { code: true, name: true, type: true, subtype: true, isBank: true, isContra: true },

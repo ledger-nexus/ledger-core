@@ -27,6 +27,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     toBookCode: bookTo,
     periodStart: new Date(from),
     periodEnd: new Date(to),
+    tenantId: scope.tenantId,
   });
 
   const tenant = await getCurrentTenant();

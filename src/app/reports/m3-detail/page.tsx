@@ -46,6 +46,7 @@ export default async function M3DetailPage({
     toBookCode: bookTo,
     periodStart: new Date(from),
     periodEnd: new Date(to),
+    tenantId: scope.tenantId,
   });
 
   const csvUrl = `/api/reports/m3-detail/csv?bookFrom=${bookFrom}&bookTo=${bookTo}&from=${from}&to=${to}`;

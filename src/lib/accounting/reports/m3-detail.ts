@@ -113,17 +113,25 @@ export async function getM3Detail(
     toBookCode: string;
     periodStart: Date;
     periodEnd: Date;
+    tenantId?: string;
   }
 ): Promise<M3DetailReport> {
   const btd = await getBookTaxDifference(prisma, input);
 
   // Pull subtypes for each account in the diff.
+  // SECURITY (SOC 2 CC6.1): tenant-scope the Account lookup. Without
+  // it, accounts in OTHER tenants with the same code surface and
+  // their `subtype` drives M-3 classification incorrectly. PR 7
+  // closure of the gap PR 5 documented.
   const allCodes = new Set<string>([
     ...btd.pnlRows.map((r) => r.accountCode),
     ...btd.balanceSheetRows.map((r) => r.accountCode),
   ]);
   const accounts = await prisma.account.findMany({
-    where: { code: { in: Array.from(allCodes) } },
+    where: {
+      code: { in: Array.from(allCodes) },
+      ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+    },
     select: { code: true, subtype: true },
   });
   const subtypeByCode = new Map(accounts.map((a) => [a.code, a.subtype]));

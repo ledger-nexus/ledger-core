@@ -159,8 +159,15 @@ export async function getConsolidatedTrialBalance(
   }
 
   // Pull account metadata (subtype + isContra) for classification.
+  // SECURITY (SOC 2 CC6.1): tenant-scope the Account lookup. Without
+  // it, accounts in OTHER tenants with the same code surface and
+  // their `subtype` drives intercompany-elimination classification
+  // incorrectly. PR 7 closure of the gap PR 5 documented.
   const accountMeta = await prisma.account.findMany({
-    where: { code: { in: Array.from(aggregates.keys()) } },
+    where: {
+      code: { in: Array.from(aggregates.keys()) },
+      tenantId: root.tenantId,
+    },
     select: { code: true, subtype: true, isContra: true },
   });
   const metaByCode = new Map(accountMeta.map((a) => [a.code, a]));
