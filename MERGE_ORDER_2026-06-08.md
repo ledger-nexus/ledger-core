@@ -1,6 +1,6 @@
 # Merge order — 2026-06-08 session
 
-49 PRs landed today across 6 architectural arcs + 1 adversarial-pass closure + 1 v0.10 polish-arc closure + 4 closure tails + doc capstones. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #192) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`, `books.ts`, `ns-analytics-auth.ts`, `ns-saved-search.ts`, `export.ts`, `post-journal.ts`, 4 NS-analytics CSV routes, 2 aging-page routes, JE new-entry form).
+51 PRs landed today across 6 architectural arcs + 1 adversarial-pass closure + 1 v0.10 polish-arc closure + 4 closure tails + doc capstones. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #194) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`, `books.ts`, `ns-analytics-auth.ts`, `ns-saved-search.ts`, `export.ts`, `post-journal.ts`, 4 NS-analytics CSV routes, 2 aging-page routes, JE new-entry form, `tenant-account-resolution.test.ts`).
 
 ## The 37-PR stack
 
@@ -106,8 +106,10 @@ Closes every remaining item on the v1.2+ ergonomics-and-polish list. The list ha
 | 50 | [#190](https://github.com/ledger-nexus/ledger-core/pull/190) | v0.10 polish — Tab from last Amount appends a new JE line | `new-entry-form.tsx`, `PROJECT_STATUS.md` |
 | 51 | [#191](https://github.com/ledger-nexus/ledger-core/pull/191) | v0.10 polish — sortable columns on AR / AP aging pages | `ar-aging/page.tsx`, `ap-aging/page.tsx`, `PROJECT_STATUS.md` |
 | 52 | [#192](https://github.com/ledger-nexus/ledger-core/pull/192) | v0.10 polish — pin HISTORICAL pass-through as ASC 830-correct + test | `consolidation.ts`, `fx-consolidation-historical.test.ts`, `PROJECT_STATUS.md` |
+| 53 | [#193](https://github.com/ledger-nexus/ledger-core/pull/193) | docs: MERGE_ORDER → 49 PRs + Arc 8 v0.10 polish closure captured | `MERGE_ORDER_2026-06-08.md`, `PROJECT_STATUS.md` |
+| 54 | [#194](https://github.com/ledger-nexus/ledger-core/pull/194) | v0.10 polish — self-healing orphan-tenant cleanup in tenant-account-resolution | `tenant-account-resolution.test.ts` |
 
-*(Note: 52 line items above include 7 doc-MERGE_ORDER + doc-PROJECT_STATUS capstones #160 + #162 + #166 + #180 + #186 + #188 + #189 that are bookkeeping — call the actual code-arc count 45 PRs deployed.)*
+*(Note: 54 line items above include 8 doc capstones #160 + #162 + #166 + #180 + #186 + #188 + #189 + #193 that are bookkeeping — call the actual code-arc count 46 PRs deployed.)*
 
 ## 6 architectural arcs + 1 adversarial-pass closure + 1 polish-arc closure
 
@@ -134,8 +136,8 @@ The Arc 5 capstone left 5 documented deferrals. Arc 6 closes every one of them i
 ### 34th adversarial pass (Arc 7, PR #187) — self-review axis
 Standing cadence (memory: passes 1-33 have run). 34th-pass review of Arc 6 found one HIGH and 4 safe-but-flagged findings. HIGH: CWE-1236 CSV formula injection in 4 NS-analytics CSV serializers (TB / IS / BS / Consolidated TB) — the inline escape forgot the formula-leader prefix that the shared `toCsv` helper at `src/lib/utils/csv.ts` already enforces (`escapeFormula` + `FORMULA_LEADERS` regex). Fix: swap all 4 to the shared helper; ship a `csv-formula-injection.test.ts` unit test at the helper layer so every future caller inherits the same contract. Safe-but-flagged: Saved-Search amount filter (Prisma driver rejects malformed decimals); subtype refinement (pure enum map, no user input); Customer/Vendor/Item searchTypes (same whitelist pattern as Account/Transaction); OpenItemState tenant-scoping inherits the exporter-wide pre-existing pattern (RLS Phase 2 enforces in production; Phase 3 FORCE in progress per separate task).
 
-### v0.10 polish closure (Arc 8, PRs #188 → #192) — gap-closure axis
-Closes every remaining item on the v1.2+ ergonomics-and-polish deferred list, which had been carrying these items since v0.6. Recurring journal entry templates — closed in #189 as already-shipped at v0.6 (schema + engine + Server Action + UI form all in tree; the deferral entry was a stale carry-over). Keyboard shortcut "+ Add line" — shipped in #190 with Tab from last Amount appending a new line + focusing its Side select via querySelector-after-commit (no ref array, no client-side state churn). AR / AP aging sortable columns — shipped in #191 via URL-param SSR sort (deep-linkable, no client JS, in-memory sort handles derived columns like daysOverdue naturally). HISTORICAL category line-walking — closed in #192 as WON'T DO with evidence: the pass-through is ASC 830-10-45-9-correct (non-monetary items at historical cost translate at the rate when recognized; the GL already stores at that rate via `JournalEntry.fxRate`). New `fx-consolidation-historical.test.ts` proves the dimensional analysis with a worked example (GBP equity contribution at posting-rate 1.20 stays at 1,200 USD; CR cash counterpart remeasures to 1,560 USD at current 1.30; CTA = exactly 360 USD = expected). Comment in `consolidation.ts:314` rewritten from "TODO Phase 5 polish" to documented rationale citing ASC 830.
+### v0.10 polish closure (Arc 8, PRs #188 → #194) — gap-closure axis
+Closes every remaining item on the v1.2+ ergonomics-and-polish deferred list, which had been carrying these items since v0.6. Recurring journal entry templates — closed in #189 as already-shipped at v0.6 (schema + engine + Server Action + UI form all in tree; the deferral entry was a stale carry-over). Keyboard shortcut "+ Add line" — shipped in #190 with Tab from last Amount appending a new line + focusing its Side select via querySelector-after-commit (no ref array, no client-side state churn). AR / AP aging sortable columns — shipped in #191 via URL-param SSR sort (deep-linkable, no client JS, in-memory sort handles derived columns like daysOverdue naturally). HISTORICAL category line-walking — closed in #192 as WON'T DO with evidence: the pass-through is ASC 830-10-45-9-correct (non-monetary items at historical cost translate at the rate when recognized; the GL already stores at that rate via `JournalEntry.fxRate`). New `fx-consolidation-historical.test.ts` proves the dimensional analysis with a worked example (GBP equity contribution at posting-rate 1.20 stays at 1,200 USD; CR cash counterpart remeasures to 1,560 USD at current 1.30; CTA = exactly 360 USD = expected). Comment in `consolidation.ts:314` rewritten from "TODO Phase 5 polish" to documented rationale citing ASC 830. PR #194 hardens `tenant-account-resolution.test.ts` against killed-mid-run residue: a self-healing beforeAll scrubs `acc-leak-*` orphan tenants from prior interrupted runs so subsequent FX consolidation tests don't get poisoned by leaked tenant-scoped accounts (pre-existing `getTrialBalance` tenant-scoping gap is fixed portfolio-wide by RLS Phase 3 FORCE — task #127 in_progress).
 
 ## Migration dependencies
 
@@ -214,11 +216,11 @@ No documented deferrals remain. Future v0.10 work (recurring entries, multi-curr
 
 ## The session at a glance
 
-- 49 PRs deployed across 6 architectural arcs + 1 adversarial-pass closure + 1 v0.10 polish-arc closure + 4 closure tails + 7 doc capstones
+- 51 PRs deployed across 6 architectural arcs + 1 adversarial-pass closure + 1 v0.10 polish-arc closure + 4 closure tails + 8 doc capstones
 - 5 Prisma migrations (all idempotent)
-- 28+ test files with full pass count (162+ tests across the final sweep)
+- 28+ test files with full pass count (162+ tests across the final focused sweep)
 - 0 breaking changes — every v0.7 caller works unchanged at head of stack
-- 0 documented deferrals remaining — Arc 6 closed every Arc 5 follow-up; Arc 7 closed the one HIGH the 34th adversarial pass surfaced; Arc 8 cleared the v1.2+ ergonomics-and-polish list (including HISTORICAL line-walking, which turned out to be WON'T DO with ASC 830 evidence)
+- 0 documented deferrals remaining — Arc 6 closed every Arc 5 follow-up; Arc 7 closed the one HIGH the 34th adversarial pass surfaced; Arc 8 cleared the v1.2+ ergonomics-and-polish list (including HISTORICAL line-walking, which turned out to be WON'T DO with ASC 830 evidence) AND hardened the shared-DB tenant-account-resolution test against killed-mid-run residue
 - Bi-directional NS substrate now operational:
   - **INBOUND**: NS OneWorld exports → ledger-core via 4 mapper paths + multi-sub + multi-book + ASC 830 FX + sub-ledger multi-book
   - **OUTBOUND**: BI tools with SuiteAnalytics adapters → ledger-core reports via bearer-auth + NS-internalid resolution + NS-canonical shape + Saved-Search (5 searchTypes) + consolidation (JSON + CSV) + amount filter; all CSV exports CWE-1236-hardened via shared `toCsv` helper
