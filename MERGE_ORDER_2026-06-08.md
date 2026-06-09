@@ -1,6 +1,6 @@
 # Merge order — 2026-06-08 session
 
-37 PRs landed today across 5 architectural arcs + 4 closure tails + doc capstones. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #179) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`, `books.ts`, `ns-analytics-auth.ts`).
+43 PRs landed today across 6 architectural arcs + 4 closure tails + doc capstones. They stack linearly — each PR's base is the previous PR's head. Land them in numerical order (PR #141 → #185) to get a clean fast-forward merge into `main`. Out-of-order merges hit conflicts on shared files (`import.ts`, `consolidation.ts`, `subsidiaries.ts`, `books.ts`, `ns-analytics-auth.ts`, `ns-saved-search.ts`, `export.ts`, `post-journal.ts`).
 
 ## The 37-PR stack
 
@@ -73,11 +73,24 @@
 | 38 | [#178](https://github.com/ledger-nexus/ledger-core/pull/178) | Phase 4 — Saved-Search query endpoint (Account + Transaction) | `ns-saved-search.ts`, `saved-search/route.ts` |
 | 39 | [#179](https://github.com/ledger-nexus/ledger-core/pull/179) | Phase 5 — Consolidated Trial Balance + arc capstone | `consolidated-trial-balance/route.ts`, shape mapper extension |
 
-*(Note: 37 line items above includes 2 doc-MERGE_ORDER capstones #160 + #162 + #166 that are bookkeeping — call the actual code-arc count 37 PRs deployed.)*
+### Arc 6 — SuiteAnalytics burndown (PRs #180 → #185)
 
-## 5 architectural arcs, 5 NS axes
+Closes every deferred item from the original Arc 5 capstone in code. Each PR carries the established Arc-5 pattern on a single, focused axis.
 
-The 37 PRs cluster cleanly into 5 NS architectural axes:
+| # | PR | Title | Files of note |
+|---|----|-------|--------------|
+| 40 | [#180](https://github.com/ledger-nexus/ledger-core/pull/180) | docs: MERGE_ORDER capstone — bring doc current with 37-PR session inventory | `MERGE_ORDER_2026-06-08.md` |
+| 41 | [#181](https://github.com/ledger-nexus/ledger-core/pull/181) | v0.9 NS SuiteAnalytics — Customer / Vendor / Item Saved-Search types | `ns-saved-search.ts`, `ns-saved-search.test.ts` |
+| 42 | [#182](https://github.com/ledger-nexus/ledger-core/pull/182) | v0.9 NS SuiteAnalytics — per-row NS accttype subtype refinement | `ns-report-shapes.ts`, `ns-analytics-auth.ts`, 4 route files, `ns-report-shapes.test.ts` |
+| 43 | [#183](https://github.com/ledger-nexus/ledger-core/pull/183) | v0.9 NS SuiteAnalytics — CSV format for consolidation endpoint | `consolidated-trial-balance/route.ts`, `ns-consolidated-tb-endpoint.test.ts` |
+| 44 | [#184](https://github.com/ledger-nexus/ledger-core/pull/184) | v0.9 NS SuiteAnalytics — Saved-Search Transaction amount filter | migration 0012, `post-journal.ts`, `ns-saved-search.ts`, `ns-saved-search.test.ts` |
+| 45 | [#185](https://github.com/ledger-nexus/ledger-core/pull/185) | v0.9 NS Books Phase 3.5.C — sub-ledger MULTI-BOOK reverse export | `types.ts`, `export.ts`, `ns-sub-ledger-reverse-export.test.ts` |
+
+*(Note: 45 line items above include 3 doc-MERGE_ORDER capstones #160 + #162 + #166 + #180 that are bookkeeping — call the actual code-arc count 41 PRs deployed.)*
+
+## 6 architectural arcs, 6 NS axes
+
+The 43 PRs cluster cleanly into 6 NS architectural axes:
 
 ### v0.7 NS multi-subsidiary (Arc 1, PRs #141 → #145) — entity axis
 NS multi-sub import end-to-end through to consolidated trial balance. Phase 4 reverse exporter closes the roundtrip. UI + demo + hardened Server Action ship the v0.7 deliverable.
@@ -94,22 +107,26 @@ Closes the silent-data-loss bug where multi-book NS exports lost sub-ledger deta
 ### NS SuiteAnalytics outbound endpoints (Arc 5, PRs #173 → #179) — outbound report axis
 Inverts the data direction: external NS-ecosystem BI tools call ledger-core with NS internalid params + bearer token, get back NS-canonical SuiteAnalytics-shaped JSON. TB / IS / BS + Saved-Search (Account, Transaction) + Consolidated TB with intercompany elimination + ASC 830 translation + CTA. The "drop-in NS replacement" thesis now operational in both directions.
 
+### SuiteAnalytics burndown (Arc 6, PRs #180 → #185) — gap closure axis
+The Arc 5 capstone left 5 documented deferrals. Arc 6 closes every one of them in code, on the same single-PR-per-axis cadence. Customer/Vendor/Item Saved-Search types (drop-in addition on the established Phase 4 pattern); per-row accttype subtype refinement (22-row REFINED_BY_SUBTYPE map threaded through all 4 report shape mappers via optional subtypeHints); CSV format for consolidation (wide-format with per-entity column pairs); Saved-Search amount filter (new denormalized `JournalEntry.totalDebit/Credit` column + migration 0012 + post-write population + adapter wiring); Phase 3.5.C sub-ledger multi-book reverse export (new `OpenItemState` extension to the NS export shape). Every backward-compat invariant preserved; single-mode exports keep the v0.6 canonical shape unchanged.
+
 ## Migration dependencies
 
-Four Prisma migrations land in numerical order:
+Five Prisma migrations land in numerical order:
 
 - **0008** (PR #149) — adds `Account.translationCategory` enum + column with backfill
 - **0009** (PR #155) — scopes `gl_entry_header_lineage_uniq` to `(tenantId, bookId, ...)`
 - **0010** (PR #159) — adds `LegalEntity.isEliminationEntity` column with backfill
 - **0011** (PR #168) — scopes `ar_open_item` + `ap_open_item` lineage uniq to `(tenantId, bookId, ...)`
+- **0012** (PR #184) — adds `JournalEntry.totalDebit/totalCredit` Decimal(18,4) columns with CTE backfill + compound index on `(tenantId, totalDebit)`
 
 Each is idempotent (`IF NOT EXISTS` / `WHERE NOT EXISTS`). Production rollout: apply in order; no operator coordination needed beyond the merge sequence itself.
 
 ## Test results across the stack
 
-Verified on dev DB at the head of #179:
+Verified on dev DB at the head of #185:
 
-- **124+ NS + FX + SuiteAnalytics test files green**:
+- **152+ NS + FX + SuiteAnalytics test files green** (19 files, full sequential sweep):
   - `netsuite-multi-subsidiary` (v0.7 Phase 1 unit): 15/15
   - `netsuite-multi-subsidiary-integration` (v0.7 Phase 2 Postgres): 6/6
   - `netsuite-import-multi-sub-e2e` (v0.7 Phase 3 e2e): 5/5
@@ -134,41 +151,46 @@ Verified on dev DB at the head of #179:
   - `ns-analytics-endpoints` (SuiteAnalytics Phase 1 + 2 + 3 + 3.5): 22/22
   - `ns-id-resolver` (SuiteAnalytics Phase 2): 7/7
   - `ns-report-shapes` (SuiteAnalytics Phase 3 + 5): 7/7
-  - `ns-saved-search` (SuiteAnalytics Phase 4): 22/22
-  - `ns-consolidated-tb-endpoint` (SuiteAnalytics Phase 5): 7/7
-- **tsc clean** across all 37 PR diffs
+  - `ns-saved-search` (SuiteAnalytics Phase 4 + Arc 6 #181 + #184): 33/33
+  - `ns-consolidated-tb-endpoint` (SuiteAnalytics Phase 5 + Arc 6 #183): 7/7
+  - `ns-report-shapes` (SuiteAnalytics Phase 3 + 5 + Arc 6 #182): 15/15
+  - `ns-sub-ledger-reverse-export` (Arc 6 #185 — Phase 3.5.C reverse export): 3/3
+- **tsc clean** across all 43 PR diffs
 - **Backward compat preserved** at every layer — every existing v0.7 test passes against the head of the stack
+- **Single-mode export shape unchanged** — Arc 6 additions all gated behind `bookResolution.mode === "multi"` / `format=csv` / explicit searchType, so the v0.6 canonical fixture still diffs to null
 
 ## What's still deferred (intentionally — beyond this session)
 
-Every deferred item from the original 19-PR capstone has been **closed in code or captured in design**. Items that remain are intentional follow-ups that emerged DURING the SuiteAnalytics arc:
+Every documented deferral from the original 19-PR capstone AND every documented deferral from the Arc 5 follow-up list has been **closed in code**. Arc 6 (PRs #180 → #185) is the explicit burndown:
 
-- Saved-Search Customer / Vendor / Item searchTypes (drop-in additions; established pattern in PR #178)
-- Per-row NS accttype subtype refinement (Bank vs OthCurAsset, COGS vs Expense, etc.)
-- Saved-Search amount filter (requires denormalized JE total column)
-- CSV format for the consolidation endpoint
-- NS Books Phase 3.5 sub-ledger multi-book reverse-export path (sub-ledger lineage already book-scoped, but the reverse exporter doesn't emit per-book OpenItem state yet)
+- ✅ Saved-Search Customer / Vendor / Item searchTypes — closed in PR #181
+- ✅ Per-row NS accttype subtype refinement — closed in PR #182
+- ✅ CSV format for the consolidation endpoint — closed in PR #183
+- ✅ Saved-Search amount filter (with denormalized JE total column) — closed in PR #184
+- ✅ NS Books Phase 3.5 sub-ledger multi-book reverse-export path — closed in PR #185
 
-These are bounded follow-ups for a future session — each takes 30-100 lines of code on top of the established pattern. None are blocking.
+No documented deferrals remain. Future v0.10 work (recurring entries, multi-currency revaluation, FX gain/loss wiring) is roadmap, not deferral.
 
 ## Recommended merge approach
 
 1. Land PRs in numerical order on a feature merge train branch (e.g. `merge-train-2026-06-08`).
 2. Squash-merge each PR — the linear history makes the train easy to revert by PR if needed.
-3. After all 37 land on the train, fast-forward `main`.
-4. Run the full NS + FX + Phase 3.5 + SuiteAnalytics suite on `main` post-merge as the production-readiness check.
+3. After all 43 land on the train, fast-forward `main`.
+4. Run the full NS + FX + Phase 3.5 + SuiteAnalytics + Arc 6 burndown suite on `main` post-merge as the production-readiness check.
 5. Document the session in the operator runbook (this file IS the operator runbook for this session).
 
-**Alternative for individual review**: cherry-pick the docs PRs (#145, #153, #157, #160, #162, #166, #167, #173) and the column-promotion PR (#159) first — those are low-risk single-file changes. The architectural PRs need the chain order preserved.
+**Alternative for individual review**: cherry-pick the docs PRs (#145, #153, #157, #160, #162, #166, #167, #173, #180) and the column-promotion PR (#159) first — those are low-risk single-file changes. The architectural PRs need the chain order preserved.
 
-**Special note on doc PRs**: the doc-MERGE_ORDER capstones (#160, #162, #166, and this revision) are bookkeeping — they only modify the merge-order doc itself. Safe to land last if doing partial rollout.
+**Special note on doc PRs**: the doc-MERGE_ORDER capstones (#160, #162, #166, #180, and this revision) are bookkeeping — they only modify the merge-order doc itself. Safe to land last if doing partial rollout.
 
 ## The session at a glance
 
-- 37 PRs deployed across 5 architectural arcs + 4 closure tails + 3 doc capstones
-- 4 Prisma migrations (all idempotent)
-- 25+ test files with full pass count
+- 43 PRs deployed across 6 architectural arcs + 4 closure tails + 4 doc capstones
+- 5 Prisma migrations (all idempotent)
+- 26+ test files with full pass count (152+ tests on the final sweep)
 - 0 breaking changes — every v0.7 caller works unchanged at head of stack
+- 0 documented deferrals remaining — Arc 6 closed every documented Arc 5 follow-up
 - Bi-directional NS substrate now operational:
   - **INBOUND**: NS OneWorld exports → ledger-core via 4 mapper paths + multi-sub + multi-book + ASC 830 FX + sub-ledger multi-book
-  - **OUTBOUND**: BI tools with SuiteAnalytics adapters → ledger-core reports via bearer-auth + NS-internalid resolution + NS-canonical shape + Saved-Search queries + consolidation
+  - **OUTBOUND**: BI tools with SuiteAnalytics adapters → ledger-core reports via bearer-auth + NS-internalid resolution + NS-canonical shape + Saved-Search (5 searchTypes) + consolidation (JSON + CSV) + amount filter
+  - **REVERSE-EXPORT**: per-book sub-ledger OpenItem state surfaced in NsExport for downstream consumers
