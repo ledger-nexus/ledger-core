@@ -35,6 +35,15 @@ export interface AccountFilter {
   parentCodes?: string[];
   includeCodes?: string[];
   excludeCodes?: string[];
+  /**
+   * Exclude accounts whose subtype is in this list. Added in PR 5 so
+   * the BS template's `noncurrent_liabilities` row can say "all LIAB
+   * accounts EXCEPT the current-liability subtypes" without enumerating
+   * every code. Without this, the prior template used
+   * `excludeCodes: []` which was a silent no-op and caused
+   * current_liabilities + noncurrent_liabilities to double-count.
+   */
+  excludeSubtypes?: string[];
 }
 
 /**

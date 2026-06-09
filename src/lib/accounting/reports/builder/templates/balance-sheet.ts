@@ -92,10 +92,21 @@ export const BALANCE_SHEET_TEMPLATE: ReportTemplate = {
         kind: "ACCOUNTS",
         label: "Non-current liabilities",
         filter: {
+          // "Everything LIABILITY minus what current_liabilities already
+          // caught." PR 5 added `excludeSubtypes` to AccountFilter
+          // specifically for this catch-all pattern — without it, the
+          // prior `excludeCodes: []` was a silent no-op and
+          // current_liabilities + noncurrent_liabilities double-counted
+          // every AP/accrual/deferred-rev row.
           types: ["LIABILITY"],
-          // Anything LIABILITY that's NOT current. v1 catches via exclude;
-          // future enrichment: LEASE_LIABILITY_LT, LONG_TERM_DEBT subtypes.
-          excludeCodes: [],
+          excludeSubtypes: [
+            "AP_TRADE",
+            "ACCRUED",
+            "DEFERRED_REV",
+            "TAX_PAYABLE",
+            "DUE_TO_AFFILIATE",
+            "LEASE_LIABILITY",
+          ],
         },
         signFlip: true,
       },

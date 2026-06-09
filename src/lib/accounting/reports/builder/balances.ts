@@ -119,6 +119,9 @@ export async function getAccountBalances(
             ...(filter?.excludeCodes && filter.excludeCodes.length > 0
               ? { code: { notIn: filter.excludeCodes } }
               : {}),
+            ...(filter?.excludeSubtypes && filter.excludeSubtypes.length > 0
+              ? { subtype: { notIn: filter.excludeSubtypes } }
+              : {}),
           }),
     },
     include: {
@@ -209,6 +212,15 @@ export function filterBalances(balances: AccountBalances, filter: AccountFilter)
       if (!b.parentCode || !filter.parentCodes.includes(b.parentCode)) matches = false;
     }
     if (matches && filter.excludeCodes && filter.excludeCodes.includes(b.code)) {
+      matches = false;
+    }
+    if (
+      matches &&
+      filter.excludeSubtypes &&
+      filter.excludeSubtypes.length > 0 &&
+      b.subtype &&
+      filter.excludeSubtypes.includes(b.subtype)
+    ) {
       matches = false;
     }
 
