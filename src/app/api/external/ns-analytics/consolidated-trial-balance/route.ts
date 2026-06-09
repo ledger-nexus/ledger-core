@@ -21,6 +21,7 @@ import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidat
 import {
   authenticateExternalRequest,
   auditExternalReportAccess,
+  fetchAccountSubtypeHints,
 } from "@/lib/external/ns-analytics-auth";
 import {
   resolveNsSubsidiary,
@@ -160,6 +161,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       entityCodeToNsInternalid[e.code] = nsId;
     }
 
+    const hints = await fetchAccountSubtypeHints(
+      prisma,
+      auth.tenantId,
+      report.rows.map((r) => r.accountCode)
+    );
     const nsBody = toNsConsolidatedTrialBalance(
       {
         entities: report.entitiesIncluded,
@@ -179,7 +185,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         accountingBookInternalid: accountingBook,
         rootEntityName: report.rootEntityName,
         entityCodeToNsInternalid,
-      }
+      },
+      hints
     );
     return NextResponse.json(nsBody);
   }

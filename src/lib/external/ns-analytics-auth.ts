@@ -237,6 +237,35 @@ export async function resolveScopeFromQuery(
 }
 
 /**
+ * v0.9 SuiteAnalytics — fetch per-accountCode subtype + isBank hints
+ * for refined NS accttype mapping. The shape mapper falls back to the
+ * primary-type default when a code is missing from the hint map, so
+ * this helper is safe to call with any list of codes. Returns an
+ * empty map when no codes match.
+ *
+ * Scoped to the auth tenant — cross-tenant probes return null hints.
+ */
+export async function fetchAccountSubtypeHints(
+  prisma: PrismaClient,
+  tenantId: string,
+  accountCodes: string[]
+): Promise<Record<string, { subtype: string | null; isBank: boolean }>> {
+  if (accountCodes.length === 0) return {};
+  const rows = await prisma.account.findMany({
+    where: {
+      tenantId,
+      code: { in: accountCodes },
+    },
+    select: { code: true, subtype: true, isBank: true },
+  });
+  const hints: Record<string, { subtype: string | null; isBank: boolean }> = {};
+  for (const r of rows) {
+    hints[r.code] = { subtype: r.subtype, isBank: r.isBank };
+  }
+  return hints;
+}
+
+/**
  * Audit-log a successful external report read. Called after the report
  * helper returns but before the response is sent — so a failed report
  * (Decimal overflow, etc.) also gets recorded.

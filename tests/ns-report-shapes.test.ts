@@ -182,6 +182,219 @@ describe("v0.9 NS SuiteAnalytics Phase 3: toNsIncomeStatement", () => {
   });
 });
 
+describe("v0.9 NS SuiteAnalytics — per-row subtype refinement (accttype)", () => {
+  // The subtype hint map refines the catch-all primary-type fallback
+  // ("OthCurAsset" / "OthCurLiab" / etc.) into the more specific NS
+  // accttype value that real SuiteAnalytics responses use.
+
+  it("isBank=true forces accttype=Bank regardless of subtype", async () => {
+    const body = toNsTrialBalance(
+      [
+        {
+          accountCode: "1000",
+          accountName: "Cash — Operating",
+          type: "ASSET",
+          debit: new Decimal("100.0000"),
+          credit: new Decimal("0.0000"),
+          balance: new Decimal("100.0000"),
+          parentCode: null,
+          isContra: false,
+        },
+      ],
+      { totalDebit: new Decimal("100.0000"), totalCredit: new Decimal("0.0000") },
+      "2026-04-30",
+      CTX,
+      { "1000": { subtype: "CASH", isBank: true } }
+    );
+    expect(body.rows[0].account.accttype).toBe("Bank");
+  });
+
+  it("AR_TRADE subtype maps to AcctRec", async () => {
+    const body = toNsTrialBalance(
+      [
+        {
+          accountCode: "1200",
+          accountName: "Accounts Receivable",
+          type: "ASSET",
+          debit: new Decimal("0.0000"),
+          credit: new Decimal("0.0000"),
+          balance: new Decimal("0.0000"),
+          parentCode: null,
+          isContra: false,
+        },
+      ],
+      { totalDebit: new Decimal("0.0000"), totalCredit: new Decimal("0.0000") },
+      "2026-04-30",
+      CTX,
+      { "1200": { subtype: "AR_TRADE", isBank: false } }
+    );
+    expect(body.rows[0].account.accttype).toBe("AcctRec");
+  });
+
+  it("AP_TRADE subtype maps to AcctPay", async () => {
+    const body = toNsTrialBalance(
+      [
+        {
+          accountCode: "2000",
+          accountName: "Accounts Payable",
+          type: "LIABILITY",
+          debit: new Decimal("0.0000"),
+          credit: new Decimal("0.0000"),
+          balance: new Decimal("0.0000"),
+          parentCode: null,
+          isContra: false,
+        },
+      ],
+      { totalDebit: new Decimal("0.0000"), totalCredit: new Decimal("0.0000") },
+      "2026-04-30",
+      CTX,
+      { "2000": { subtype: "AP_TRADE", isBank: false } }
+    );
+    expect(body.rows[0].account.accttype).toBe("AcctPay");
+  });
+
+  it("FIXED_ASSET subtype maps to FixedAsset", async () => {
+    const body = toNsTrialBalance(
+      [
+        {
+          accountCode: "1500",
+          accountName: "Computer Equipment",
+          type: "ASSET",
+          debit: new Decimal("0.0000"),
+          credit: new Decimal("0.0000"),
+          balance: new Decimal("0.0000"),
+          parentCode: null,
+          isContra: false,
+        },
+      ],
+      { totalDebit: new Decimal("0.0000"), totalCredit: new Decimal("0.0000") },
+      "2026-04-30",
+      CTX,
+      { "1500": { subtype: "FIXED_ASSET", isBank: false } }
+    );
+    expect(body.rows[0].account.accttype).toBe("FixedAsset");
+  });
+
+  it("LEASE_LIABILITY subtype maps to LongTermLiab (not OthCurLiab)", async () => {
+    const body = toNsTrialBalance(
+      [
+        {
+          accountCode: "2600",
+          accountName: "Lease Liability — Current",
+          type: "LIABILITY",
+          debit: new Decimal("0.0000"),
+          credit: new Decimal("0.0000"),
+          balance: new Decimal("0.0000"),
+          parentCode: null,
+          isContra: false,
+        },
+      ],
+      { totalDebit: new Decimal("0.0000"), totalCredit: new Decimal("0.0000") },
+      "2026-04-30",
+      CTX,
+      { "2600": { subtype: "LEASE_LIABILITY", isBank: false } }
+    );
+    expect(body.rows[0].account.accttype).toBe("LongTermLiab");
+  });
+
+  it("unknown subtype falls back to primary-type default", async () => {
+    const body = toNsTrialBalance(
+      [
+        {
+          accountCode: "9999",
+          accountName: "Unknown",
+          type: "ASSET",
+          debit: new Decimal("0.0000"),
+          credit: new Decimal("0.0000"),
+          balance: new Decimal("0.0000"),
+          parentCode: null,
+          isContra: false,
+        },
+      ],
+      { totalDebit: new Decimal("0.0000"), totalCredit: new Decimal("0.0000") },
+      "2026-04-30",
+      CTX,
+      { "9999": { subtype: "MYSTERY_VALUE", isBank: false } }
+    );
+    // Falls back to ASSET → OthCurAsset because MYSTERY_VALUE isn't in
+    // the refinement table.
+    expect(body.rows[0].account.accttype).toBe("OthCurAsset");
+  });
+
+  it("no hint at all → primary-type default (backward compat for callers omitting hints)", async () => {
+    const body = toNsTrialBalance(
+      [
+        {
+          accountCode: "1000",
+          accountName: "Cash",
+          type: "ASSET",
+          debit: new Decimal("100.0000"),
+          credit: new Decimal("0.0000"),
+          balance: new Decimal("100.0000"),
+          parentCode: null,
+          isContra: false,
+        },
+      ],
+      { totalDebit: new Decimal("100.0000"), totalCredit: new Decimal("0.0000") },
+      "2026-04-30",
+      CTX
+      // No subtypeHints — uses primary-type fallback.
+    );
+    expect(body.rows[0].account.accttype).toBe("OthCurAsset");
+  });
+
+  it("toNsBalanceSheet refines per section (Cash=Bank, AR=AcctRec, AP=AcctPay)", async () => {
+    const body = toNsBalanceSheet(
+      {
+        assets: [
+          {
+            code: "1000",
+            name: "Cash",
+            amount: new Decimal("100.0000"),
+            parentCode: null,
+            isContra: false,
+          },
+          {
+            code: "1200",
+            name: "AR",
+            amount: new Decimal("200.0000"),
+            parentCode: null,
+            isContra: false,
+          },
+        ],
+        liabilities: [
+          {
+            code: "2000",
+            name: "AP",
+            amount: new Decimal("50.0000"),
+            parentCode: null,
+            isContra: false,
+          },
+        ],
+        equity: [],
+      },
+      {
+        totalAssets: new Decimal("300.0000"),
+        totalLiabilities: new Decimal("50.0000"),
+        totalEquity: new Decimal("250.0000"),
+        retainedEarnings: new Decimal("0.0000"),
+        totalLiabilitiesAndEquity: new Decimal("300.0000"),
+      },
+      true,
+      "2026-04-30",
+      CTX,
+      {
+        "1000": { subtype: "CASH", isBank: true },
+        "1200": { subtype: "AR_TRADE", isBank: false },
+        "2000": { subtype: "AP_TRADE", isBank: false },
+      }
+    );
+    expect(body.assets[0].account.accttype).toBe("Bank");
+    expect(body.assets[1].account.accttype).toBe("AcctRec");
+    expect(body.liabilities[0].account.accttype).toBe("AcctPay");
+  });
+});
+
 describe("v0.9 NS SuiteAnalytics Phase 5: toNsConsolidatedTrialBalance", () => {
   it("emits NS SubsidiaryElimination-canonical consolidation shape", async () => {
     const body = toNsConsolidatedTrialBalance(

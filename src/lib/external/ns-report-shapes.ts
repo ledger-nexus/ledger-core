@@ -29,16 +29,69 @@
 import type { AccountType } from "@prisma/client";
 import type { Decimal } from "decimal.js";
 
-/** Most common NS accttype per ledger-core enum value. */
+/** Most common NS accttype per ledger-core enum value (fallback). */
 const ACCT_TYPE_BY_LEDGER_TYPE: Record<AccountType, string> = {
-  ASSET: "OthCurAsset", // most NS-import-driven assets are current
+  ASSET: "OthCurAsset",
   LIABILITY: "OthCurLiab",
   EQUITY: "Equity",
   REVENUE: "Income",
   EXPENSE: "Expense",
 };
 
-function mapAcctType(t: AccountType): string {
+/**
+ * Refined NS accttype per ledger-core Account.subtype. Driven by the
+ * subtypes actually used in src/lib/db/chart-of-accounts.ts.
+ *
+ * NS's accttype taxonomy is much finer-grained than ledger-core's
+ * 5-way AccountType enum. When the importer knows the subtype (via
+ * NS Account.accttype on the way in, OR via the chart-of-accounts
+ * registry on native data), we can emit the correct NS-side value
+ * instead of the catch-all "OthCurAsset" / "OthCurLiab".
+ */
+const REFINED_BY_SUBTYPE: Record<string, string> = {
+  CASH: "Bank",
+  AR_TRADE: "AcctRec",
+  AP_TRADE: "AcctPay",
+  ALLOWANCE_DOUBTFUL: "OthCurAsset",
+  PREPAID: "OthCurAsset",
+  FIXED_ASSET: "FixedAsset",
+  ACCUM_DEPR: "FixedAsset",   // contra-asset, still under FixedAsset section
+  ROU_ASSET: "FixedAsset",
+  DUE_FROM_AFFILIATE: "OthCurAsset",
+  ACCRUED: "OthCurLiab",
+  DEFERRED_REV: "OthCurLiab",
+  TAX_PAYABLE: "OthCurLiab",
+  DUE_TO_AFFILIATE: "OthCurLiab",
+  LEASE_LIABILITY: "LongTermLiab",
+  INTERCOMPANY_REV: "Income",
+  INTERCOMPANY_EXP: "Expense",
+  BAD_DEBT: "Expense",
+  DEPRECIATION: "Expense",
+  LEASE_EXPENSE: "Expense",
+  FX_GAIN_LOSS: "OthIncome",       // ambiguous — defaults to OthIncome
+  DISPOSAL_GAIN_LOSS: "OthIncome", // ambiguous — defaults to OthIncome
+  INTEREST: "OthIncome",           // INTEREST on income side; expense side rare
+};
+
+/**
+ * Per-account hint set the route passes alongside the report rows.
+ * Keyed by accountCode. Missing entries fall back to the primary-type
+ * default, so the mapper degrades gracefully when the route can't
+ * fetch hints (or when the report contains accounts the chart
+ * doesn't cover).
+ */
+export interface AccountSubtypeHint {
+  subtype: string | null;
+  isBank: boolean;
+}
+
+function mapAcctType(t: AccountType, hint?: AccountSubtypeHint): string {
+  if (hint) {
+    if (hint.isBank) return "Bank";
+    if (hint.subtype && REFINED_BY_SUBTYPE[hint.subtype]) {
+      return REFINED_BY_SUBTYPE[hint.subtype];
+    }
+  }
   return ACCT_TYPE_BY_LEDGER_TYPE[t];
 }
 
@@ -140,7 +193,9 @@ export function toNsTrialBalance(
   rows: NativeTrialBalanceRow[],
   totals: { totalDebit: Decimal; totalCredit: Decimal },
   asOf: string,
-  ctx: ShapeContext
+  ctx: ShapeContext,
+  /** Optional per-accountCode hints for refined NS accttype. */
+  subtypeHints?: Record<string, AccountSubtypeHint>
 ): NsTrialBalanceResponse {
   return {
     reportName: "Trial Balance",
@@ -151,7 +206,7 @@ export function toNsTrialBalance(
       account: {
         acctnumber: r.accountCode,
         acctname: r.accountName,
-        accttype: mapAcctType(r.type),
+        accttype: mapAcctType(r.type, subtypeHints?.[r.accountCode]),
       },
       debitamount: r.debit.toFixed(4),
       creditamount: r.credit.toFixed(4),
@@ -173,7 +228,8 @@ export function toNsIncomeStatement(
     netIncome: Decimal;
   },
   range: { fromDate: string; toDate: string },
-  ctx: ShapeContext
+  ctx: ShapeContext,
+  subtypeHints?: Record<string, AccountSubtypeHint>
 ): NsIncomeStatementResponse {
   return {
     reportName: "Income Statement",
@@ -185,7 +241,7 @@ export function toNsIncomeStatement(
       account: {
         acctnumber: r.code,
         acctname: r.name,
-        accttype: mapAcctType("REVENUE"),
+        accttype: mapAcctType("REVENUE", subtypeHints?.[r.code]),
       },
       amount: r.amount.toFixed(4),
     })),
@@ -193,7 +249,7 @@ export function toNsIncomeStatement(
       account: {
         acctnumber: r.code,
         acctname: r.name,
-        accttype: mapAcctType("EXPENSE"),
+        accttype: mapAcctType("EXPENSE", subtypeHints?.[r.code]),
       },
       amount: r.amount.toFixed(4),
     })),
@@ -292,7 +348,8 @@ export function toNsConsolidatedTrialBalance(
     balances: boolean;
   },
   asOf: string,
-  ctx: ConsolidationShapeContext
+  ctx: ConsolidationShapeContext,
+  subtypeHints?: Record<string, AccountSubtypeHint>
 ): NsConsolidatedTrialBalanceResponse {
   // NS perSubsidiary row keys by internalid. Build the reverse map for
   // the per-row translation. Unknown entities (entityCode not in the
@@ -320,7 +377,7 @@ export function toNsConsolidatedTrialBalance(
       account: {
         acctnumber: r.accountCode,
         acctname: r.accountName,
-        accttype: mapAcctType(r.type),
+        accttype: mapAcctType(r.type, subtypeHints?.[r.accountCode]),
       },
       perSubsidiary: r.perEntity.map((p) => ({
         internalid: nsIdFor(p.entityCode),
@@ -367,7 +424,8 @@ export function toNsBalanceSheet(
   },
   balances: boolean,
   asOf: string,
-  ctx: ShapeContext
+  ctx: ShapeContext,
+  subtypeHints?: Record<string, AccountSubtypeHint>
 ): NsBalanceSheetResponse {
   return {
     reportName: "Balance Sheet",
@@ -378,7 +436,7 @@ export function toNsBalanceSheet(
       account: {
         acctnumber: r.code,
         acctname: r.name,
-        accttype: mapAcctType("ASSET"),
+        accttype: mapAcctType("ASSET", subtypeHints?.[r.code]),
       },
       amount: r.amount.toFixed(4),
     })),
@@ -386,7 +444,7 @@ export function toNsBalanceSheet(
       account: {
         acctnumber: r.code,
         acctname: r.name,
-        accttype: mapAcctType("LIABILITY"),
+        accttype: mapAcctType("LIABILITY", subtypeHints?.[r.code]),
       },
       amount: r.amount.toFixed(4),
     })),
@@ -394,7 +452,7 @@ export function toNsBalanceSheet(
       account: {
         acctnumber: r.code,
         acctname: r.name,
-        accttype: mapAcctType("EQUITY"),
+        accttype: mapAcctType("EQUITY", subtypeHints?.[r.code]),
       },
       amount: r.amount.toFixed(4),
     })),
