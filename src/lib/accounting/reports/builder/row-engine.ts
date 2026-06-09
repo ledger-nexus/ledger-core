@@ -37,6 +37,12 @@ export interface RowEngineInput {
   scope: ColumnScope;
   /** Cross-template row values, keyed by alias (e.g. "@IS.ni" → Decimal). */
   crossTemplateValues?: Map<string, Decimal>;
+  /**
+   * Opening balance map (asOf = period.fromDate − 1 day). Required when
+   * the template has PERIOD_DELTA rows. PR 3's column engine fetches
+   * this when needed and passes it through.
+   */
+  openingBalances?: AccountBalances;
 }
 
 export interface EvaluatedRow {
@@ -141,11 +147,31 @@ export function runRowEngine(input: RowEngineInput): RowEngineResult {
         break;
       }
       case "PERIOD_DELTA": {
-        // v1 stub. PR 3 (column engine) will pre-compute opening +
-        // closing balance maps and pass the delta through the
-        // crossTemplateValues mechanism or a parallel "deltaBalances"
-        // input. For now, the row evaluates to 0 with a warning.
-        warnings.push(`PERIOD_DELTA row "${row.id}" not yet supported (v1) — defaults to 0`);
+        // Requires opening balance map. If not provided, default to 0
+        // with a warning (e.g. caller is a point-in-time report like
+        // BS where PERIOD_DELTA is nonsensical).
+        if (!input.openingBalances) {
+          warnings.push(
+            `PERIOD_DELTA row "${row.id}" needs openingBalances; defaulting to 0`
+          );
+          break;
+        }
+        // closing − opening per matching account, summed.
+        const closingMatches = filterBalances(balances, row.filter);
+        for (const closing of closingMatches) {
+          const opening = input.openingBalances.get(closing.code);
+          const openingBal = opening?.balance ?? new Decimal(0);
+          const delta = closing.balance.minus(openingBal);
+          value = value.plus(delta);
+          contributingCodes.push(closing.code);
+        }
+        // direction "increase" means cash moves OPPOSITE to the account
+        // change (e.g. AR went UP → cash went DOWN → flip sign in CF).
+        // direction "decrease" means cash moves WITH the account (AP
+        // went UP → cash went UP → preserve sign).
+        if (row.direction === "increase") {
+          value = value.negated();
+        }
         break;
       }
       case "HEADER": {

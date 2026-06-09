@@ -178,7 +178,7 @@ describe("runRowEngine — row kinds", () => {
     expect(result.warnings).toContain("Cross-template reference unresolved: @IS.ni");
   });
 
-  it("PERIOD_DELTA is stubbed in v1 — value 0 with warning", () => {
+  it("PERIOD_DELTA without openingBalances warns + defaults to 0 (PR 3 wires opening map via column engine)", () => {
     const rows: RowDef[] = [
       {
         id: "d_ar",
@@ -188,9 +188,36 @@ describe("runRowEngine — row kinds", () => {
         direction: "increase",
       },
     ];
+    // Caller didn't provide openingBalances — row engine warns + 0.
     const result = runRowEngine({ rows, balances, scope: SCOPE });
     expect(result.byId.get("d_ar")!.value.toString()).toBe("0");
-    expect(result.warnings[0]).toMatch(/PERIOD_DELTA.*not yet supported/);
+    expect(result.warnings[0]).toMatch(/PERIOD_DELTA.*openingBalances/);
+  });
+
+  it("PERIOD_DELTA WITH openingBalances computes closing − opening, applies direction", () => {
+    const closing = makeBalances([
+      makeBalance({ code: "1200", type: "ASSET", subtype: "AR_TRADE", balance: new Decimal(1200) }),
+    ]);
+    const opening = makeBalances([
+      makeBalance({ code: "1200", type: "ASSET", subtype: "AR_TRADE", balance: new Decimal(500) }),
+    ]);
+    const rows: RowDef[] = [
+      {
+        id: "d_ar",
+        kind: "PERIOD_DELTA",
+        label: "Δ AR",
+        filter: { subtypes: ["AR_TRADE"] },
+        direction: "increase", // AR up → cash down, flip sign
+      },
+    ];
+    const result = runRowEngine({
+      rows,
+      balances: closing,
+      scope: SCOPE,
+      openingBalances: opening,
+    });
+    // Δ = 1200 − 500 = 700. direction=increase → negate → −700.
+    expect(result.byId.get("d_ar")!.value.toString()).toBe("-700");
   });
 
   it("HEADER + SPACER carry no value but render in document order", () => {
