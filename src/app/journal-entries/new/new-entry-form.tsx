@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { Decimal } from "decimal.js";
 import {
@@ -80,6 +80,33 @@ export function NewEntryForm({
     setLines((prev) => [...prev, newLine(side)]);
   }
 
+  // Keyboard shortcut: Tab from the LAST row's Amount input appends a
+  // new line + focuses its Side select. Mirrors the muscle memory CPAs
+  // build up in Excel — "tab through the line, hit Tab on the amount,
+  // start typing the next line." The v1.2+ ergonomics-and-polish list
+  // had this as a TODO since v0.6.
+  //
+  // Mechanics: on the last row's Amount onKeyDown, intercept Tab (not
+  // Shift+Tab), preventDefault, addLine, then queue a focus instruction
+  // via the ref + useEffect. The effect fires after React commits the
+  // new row and we focus the just-appended Side select via querySelector
+  // scoped to the form ref.
+  //
+  // Why not focus-by-ref array: ref arrays for dynamic lists hit the
+  // "stale closure" problem unless you carefully manage the array. The
+  // querySelector approach reads the live DOM after commit — simpler.
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const pendingFocusLastSide = useRef(false);
+  useEffect(() => {
+    if (!pendingFocusLastSide.current) return;
+    pendingFocusLastSide.current = false;
+    const sides =
+      formRef.current?.querySelectorAll<HTMLSelectElement>(
+        'select[data-line-side]'
+      ) ?? [];
+    sides[sides.length - 1]?.focus();
+  }, [lines.length]);
+
   const { debitTotal, creditTotal, difference, balanced, hasZeroAmount, hasMissingAccount } = useMemo(() => {
     let dr = new Decimal(0);
     let cr = new Decimal(0);
@@ -115,7 +142,7 @@ export function NewEntryForm({
   );
 
   return (
-    <form action={formAction} className="flex flex-col gap-6">
+    <form ref={formRef} action={formAction} className="flex flex-col gap-6">
       {/* Datalists for autocomplete. The browser matches typed text
           against option value AND label, so a user can type "1000" or
           "Cash" and see the matching choices. Rendered invisible. */}
@@ -196,10 +223,13 @@ export function NewEntryForm({
               </tr>
             </THead>
             <TBody>
-              {lines.map((line) => (
+              {lines.map((line, idx) => {
+                const isLastRow = idx === lines.length - 1;
+                return (
                 <TR key={line.uid}>
                   <TD>
                     <Select
+                      data-line-side
                       value={line.side}
                       onChange={(e) =>
                         updateLine(line.uid, { side: e.target.value as "DEBIT" | "CREDIT" })
@@ -245,6 +275,18 @@ export function NewEntryForm({
                     <Input
                       value={line.amount}
                       onChange={(e) => updateLine(line.uid, { amount: e.target.value })}
+                      onKeyDown={(e) => {
+                        // v0.10 polish: Tab on the LAST row's Amount field
+                        // appends a new line + focuses its Side select.
+                        // Shift+Tab on the last Amount keeps the default
+                        // (go back). Tab on any non-last row uses the
+                        // normal browser tab order (no preventDefault).
+                        if (isLastRow && e.key === "Tab" && !e.shiftKey) {
+                          e.preventDefault();
+                          addLine(line.side);
+                          pendingFocusLastSide.current = true;
+                        }
+                      }}
                       placeholder="0.00"
                       inputMode="decimal"
                       className="text-right font-mono tabular-nums"
@@ -263,7 +305,8 @@ export function NewEntryForm({
                     </Button>
                   </TD>
                 </TR>
-              ))}
+                );
+              })}
               <tr className="border-t-2 border-ink-300 bg-ink-50 font-semibold">
                 <TD colSpan={4} className="text-ink-700">
                   Totals
