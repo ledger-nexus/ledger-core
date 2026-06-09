@@ -320,6 +320,17 @@ export async function postJournalEntry(
     });
     const entryNumber = `${entity.code}-${book.code}-${String(existingCount + 1).padStart(5, "0")}`;
 
+    // Denormalized line sums for the NS SuiteAnalytics Saved-Search
+    // amount filter + future reporting (migration 0012). The
+    // postJournalEntry invariant (debits == credits) holds at this
+    // point — both totals will be equal.
+    const sumTotalDebit = normalizedLines
+      .reduce((acc, l) => acc.plus(l.debit), new Decimal(0))
+      .toFixed(4);
+    const sumTotalCredit = normalizedLines
+      .reduce((acc, l) => acc.plus(l.credit), new Decimal(0))
+      .toFixed(4);
+
     const entry = await tx.journalEntry.create({
       data: {
         entryNumber,
@@ -334,6 +345,8 @@ export async function postJournalEntry(
         memo: input.memo,
         currencyId: currencyCode,
         fxRate: fxRate.toFixed(10),
+        totalDebit: sumTotalDebit,
+        totalCredit: sumTotalCredit,
         source: input.source ?? "MANUAL",
         status: "POSTED",
         createdBy: input.createdBy,
