@@ -28,6 +28,10 @@ import {
   getIncomeStatement,
   getBalanceSheet,
 } from "@/lib/accounting/reports";
+import {
+  getReconciliationRollup,
+  rollupSummaryLine,
+} from "@/lib/recon/rollup";
 import { toCsv, csvFilename, type CsvCell } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
@@ -110,7 +114,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
   const bsTies = bs.totalAssets.equals(bs.totalLiabilities.plus(bs.totalEquity));
 
+  // Reconciliation rollup — added in BlackLine arc Phase 1 PR 8. The
+  // existing tenant lookup further down is reused via this hoist.
   const tenant = await getCurrentTenant();
+  const reconRollup = tenant
+    ? await getReconciliationRollup(prisma, {
+        tenantId: tenant.id,
+        entityId: entity.id,
+        bookId: book.id,
+        periodId: selected.id,
+      })
+    : null;
+  const reconsAllDone =
+    reconRollup !== null &&
+    reconRollup.total > 0 &&
+    reconRollup.done === reconRollup.total;
+
   const currentUser = await getCurrentUser();
   await auditDataExport({
     actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
@@ -142,8 +161,56 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     close ? `on ${close.closedAt.toISOString().slice(0, 10)}` : "",
     close ? `by ${close.closedBy ?? ""}` : "",
   ]);
-  rows.push(["Tie-out", `TB DR=CR: ${tbTies ? "PASS" : "FAIL"}`, `BS A=L+E: ${bsTies ? "PASS" : "FAIL"}`]);
+  rows.push([
+    "Tie-out",
+    `TB DR=CR: ${tbTies ? "PASS" : "FAIL"}`,
+    `BS A=L+E: ${bsTies ? "PASS" : "FAIL"}`,
+    reconRollup && reconRollup.total > 0
+      ? `Recons signed off: ${reconsAllDone ? "PASS" : "FAIL"} (${reconRollup.done}/${reconRollup.total})`
+      : "Recons: n/a",
+  ]);
   rows.push([]);
+
+  // ─── Reconciliation rollup ───────────────────────────────────────────
+  // Only emit the section when there's at least one recon for the period.
+  // Empty periods (first-use, no chart) get no section rather than a
+  // "0/0" row that adds noise without value.
+  if (reconRollup && reconRollup.total > 0) {
+    rows.push(["Account reconciliations", rollupSummaryLine(reconRollup)]);
+    rows.push(["Status", "Count", "% of total"]);
+    rows.push([
+      "RECONCILED",
+      reconRollup.reconciled,
+      `${reconRollup.total === 0 ? 0 : Math.round((reconRollup.reconciled / reconRollup.total) * 100)}%`,
+    ]);
+    rows.push([
+      "WAIVED",
+      reconRollup.waived,
+      `${reconRollup.total === 0 ? 0 : Math.round((reconRollup.waived / reconRollup.total) * 100)}%`,
+    ]);
+    rows.push([
+      "PREPARED",
+      reconRollup.prepared,
+      `${reconRollup.total === 0 ? 0 : Math.round((reconRollup.prepared / reconRollup.total) * 100)}%`,
+    ]);
+    rows.push([
+      "IN_PROGRESS",
+      reconRollup.inProgress,
+      `${reconRollup.total === 0 ? 0 : Math.round((reconRollup.inProgress / reconRollup.total) * 100)}%`,
+    ]);
+    rows.push([
+      "OPEN",
+      reconRollup.open,
+      `${reconRollup.total === 0 ? 0 : Math.round((reconRollup.open / reconRollup.total) * 100)}%`,
+    ]);
+    rows.push([
+      "EXCEPTION",
+      reconRollup.exception,
+      `${reconRollup.total === 0 ? 0 : Math.round((reconRollup.exception / reconRollup.total) * 100)}%`,
+    ]);
+    rows.push(["TOTAL", reconRollup.total, "100%"]);
+    rows.push([]);
+  }
 
   // ─── Income statement ────────────────────────────────────────────────
   rows.push(["Income statement", `${selected.startsOn.toISOString().slice(0, 10)} → ${selected.endsOn.toISOString().slice(0, 10)}`]);
