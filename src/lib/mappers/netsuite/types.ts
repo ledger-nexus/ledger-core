@@ -282,6 +282,48 @@ export interface NsCustomFieldDefinition {
   options?: string[];           // for ENUM
 }
 
+// ---- v0.9 Phase 3.5 multi-book sub-ledger snapshot -------------------
+//
+// NS itself stores ONE OpenItem per transaction — the book divergence is
+// implicit (a single AR balance carries the same number across all the
+// declared books). ledger-core's Pattern 2 substrate genuinely opens ONE
+// item PER BOOK (per ar_open_item_lineage_uniq), so a $1,000 invoice on
+// US_GAAP can carry a different current balance than the same invoice on
+// US_TAX after a partial payment lands only on one book.
+//
+// The reverse exporter preserves that divergence by emitting a per-book
+// state snapshot alongside the canonical NS records. This is NOT a
+// vanilla NS shape — it's a ledger-core-specific extension. Consumers
+// that don't care about per-book state can ignore the OpenItemState
+// array; consumers that DO care get the full picture in one place.
+//
+// Only emitted when `exportToNs` runs in `bookResolution.mode: "multi"`.
+// Single-mode exports keep the v0.6 shape (no OpenItemState key).
+export type NsOpenItemSide = "Invoice" | "VendorBill";
+export type NsOpenItemStatus =
+  | "OPEN"
+  | "PARTIAL"
+  | "APPLIED"
+  | "WRITTEN_OFF"
+  | "REOPENED"
+  | "VOID";
+
+export interface NsOpenItemState {
+  /** "Invoice" (AR) or "VendorBill" (AP). */
+  sourceRecordType: NsOpenItemSide;
+  /** The NS internalid of the originating Invoice / VendorBill. */
+  sourceRecordId: string;
+  /** The ledger-core book code this snapshot is scoped to. */
+  bookCode: string;
+  /** The ledger-core entity code this snapshot is scoped to. */
+  entityCode: string;
+  /** Decimal string — never a JS number (precision). */
+  originalAmount: string;
+  /** Decimal string — what's still outstanding on this book. */
+  currentBalance: string;
+  status: NsOpenItemStatus;
+}
+
 // ---- Top-level export shape ------------------------------------------
 
 export interface NsExport {
@@ -317,4 +359,10 @@ export interface NsExport {
   CustomerPayment?: NsCustomerPayment[];
   VendorPayment?: NsVendorPayment[];
   JournalEntry?: NsJournalEntry[];
+  /**
+   * v0.9 NS Books Phase 3.5 — per-book AR/AP OpenItem state. Only
+   * emitted by `exportToNs` in `bookResolution.mode: "multi"`. See the
+   * NsOpenItemState comment above for the rationale.
+   */
+  OpenItemState?: NsOpenItemState[];
 }
