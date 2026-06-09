@@ -31,17 +31,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
+      # The repo uses npm (per package-lock.json) — not pnpm despite
+      # CLAUDE.md mentioning pnpm. CI follows the artifact reality.
+      # If we ever switch to pnpm, generate pnpm-lock.yaml and revert
+      # this to pnpm/action-setup@v4 + cache: pnpm.
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+          cache: "npm"
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec prisma generate
-      - run: pnpm exec prisma db push --skip-generate
-      - run: pnpm db:seed
-      - run: pnpm test
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma db push --skip-generate
+      - run: npm run db:seed
+      - run: npm test
