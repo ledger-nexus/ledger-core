@@ -29,6 +29,7 @@ import {
   resolveNsAccountingBook,
 } from "@/lib/external/ns-id-resolver";
 import { toNsConsolidatedTrialBalance } from "@/lib/external/ns-report-shapes";
+import { toCsv, type CsvCell } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -275,14 +276,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // No CTA row: ASC 830 translation dispositioned unmerged (v1.27);
     // unlike the JSON shapes (keys pinned null for shape-strict
     // adapters), CSV has no key contract — omitting the row is honest.
-    const csvRows = [header, ...dataRows, totalsRow];
-    const csv = csvRows
-      .map((row) =>
-        row
-          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-          .join(",")
-      )
-      .join("\n");
+    //
+    // Shared toCsv helper (@/lib/utils/csv): RFC 4180 quoting + a
+    // leading single quote on cells starting with =, +, -, @, \t, \r
+    // (CWE-1236 formula injection — account names and entity codes
+    // flow byref from NS imports and are attacker-controllable).
+    const csvRows: CsvCell[][] = [header, ...dataRows, totalsRow];
+    const csv = toCsv(csvRows);
     return new NextResponse(csv, {
       status: 200,
       headers: {

@@ -17,6 +17,7 @@ import {
   fetchAccountSubtypeHints,
 } from "@/lib/external/ns-analytics-auth";
 import { toNsIncomeStatement } from "@/lib/external/ns-report-shapes";
+import { toCsv, type CsvCell } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -163,9 +164,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ...body.expenses.map((r) => ["Expense", r.accountCode, r.accountName, r.amount]),
       ["", "", "Net income", body.totals.netIncome],
     ];
-    const csv = csvRows
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+    // CWE-1236 hardening: shared toCsv helper escapes formula leaders.
+    const csv = toCsv(csvRows as CsvCell[][]);
     return new NextResponse(csv, {
       status: 200,
       headers: {
