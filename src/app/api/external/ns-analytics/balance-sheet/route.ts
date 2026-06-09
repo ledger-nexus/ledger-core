@@ -17,6 +17,7 @@ import {
   fetchAccountSubtypeHints,
 } from "@/lib/external/ns-analytics-auth";
 import { toNsBalanceSheet } from "@/lib/external/ns-report-shapes";
+import { toCsv, type CsvCell } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -170,9 +171,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ["", "", "Total Assets", body.totals.assets],
       ["", "", "Total Liabilities & Equity", body.totals.liabilitiesAndEquity],
     ];
-    const csv = csvRows
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+    // CWE-1236 hardening: shared toCsv helper escapes formula leaders.
+    const csv = toCsv(csvRows as CsvCell[][]);
     return new NextResponse(csv, {
       status: 200,
       headers: {

@@ -28,6 +28,7 @@ import {
   resolveNsAccountingBook,
 } from "@/lib/external/ns-id-resolver";
 import { toNsConsolidatedTrialBalance } from "@/lib/external/ns-report-shapes";
+import { toCsv, type CsvCell } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -278,14 +279,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       "",
       "",
     ];
-    const csvRows = [header, ...dataRows, totalsRow, ctaRow];
-    const csv = csvRows
-      .map((row) =>
-        row
-          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-          .join(",")
-      )
-      .join("\n");
+    // Use the shared toCsv helper from @/lib/utils/csv. It RFC 4180-quotes
+    // cells that contain ",\n + and prepends a single quote to cells whose
+    // first char is =, +, -, @, \t, \r (CWE-1236, CSV formula injection).
+    // Account names + entity codes flow byref from NS imports, so they're
+    // attacker-controllable; the inline `"${String(cell)}"` escaper this
+    // file used to carry handled quotes but NOT leaders. See csv.ts for
+    // the exploit details.
+    const csvRows: CsvCell[][] = [header, ...dataRows, totalsRow, ctaRow];
+    const csv = toCsv(csvRows);
     return new NextResponse(csv, {
       status: 200,
       headers: {
