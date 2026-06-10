@@ -111,9 +111,9 @@ That URL is your `DATABASE_URL` everywhere.
 ```bash
 cd ledger-core
 echo 'DATABASE_URL="<paste-Neon-pooled-URL>"' > .env
-pnpm install
-pnpm db:push       # creates all substrate tables
-pnpm db:seed       # loads Northwind + consolidation demo
+npm install
+npm run db:push       # creates all substrate tables
+npm run db:seed       # loads Northwind + consolidation demo
 ```
 
 The other four repos' schemas are MIRRORS — they read the same tables ledger-core creates. **Do NOT run `prisma db push` from recon/revenue-rec/integrations/fa-amort against prod** — they'd want to drop tables they don't model.
@@ -151,7 +151,7 @@ Order matters: ledger-core is the substrate, every other repo's `LEDGER_CORE_URL
 4. Click **Deploy**.
 5. Once green, note the production URL (e.g., `https://ledger-core-abc123.vercel.app`). Add a custom domain or shorter alias if you have one — that's the URL the other repos will hit.
 
-Hit the deployed URL in a browser. The dashboard should render against your seeded Northwind data. If `/admin/users` or `/admin/orphans` show empty, the seed didn't run — verify `DATABASE_URL` and re-run `pnpm db:seed` from your laptop.
+Hit the deployed URL in a browser. The dashboard should render against your seeded Northwind data. If `/admin/users` or `/admin/orphans` show empty, the seed didn't run — verify `DATABASE_URL` and re-run `npm run db:seed` from your laptop.
 
 ---
 
@@ -233,7 +233,7 @@ Smoke test: open `<fa-amort-url>/`. The dashboard should show the seeded fixed a
 ```bash
 cd ledger-core
 # Make sure your local .env points at the same Neon DB
-pnpm demo
+npm run demo
 ```
 
 Wait ~30s. The output prints a localhost URL — **swap localhost:3000 for your ledger-core Vercel URL** and open it:

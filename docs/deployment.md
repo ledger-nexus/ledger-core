@@ -29,12 +29,12 @@ From your local machine:
 ```bash
 git clone https://github.com/ledger-nexus/ledger-core.git
 cd ledger-core
-pnpm install
+npm install
 cp .env.example .env
 # Paste the Neon connection string into DATABASE_URL in .env
-pnpm db:push       # creates all the ledger-core tables
-pnpm db:seed       # loads the Northwind multi-book demo
-pnpm test          # confirms invariants hold against the live DB
+npm run db:push       # creates all the ledger-core tables
+npm run db:seed       # loads the Northwind multi-book demo
+npm test          # confirms invariants hold against the live DB
 ```
 
 The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS) with all sub-ledgers populated. The headline assertions (multi-book divergence, AR/AP reconciliation, book-tax difference) verify in under 30 seconds.
@@ -47,7 +47,7 @@ The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS
    - `DATABASE_URL` — paste the same Neon **pooled** connection string.
 4. Build settings (defaults are correct):
    - Build command: `prisma generate && next build`
-   - Install command: `pnpm install` (or `npm install`)
+   - Install command: `npm install`
 5. Click **Deploy**.
 
 First deploy takes ~2 minutes. Subsequent pushes auto-deploy on the `main` branch.
@@ -125,12 +125,12 @@ Live since v0.8. Authenticated by an `ADMIN_TOKEN` env var.
    a GET handler with bearer-token check. For the v0.8 demo, manual
    triggers are sufficient.
 
-### Option 2 — `pnpm db:reset` (local with prod DATABASE_URL)
+### Option 2 — `npm run db:reset` (local with prod DATABASE_URL)
 
 For a truly clean slate (drops every table, re-runs migrations, re-seeds):
 
 ```bash
-DATABASE_URL=<neon-pooled-url> pnpm db:reset
+DATABASE_URL=<neon-pooled-url> npm run db:reset
 ```
 
 This is destructive — it also drops QBO/NS-imported entities. Use Option 1 unless you want a from-scratch wipe.
@@ -237,10 +237,10 @@ To pause without removing config: in the admin UI, click **Disable** on every ch
 The Neon free tier suspends inactive databases after ~5 minutes of idle. The first request after suspension takes ~3 seconds to wake up — subsequent requests are fast. For a demo this is fine; for production-style usage, upgrade to a paid Neon tier or use the autoscaling pooler.
 
 **`PrismaClientInitializationError: gen_random_uuid() does not exist`**
-Make sure your Postgres version is 13+ AND `pgcrypto` is available. Neon has it enabled by default. Self-hosted Postgres: run `CREATE EXTENSION IF NOT EXISTS pgcrypto;` before `pnpm db:push`.
+Make sure your Postgres version is 13+ AND `pgcrypto` is available. Neon has it enabled by default. Self-hosted Postgres: run `CREATE EXTENSION IF NOT EXISTS pgcrypto;` before `npm run db:push`.
 
 **Build fails with `Type error: Cannot find module 'next/headers'`**
-The repo targets Next.js 14. Make sure `next` is installed via `pnpm install` before running `next build`.
+The repo targets Next.js 14. Make sure `next` is installed via `npm install` before running `next build`.
 
 ---
 
