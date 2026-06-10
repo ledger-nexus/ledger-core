@@ -20,6 +20,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const mockCookieStore = new Map<string, { value: string }>();
 vi.mock("next/headers", () => ({
@@ -167,7 +168,9 @@ afterAll(async () => {
   });
   await prisma.account.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: { in: tenantIds } } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  });
   await prisma.recordEvent.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenantMembership.deleteMany({
     where: { tenantId: { in: tenantIds } },

@@ -33,6 +33,7 @@ import { Decimal } from "decimal.js";
 import { PrismaClient } from "@prisma/client";
 
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -160,6 +161,14 @@ async function cleanup(): Promise<void> {
   await prisma.account.deleteMany({ where: { id: { in: createdAccountIds } } });
   await prisma.legalEntity.deleteMany({
     where: { id: { in: createdEntityIds } },
+  });
+  // Audit rows referencing the fixture users must go first: the
+  // append-only RULE rewrites the actorUserId FK's ON DELETE SET NULL
+  // action, so deleting a still-referenced user errors with XX000.
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
+      where: { actorUserId: { in: createdUserIds } },
+    });
   });
   await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
 }
