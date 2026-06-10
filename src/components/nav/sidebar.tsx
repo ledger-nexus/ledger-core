@@ -52,6 +52,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
       { href: "/reports/m3-detail", label: "M-3 detail", hint: "Form 1120" },
       { href: "/reports/ar-aging", label: "AR aging" },
       { href: "/reports/ap-aging", label: "AP aging" },
+      { href: "/reports/fx-revaluation", label: "FX revaluation", hint: "ASC 830" },
       { href: "/reports/consolidation", label: "Consolidation", hint: "multi-entity" },
     ],
   },
