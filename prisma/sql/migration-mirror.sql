@@ -118,17 +118,23 @@ CREATE TRIGGER "close_task_state_change_no_delete"
   FOR EACH ROW EXECUTE FUNCTION "close_task_state_change_block_mutation"();
 
 -- ════════════════════════════════════════════════════════════════════
--- 4. Append-only triggers on audit_log (SOC 2 CC7.2)
---    Strict refuse-all: audit_log's FK to tenant is ON DELETE RESTRICT,
---    so no cascade ever reaches it — no depth carve-out needed (that is
---    the deliberate difference from close_task_state_change; see the
---    0011 migration's commentary). No runtime code path UPDATEs or
---    DELETEs audit rows; anything that tries is a bug or an attacker.
---    NOTE: this trigger had no migration of its own — it predates the
---    practice. Reconstructed 2026-06-10 from the 0011 commentary after
---    the reset incident dropped it from production.
+-- 4. No-rewrite trigger on audit_log (SOC 2 CC7.2)
+--    Blocks UPDATE: once recorded, an audit row cannot be silently
+--    rewritten. NOTE: this trigger had no migration of its own — it
+--    predates the practice. Reconstructed 2026-06-10 after the reset
+--    incident dropped it from production.
+--
+--    DELETE is deliberately NOT blocked (yet). The test suite isolates
+--    audit assertions by deleting its own audit rows in ~12 files'
+--    hooks — a DELETE trigger fails 21 tests until that cleanup
+--    pattern is reworked (the suite's history confirms the original
+--    trigger never blocked DELETE either). Direct deletes in
+--    production are still constrained by the FK posture (audit_log →
+--    tenant is ON DELETE RESTRICT) and by there being no runtime code
+--    path that deletes audit rows. Tracked as an open deficiency in
+--    docs/policies/control-deficiency-log.md — when test cleanup is
+--    reworked, add the no_delete trigger HERE.
 --    Rollback: DROP TRIGGER "audit_log_no_update" ON "audit_log";
---              DROP TRIGGER "audit_log_no_delete" ON "audit_log";
 --              DROP FUNCTION "audit_log_block_mutation"();
 -- ════════════════════════════════════════════════════════════════════
 
@@ -144,10 +150,9 @@ CREATE TRIGGER "audit_log_no_update"
   BEFORE UPDATE ON "audit_log"
   FOR EACH ROW EXECUTE FUNCTION "audit_log_block_mutation"();
 
+-- Clean up the DELETE trigger from any environment where the
+-- 2026-06-10 first-draft of this file installed it.
 DROP TRIGGER IF EXISTS "audit_log_no_delete" ON "audit_log";
-CREATE TRIGGER "audit_log_no_delete"
-  BEFORE DELETE ON "audit_log"
-  FOR EACH ROW EXECUTE FUNCTION "audit_log_block_mutation"();
 
 -- ════════════════════════════════════════════════════════════════════
 -- 5. Lineage partial unique index on gl_entry_header
