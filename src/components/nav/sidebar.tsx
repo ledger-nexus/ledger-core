@@ -32,6 +32,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
     label: "Close",
     items: [
       { href: "/close", label: "Close dashboard", hint: "all pillars" },
+      { href: "/close/alerts", label: "Alerts", hint: "cross-pillar" },
       { href: "/periods", label: "Periods", hint: "open / closed" },
       { href: "/close/reconciliations", label: "Reconciliations", hint: "BS tie-out" },
       { href: "/close/tasks", label: "Close tasks", hint: "checklist" },
