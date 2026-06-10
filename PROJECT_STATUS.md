@@ -8,7 +8,9 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-06-10
 
-**Current state:** **BlackLine arc just shipped.** Phase 1-4 (22 PRs across 23 commits, +15,847 LOC) ships F1000-grade close management on top of the v1.0 substrate: Account Reconciliations with state machine + signoff + attachments + sub-ledger auto-pull (Phase 1, 8 PRs), Close Task Calendar with dependency DAG + cycle prevention + 50 canonical templates (Phase 2, 6 PRs), Flux / Variance Analysis with frozen-snapshot evidence + materiality cascade (Phase 3, 4 PRs), and the cross-pillar integration capstone with `/close` dashboard + `/close/alerts` cross-pillar feed + `/close/retrospective` process-improvement metrics (Phase 4, 4 PRs — PR 4/4 is this status amendment).
+**Current state:** **Slack notifier arc just shipped (v1.21).** Close alerts now ping operator-configured Slack channels through a cron-driven dispatcher with dedupe + severity filtering + admin UI. 4 PRs + 1 hotfix; webhook URLs encrypted at rest via AES-256-GCM; `WEBHOOK_ENCRYPTION_KEY` + `CRON_SECRET` env-driven. Closes the controller's loop — the BlackLine arc's `/api/close/alerts` endpoint is no longer a hypothetical integration surface but a live production feature.
+
+Right before this, **BlackLine arc** (Phase 1-4, 22 PRs across 23 commits, +15,847 LOC) shipped F1000-grade close management: Account Reconciliations with state machine + signoff + attachments + sub-ledger auto-pull (Phase 1, 8 PRs), Close Task Calendar with dependency DAG + cycle prevention + 50 canonical templates (Phase 2, 6 PRs), Flux / Variance Analysis with frozen-snapshot evidence + materiality cascade (Phase 3, 4 PRs), and the cross-pillar integration capstone with `/close` dashboard + `/close/alerts` cross-pillar feed + `/close/retrospective` process-improvement metrics (Phase 4, 4 PRs). Followed by close-task state-history (3 PRs, v1.19) and Retrospective CSV (1 PR, v1.20).
 
 The portfolio is now end-to-end close-capable: substrate (Layer 1+2), ERP mapping (QBO + NetSuite + NS multi-subsidiary), interactive UI, three financial statements, BTD + M-3 for tax provision, multi-entity consolidation, **AND** F1000-class close management. Counts: 559 tests across 56 files; 15 new test files added by the arc (~5,150 LOC of test coverage).
 
@@ -224,14 +226,55 @@ wants when planning process improvements.
 behavior change. Total 13/13 retrospective tests pass; total 8/8
 state-history tests pass.
 
-### v1.20+ — ergonomics + polish (deferred)
+### v1.20 — Retrospective CSV export (shipped 2026-06-10)
+
+Closes one of the documented v1.19+ items. `GET /api/close/retrospective/csv` emits a five-section CSV (summary + days-to-close + task lead time + exception rate + recurring blockers) board-deck-ready, with `Download CSV` button on `/close/retrospective`. CC7.2 audit row on every pull (`DATA_EXPORT` with `resource=CloseRetrospective`). Lookback + target clamped to safe ranges; same scope-resolution as the page.
+
+### v1.21 — Slack notifier arc (shipped 2026-06-10)
+
+Productionalizes `/api/close/alerts` — closes the controller's loop. Open close alerts now ping operator-configured Slack channels through a cron-driven dispatcher with dedupe + severity filtering + admin UI. 4 PRs + 1 hotfix:
+
+**PR 1/4 (PR #212)** — Schema + helpers:
+- `NotificationChannel` table — per-tenant Slack webhook config. `webhookUrl` column carries the AES-256-GCM ciphertext (key in `WEBHOOK_ENCRYPTION_KEY`); operators only ever see the masked URL after creation.
+- `NotificationDispatch` table — per-(channel, alert) idempotency record. `@@unique([channelId, alertFingerprint])` is the dedupe key.
+- `src/lib/notifications/crypto.ts` — `encryptWebhookUrl` / `decryptWebhookUrl` / `maskWebhookUrl` / `timingSafeEqualB64`. Packed iv(12) || tag(16) || ct format; fail-closed on missing env + tampered ciphertext + wrong key.
+- `src/lib/notifications/slack.ts` — `formatSlackBlocks(alert, context)` + `sendSlackMessage(url, payload)` with 5s timeout. Block Kit rendering: severity-coded color, fallback text, context block, Open button.
+
+**PR 2/4 (PR #213)** — Cron dispatcher:
+- `src/lib/auth/cron.ts` — `isAuthorizedCronRequest` timing-safe `Authorization: Bearer <CRON_SECRET>` check (or `?cron_secret=` for manual triggering).
+- `src/lib/notifications/dispatch.ts` — `dispatchCloseAlerts(prisma, opts?)`. Per tenant: walks entities × books, finds latest open period, calls `getCloseAlerts`, applies `severityFilter`, dedupe-probes via `findUnique`, decrypts URL, sends, writes dispatch row with status/error. Decrypt failures + Slack 4xx + network errors all write the row (with dedupe lock) so we don't infinite-retry.
+- `POST /api/cron/close-alerts-dispatch` — thin route wrapper. One aggregate `PRIVILEGED_ACTION` audit row per cron tick.
+
+**PR 3/4 (PR #214)** — Admin UI + Server Actions:
+- `/admin/notification-channels` page — admin-only. Lists every channel: name, masked URL, severity-filter chips, enabled badge, dispatch count, last-sent. Per-row actions: Test, Edit (inline panel; URL field empty by default — paste to rotate), Enable/Disable toggle, Delete (with confirm).
+- `src/app/actions/notification-channels.ts` — `createChannel`, `updateChannel`, `deleteChannel`, `testChannel`, `setEnabled`. All admin-only via `requireAdminContext()`. `testChannel` sends a diagnostic message without writing a `NotificationDispatch` row (test sends are operational, not alerts).
+- Sidebar entry: "Slack channels · alerts" under Admin.
+
+**PR 4/4 (this PR, PR #216)** — Deploy + docs:
+- `vercel.json` cron schedule: `*/15 9-18 * * 1-5` (every 15 min, business hours UTC, weekdays). Dedupe table makes cadence safe — any frequency emits one ping per (channel, alert) max.
+- `docs/deployment.md` — new "Slack notifier (optional)" section between Resetting and Troubleshooting. Covers `WEBHOOK_ENCRYPTION_KEY` + `CRON_SECRET` generation, env-var setup in Vercel, cron schedule, wire-a-channel walkthrough, audit-trail explanation, disable path.
+- This PROJECT_STATUS amendment.
+
+**Hotfix PR #215 (during arc)** — `sendSlackMessage` was echoing Slack's response body up into its error return value (`Slack returned ${status}: ${body.slice(0, 200)}`). Two consumer paths persisted that string (`notification_dispatch.sendError` plaintext column + `audit_log.metadata.error`). Slack's 4xx responses can contain the webhook URL itself plus arbitrary other content — the URL regex on the consumer side caught URLs only; non-URL content leaked. Fixed to return just `Slack returned HTTP ${status}` with body drained but not echoed. Both PR #213 and #214 picked up the fix automatically via merge of main.
+
+**SOC 2 coverage for the arc:**
+- **CC6.1** — every read/write tenantId-scoped via join + `requireAdminContext`.
+- **CC6.3** — admin gating on all 5 actions; cross-tenant id surfaces `NOT_FOUND` (no existence leak); cron-secret check is timing-safe.
+- **CC6.7** — webhookUrl encrypted at write time + only decrypted at send time; never logged; `maskWebhookUrl` applied at every render + error path; error strings stripped of webhook URLs even as defense-in-depth after the hotfix.
+- **CC6.8** — Zod on every action input; severity filter against enum allowlist.
+- **CC7.2** — `PRIVILEGED_ACTION` audit row on every channel mutation; one aggregate row per cron tick + per-dispatch detail in `notification_dispatch` table.
+- **CC8.1** — migration 0012 reversible; PR descriptions state risk + rollback.
+
+**Verified:** 30+ new tests pass (13 crypto + 9 Slack formatter + 7 dispatcher + 8 cron-auth + 8 channel actions). All on real Postgres. Tsc clean. CodeQL findings (`js/incomplete-url-substring-sanitization`) addressed by dropping `.includes()` URL-substring gates in favor of authoritative regex scrub.
+
+### v1.22+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
 - [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
 - [ ] Multi-currency revaluation
 - [ ] FX gain/loss accounts wired into journal lines properly
-- [ ] Retrospective CSV export — controller may want numbers for the board deck
-- [ ] Slack notifier wired to `/api/close/alerts` — daily digest of high-severity items
+- [ ] Slack notifier — per-tenant daily digest variant (the cron currently fires per-tick; daily-summary would batch high-severity items into one Slack message per day per channel)
+- [ ] Slack notifier — webhook URL rotation tooling (one-shot manual is acceptable at portfolio scale; versioned KMS scheme for larger deployments)
 
 ---
 

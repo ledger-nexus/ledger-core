@@ -137,6 +137,60 @@ This is destructive — it also drops QBO/NS-imported entities. Use Option 1 unl
 
 ---
 
+## Slack notifier (optional)
+
+The close-management surface ships with a Slack notifier that pings configured webhooks when high-severity close alerts appear (recon `EXCEPTION`, required blocked task, flux statement with stale `NEEDS_COMMENT`). Setup takes ~5 minutes.
+
+### Environment variables
+
+Two env vars need to be set in **Vercel → Settings → Environment Variables** for the notifier to function. Both should be **encrypted (sensitive)** and scoped to **Production + Preview**:
+
+| Name | Purpose | Generate |
+|---|---|---|
+| `WEBHOOK_ENCRYPTION_KEY` | AES-256-GCM key that encrypts every channel's webhook URL at rest. Stored in the `notification_channel.webhookUrl` column as ciphertext; never logged. | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` (32 bytes, base64) |
+| `CRON_SECRET` | Shared secret that gates `POST /api/cron/close-alerts-dispatch`. The cron worker passes it as `Authorization: Bearer <CRON_SECRET>`. | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (32 bytes hex; min 16 chars required by `isAuthorizedCronRequest`) |
+
+**Key rotation.** `WEBHOOK_ENCRYPTION_KEY` is single-version in v1 — rotating it means re-encrypting every channel under the new key (no automated path). For portfolio scale (~10 channels per tenant) one-shot manual rotation is acceptable; larger deployments would want a versioned KMS scheme.
+
+### Configure the cron schedule
+
+`vercel.json` ships with a 15-minute-during-business-hours cadence:
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/close-alerts-dispatch",
+      "schedule": "*/15 9-18 * * 1-5"
+    }
+  ]
+}
+```
+
+Vercel cron times are **UTC**. Adjust the hours window if your team isn't on EU/UK time. The dedupe table (`notification_dispatch` with `@@unique([channelId, alertFingerprint])`) makes any cadence safe — every (channel, alert) tuple pings at most once regardless of how often the cron fires. Aggressive cadences waste compute but never double-page.
+
+### Wire a Slack channel
+
+1. Sign into Vercel + redeploy (env vars require a new deploy to take effect).
+2. Open the app. Sign in as a **tenant admin**.
+3. Sidebar → **Admin** → **Slack channels · alerts** (visible to admins only).
+4. **Add a Slack channel** form:
+   - **Channel name** — operator-facing label, e.g. `#finance close alerts`
+   - **Slack webhook URL** — create at https://api.slack.com/messaging/webhooks; copy the full URL (starts with `https://hooks.slack.com/services/T.../B.../...`). The form masks the value as you type.
+   - **Severity filter** — pick `high` only, or leave blank for all severities.
+5. Click **Add channel**. The URL is encrypted under `WEBHOOK_ENCRYPTION_KEY` before the row lands in the DB.
+6. Click **Test** on the new row. A diagnostic message lands in the Slack channel ("Test message from ledger-core notification channel ..."). If you see `SLACK_REJECTED` or `DECRYPT_FAILED`, the audit log under **Admin → Audit log** carries the diagnostic — filter by `resource=NotificationChannel`.
+
+### Audit trail
+
+Every dispatch — successful or failed — writes a row to `notification_dispatch` with status code + error. Every admin action on a channel (create / update / delete / test / setEnabled) writes a `PRIVILEGED_ACTION` row to `audit_log` with the masked URL only — the plaintext webhook URL never appears in any audit-visible payload. The cron tick itself writes one aggregate `PRIVILEGED_ACTION` row per invocation summarizing tenants scanned + alerts dispatched + errors.
+
+### Disabling the notifier
+
+To pause without removing config: in the admin UI, click **Disable** on every channel (or toggle individual ones). The cron continues to run but emits no dispatches. To remove entirely: delete `vercel.json`'s `crons` block and unset the env vars.
+
+---
+
 ## Troubleshooting
 
 **`Error: P1001: Can't reach database`**
