@@ -13,7 +13,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "demo": "tsx prisma/demo.ts",
-    "db:reset": "prisma migrate reset --force && npm run db:seed",
+    "db:reset": "prisma db push --force-reset --skip-generate && npm run db:seed",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:invariants": "vitest run tests/invariants.test.ts",

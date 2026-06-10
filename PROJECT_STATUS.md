@@ -372,13 +372,17 @@ The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluatio
 - **`createMany` for INITIAL rows on bulk instantiation** — one round trip for N tasks instead of N transactions. Append-only trigger allows bulk INSERT (only UPDATE/DELETE blocked), so this is clean.
 - **`reason` populated only for BLOCKED + WAIVED** — start/complete/unblock leave it null. Reduces noise; captures the audit-relevant signal. The block reason is the most-asked-about field when reviewing close history.
 
+### db:reset repair (2026-06-10)
+
+- **`db:reset` switched from `prisma migrate reset --force` to `prisma db push --force-reset --skip-generate`** — the repo has no baseline `0000_init` migration (the schema has always been `db push`-managed; `prisma/migrations/` is incremental-only), so `migrate reset` drops the schema, replays only the incrementals, fails at `0001_constraints` with P3018 ("relation gl_entry_line does not exist" — nothing created the base tables) and leaves the database EMPTY. This happened on 2026-06-10 and required a full manual recovery. Post-reset caveats (shared-DB companion tables, migration-only DDL mirroring, default-tenant bootstrap) are documented in `docs/deployment.md` under "db:reset caveats".
+
 ---
 
 ## Notes for the next session
 
 - Architecture canon: `docs/universal-schema.md`. Schema visual: `docs/schema-erd.md`. Both are kept in sync with the actual schema.
 - Headline test command: `npm test` (runs invariants + sub-ledgers + seeded-company + BlackLine arc suites). Tests need a live Postgres at `DATABASE_URL`. Expect 528 / 559 pass; the 7 failures are pre-existing `tenant-context.test.ts:406` cleanup flake (audit_log append-only constraint), not BlackLine arc breakage.
-- Seed data dependencies: `npm run db:push && npm run db:seed` in that order. The seed expects a freshly pushed schema; reset with `npm run db:reset`.
+- Seed data dependencies: `npm run db:push && npm run db:seed` in that order. The seed expects a freshly pushed schema; reset with `npm run db:reset` — but read the db:reset caveats in `docs/deployment.md` first (shared DB with companion repos, migration-only DDL to re-mirror, default-tenant bootstrap before the seed can run).
 - One-shot demo: `npm run demo` (v1.17). Wipes DEMO_CO + posts 28 JEs across May 2026 + closes May. Opens to a tied-out month-end packet.
 - BlackLine arc entry points: `/close` (dashboard) → `/close/alerts` (cross-pillar feed) → `/close/retrospective` (process metrics). Sub-pillars: `/close/reconciliations` → `/close/tasks` → `/close/flux`. JSON API at `/api/close/alerts` for Slack notifier wiring.
 - SOC 2 readiness state: `SOC2_READINESS.md` v2.3 / control-deficiency-log v2.3 / risk-register v2.4. Audit window opens 6 months out; cannot bolt on later. Every mutation MUST `logAudit`; every fetch-by-id MUST be org-scoped `findFirst`; every input MUST `validateForm/Json`; every log MUST `redactPii`.
