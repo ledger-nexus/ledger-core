@@ -97,6 +97,17 @@ model Tenant {
   notifications          Notification[]
   recurringEntries       RecurringEntry[]
   journalEntryNotes      JournalEntryNote[]
+  // BlackLine arc Phase 1: account-reconciliation workflow.
+  reconciliations         Reconciliation[]
+  reconciliationAttachments ReconciliationAttachment[]
+  reconciliationConfig    ReconciliationConfig?
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks             CloseTask[]
+  closeTaskTemplates     CloseTaskTemplate[]
+  closeTaskComments      CloseTaskComment[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements         FluxStatement[]
+  fluxLines              FluxLine[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -194,6 +205,11 @@ model LegalEntity {
   arOpenItems      ArOpenItem[]
   apOpenItems      ApOpenItem[]
   recurringEntries RecurringEntry[]
+  reconciliations  Reconciliation[]
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks       CloseTask[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements   FluxStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -226,6 +242,11 @@ model Book {
   arOpenItems                   ArOpenItem[]
   apOpenItems                   ApOpenItem[]
   recurringEntries              RecurringEntry[]
+  reconciliations               Reconciliation[]
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks                    CloseTask[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements                FluxStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -280,8 +301,14 @@ model Period {
   startsOn   DateTime       @db.Date
   endsOn     DateTime       @db.Date
 
-  journalEntries JournalEntry[]
-  closes         PeriodClose[]
+  journalEntries  JournalEntry[]
+  closes          PeriodClose[]
+  reconciliations Reconciliation[]
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks      CloseTask[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatementsFrom FluxStatement[] @relation("FluxFromPeriod")
+  fluxStatementsTo   FluxStatement[] @relation("FluxToPeriod")
 
   @@unique([calendarId, code])
   @@unique([calendarId, ordinal])
@@ -499,7 +526,19 @@ model Account {
 
   active Boolean @default(true)
 
-  lines JournalLine[]
+  // BlackLine arc Phase 1: per-account override of the tenant default.
+  // - requiresReconReview: null = inherit ReconciliationConfig.defaultRequiresReview.
+  //   true = always preparer→reviewer chain. false = single sign-off OK.
+  // - reconTolerance: null = inherit tenant default (typically 0 = must tie out
+  //   exactly). Non-null = $-amount diff allowed before marking EXCEPTION.
+  //   Used by cash accounts where rounding differences are common.
+  requiresReconReview Boolean?
+  reconTolerance      Decimal? @db.Decimal(20, 4)
+
+  lines           JournalLine[]
+  reconciliations Reconciliation[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxLines       FluxLine[]
 
   sourceSystem     String?
   sourceRecordType String?
@@ -1455,6 +1494,21 @@ model User {
   notificationsActed Notification[] @relation("NotificationActor")
   auditEvents        AuditLog[]     @relation("AuditLogActor")
   journalEntryNotes  JournalEntryNote[]
+  // BlackLine arc Phase 1: a user can be the preparer on N recons, the
+  // reviewer on N recons, and the uploader of N attachments. CPA
+  // segregation of duties means preparer != reviewer on the same recon
+  // (enforced at the Server Action layer, not the schema).
+  reconciliationsPrepared    Reconciliation[]           @relation("ReconPreparer")
+  reconciliationsReviewed    Reconciliation[]           @relation("ReconReviewer")
+  reconciliationAttachments  ReconciliationAttachment[]
+  // BlackLine arc Phase 2: close-task calendar. A user can own N close
+  // tasks (assigned executor), complete N, and author N comments.
+  closeTasksOwned      CloseTask[]        @relation("CloseTaskOwner")
+  closeTasksCompleted  CloseTask[]        @relation("CloseTaskCompleter")
+  closeTaskComments    CloseTaskComment[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatementsFinalized FluxStatement[] @relation("FluxFinalizer")
+  fluxLineComments        FluxLine[]      @relation("FluxLineCommenter")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1756,6 +1810,255 @@ enum NotificationCategory {
 }
 
 // =========================================================================
+// BlackLine arc — Phase 2: Close Task Calendar
+// =========================================================================
+//
+// Models the controller's monthly close checklist as data instead of an
+// outside spreadsheet. Each (entity, book, period) gets N CloseTask rows
+// instantiated from CloseTaskTemplate at period-open time. Task status
+// flows: NOT_STARTED → IN_PROGRESS → DONE (or → BLOCKED, or → WAIVED).
+//
+// Dependencies are encoded as a self-FK array (dependsOnIds: UUID[]).
+// Cycle prevention happens at write-time in the Server Action — the
+// schema can't enforce a DAG via Prisma. Closing a period requires all
+// `requiredForClose=true` tasks to be terminal (DONE/WAIVED).
+//
+// Design doc: docs/blackline-arc-design.md → Phase 2.
+
+enum CloseTaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  WAIVED
+}
+
+enum CloseTaskCategory {
+  ACCRUAL
+  RECON
+  DEPRECIATION
+  FX
+  REVENUE
+  INVENTORY
+  TAX
+  REPORTING
+  ADMIN
+}
+
+model CloseTask {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId  String @db.Uuid
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // entityId/bookId nullable so a tenant-wide admin task ("send close-
+  // complete notification") can apply across all (entity, book) tuples
+  // for the period without N duplicate rows. The instantiator decides
+  // the fan-out shape: BS-tied tasks (recon AR) are per-(entity, book);
+  // org-wide tasks (post-mortem) are null/null.
+  entityId  String?      @db.Uuid
+  entity    LegalEntity? @relation(fields: [entityId], references: [id])
+  bookId    String?      @db.Uuid
+  book      Book?        @relation(fields: [bookId], references: [id])
+  periodId  String       @db.Uuid
+  period    Period       @relation(fields: [periodId], references: [id])
+
+  // Links back to the template this row was instantiated from. Null when
+  // the task was created ad-hoc (a controller adds a one-off "investigate
+  // unusual JE in Misc Income"). NOT a FK because deleting a template
+  // shouldn't cascade-wipe historical task records — the audit trail.
+  templateKey String?
+  name        String
+  description String?
+  category    CloseTaskCategory
+
+  status           CloseTaskStatus @default(NOT_STARTED)
+  // When true, the period-close gate refuses if this task isn't terminal.
+  requiredForClose Boolean         @default(true)
+
+  // Polymorphic owner — User or Queue, discriminated by ownerType.
+  // ownerId is application-enforced, not FK'd, mirroring the same
+  // pattern on JournalEntry / ArOpenItem (see docs/ownership-and-rules.md).
+  ownerId    String?    @db.Uuid
+  ownerType  OwnerType?
+
+  // Due date computed at instantiation from
+  // (period.endsOn + dueOffsetDays). Negative = before period end.
+  // Stored as DateTime so a task in a week-of-month calendar still
+  // gets a meaningful due moment.
+  dueOffsetDays Int?
+  dueAt         DateTime?
+
+  // Self-reference dependency list. Cycle prevention is enforced in
+  // the Server Action (Prisma can't validate a DAG at the schema level).
+  // Empty array = no predecessors.
+  dependsOnIds String[] @db.Uuid
+
+  blockedReason String?
+  completedById String?   @db.Uuid
+  completer     User?     @relation("CloseTaskCompleter", fields: [completedById], references: [id])
+  completedAt   DateTime?
+  // Free-text evidence link the user pastes when marking DONE — URL to a
+  // workpaper, bank statement screenshot, etc. Not a typed Attachment
+  // (those live on Reconciliation per Phase 1); free-form is enough at
+  // the task tier and keeps the UI simple.
+  evidenceUrl  String?
+  evidenceNote String?
+
+  owner    User?              @relation("CloseTaskOwner", fields: [ownerId], references: [id])
+  comments CloseTaskComment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, periodId, status])
+  @@index([ownerId])
+  @@index([dueAt])
+  @@map("close_task")
+}
+
+// Per-tenant catalog of recurring tasks. seedCloseTaskTemplates ships
+// the ~50 BlackLine-standard rows; controllers can disable or add
+// custom templates per tenant.
+model CloseTaskTemplate {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Stable identifier — "ACCRUE_PAYROLL", "RUN_DEPRECIATION".
+  // Templates instantiate by key, not id, so a re-seed against a fresh
+  // tenant gives matching dependsOnKeys without UUID juggling.
+  key         String
+  name        String
+  description String?
+  category    CloseTaskCategory
+
+  defaultOwnerId       String?    @db.Uuid
+  defaultOwnerType     OwnerType?
+  defaultDueOffsetDays Int? // relative to period.endsOn
+  requiredForClose     Boolean    @default(true)
+
+  // Dependency list by KEY (not ID) — resolved to ids at instantiation
+  // time. This makes the seed file portable: a fresh tenant gets the
+  // same predecessor wiring without needing to know the new UUIDs.
+  defaultDependsOnKeys String[]
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, key])
+  @@index([tenantId, active])
+  @@map("close_task_template")
+}
+
+// Comment thread on a close task. Body encrypted via the PrismaExtension
+// confidential-column path when wired in (see docs/blackline-arc-design.md
+// → "Confidentiality wire-up"). Stored as plain Text in v1.
+model CloseTaskComment {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  closeTaskId String    @db.Uuid
+  closeTask   CloseTask @relation(fields: [closeTaskId], references: [id], onDelete: Cascade)
+
+  body     String
+  authorId String @db.Uuid
+  author   User   @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([closeTaskId])
+  @@index([tenantId])
+  @@map("close_task_comment")
+}
+
+// =========================================================================
+// BlackLine arc — Phase 3: Flux / Variance Analysis
+// =========================================================================
+
+enum FluxStatementStatus {
+  DRAFT
+  FINALIZED
+}
+
+enum FluxLineStatus {
+  IMMATERIAL
+  NEEDS_COMMENT
+  EXPLAINED
+  WAIVED
+}
+
+model FluxStatement {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+
+  fromPeriodId String @db.Uuid
+  fromPeriod   Period @relation("FluxFromPeriod", fields: [fromPeriodId], references: [id])
+  toPeriodId   String @db.Uuid
+  toPeriod     Period @relation("FluxToPeriod", fields: [toPeriodId], references: [id])
+
+  absoluteThreshold Decimal @db.Decimal(20, 4) @default(0)
+  percentThreshold  Decimal @db.Decimal(8, 4) @default(0)
+
+  status FluxStatementStatus @default(DRAFT)
+
+  finalizedBy   String?   @db.Uuid
+  finalizer     User?     @relation("FluxFinalizer", fields: [finalizedBy], references: [id])
+  finalizedAt   DateTime?
+
+  lines FluxLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, bookId, fromPeriodId, toPeriodId])
+  @@index([tenantId, toPeriodId, status])
+  @@map("flux_statement")
+}
+
+model FluxLine {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  statementId String        @db.Uuid
+  statement   FluxStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id])
+
+  priorAmount   Decimal @db.Decimal(20, 4)
+  currentAmount Decimal @db.Decimal(20, 4)
+  deltaAmount   Decimal @db.Decimal(20, 4)
+  deltaPercent  Decimal? @db.Decimal(12, 4)
+
+  status FluxLineStatus @default(IMMATERIAL)
+
+  commentary   String?
+  commentaryBy String?   @db.Uuid
+  commenter    User?     @relation("FluxLineCommenter", fields: [commentaryBy], references: [id])
+  commentaryAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([statementId, accountId])
+  @@index([statementId, status])
+  @@index([tenantId])
+  @@map("flux_line")
+}
+
+// =========================================================================
 // DB-level invariants live in prisma/migrations/0001_constraints/migration.sql
 // =========================================================================
 //
@@ -1767,3 +2070,137 @@ enum NotificationCategory {
 //
 // See docs/universal-schema.md for the architectural rationale and the
 // remaining layers' build plan.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BlackLine arc — Phase 1: Account Reconciliations
+//
+// The workflow shell BlackLine's whole product is built around. One
+// Reconciliation row per (entity, book, period, account). Preparer ties out
+// GL balance to supporting documentation, signs, hands off to reviewer.
+// Reviewer signs OR sends back. Period close refuses to advance until every
+// active BS account in the tenant is RECONCILED (or WAIVED by admin).
+//
+// Design doc: docs/blackline-arc-design.md
+// Sign-off shape (single vs preparer→reviewer) is per-recon, default from
+// ReconciliationConfig.defaultRequiresReview, overridable per Account.
+// Period-close gate composition with Phases 2 + 3 documented in design doc.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ReconStatus {
+  OPEN          // auto-created, not yet started
+  IN_PROGRESS   // preparer is working
+  PREPARED      // preparer signed; ready for reviewer (only when requiresReview)
+  RECONCILED    // signed off (terminal — closes the period-close gate)
+  EXCEPTION     // diff > tolerance; disposition required
+  WAIVED        // admin marked not-applicable for this period
+}
+
+model Reconciliation {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId  String @db.Uuid
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // The scope tuple. Composite-unique so re-running the auto-instantiator
+  // (Phase 1 PR 6) is idempotent.
+  entityId  String      @db.Uuid
+  entity    LegalEntity @relation(fields: [entityId], references: [id])
+  bookId    String      @db.Uuid
+  book      Book        @relation(fields: [bookId], references: [id])
+  periodId  String      @db.Uuid
+  period    Period      @relation(fields: [periodId], references: [id])
+  accountId String      @db.Uuid
+  account   Account     @relation(fields: [accountId], references: [id])
+
+  // Frozen at sign-off so the reviewer sees the same numbers the preparer
+  // signed against — even if a JE backs into the period afterward.
+  // `glBalance` is the trial-balance number; `supportingBalance` is what
+  // the operator typed in (Phase 1) or what the sub-ledger says (Phase 1
+  // PR 7 auto-pull). `reconciledDiff` is computed = gl − supporting and
+  // stored so a SQL sort by "biggest disagreement" stays cheap.
+  glBalance         Decimal  @db.Decimal(20, 4)
+  supportingBalance Decimal?
+  reconciledDiff    Decimal?
+  // Per-recon tolerance. Inherited from Account.reconTolerance (which
+  // inherits from ReconciliationConfig.defaultTolerance). Stored on the
+  // row so changing the tenant default later doesn't retroactively flip
+  // signed-off recons in or out of EXCEPTION.
+  tolerance         Decimal  @db.Decimal(20, 4) @default(0)
+
+  status ReconStatus @default(OPEN)
+  // Decision #2 wiring: false = single sign-off (preparer's mark =
+  // RECONCILED); true = preparer→reviewer chain (PREPARED waits for
+  // reviewer). Frozen at recon-open time. Default value supplied by the
+  // create-action from Account.requiresReconReview → ReconciliationConfig
+  // → true (BlackLine standard).
+  requiresReview Boolean @default(true)
+
+  preparedBy String?   @db.Uuid
+  preparer   User?     @relation("ReconPreparer", fields: [preparedBy], references: [id])
+  preparedAt DateTime?
+  reviewedBy String?   @db.Uuid
+  reviewer   User?     @relation("ReconReviewer", fields: [reviewedBy], references: [id])
+  reviewedAt DateTime?
+
+  // Encrypted via the existing PrismaExtension confidential-column path
+  // (wired in PR 4 when notes get a real UI). Stays plain Text in schema.
+  notes String?
+
+  // Soft reference: RecordEvent.recordType = "Reconciliation",
+  // .recordId = this id. No Prisma relation — RecordEvent is the
+  // tenant-wide event journal used by ownership, JE notes, etc.
+  attachments ReconciliationAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Idempotent auto-instantiation on first visit to /close/reconciliations.
+  @@unique([entityId, bookId, periodId, accountId])
+  @@index([tenantId, periodId, status])
+  @@index([periodId, status])
+  @@map("reconciliation")
+}
+
+model ReconciliationAttachment {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  reconciliationId String         @db.Uuid
+  reconciliation   Reconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  filename    String
+  contentType String
+  // Encrypted bytes via PrismaExtension (wired in PR 4). Self-contained
+  // storage — no S3 vendor dependency. Worst case: 5 MB CSV × 100
+  // accounts × 12 months = 6 GB tenant-wide. Acceptable at portfolio
+  // scale; revisit if customer onboards with 500+ accounts.
+  payload    Bytes
+  sizeBytes  Int
+
+  uploadedById String   @db.Uuid
+  uploader     User     @relation(fields: [uploadedById], references: [id])
+  uploadedAt   DateTime @default(now())
+
+  @@index([reconciliationId])
+  @@index([tenantId])
+  @@map("reconciliation_attachment")
+}
+
+// Per-tenant default sign-off shape + default tolerance. Per-account
+// override stored on Account.requiresReconReview + Account.reconTolerance.
+// Resolution order documented in docs/blackline-arc-design.md.
+model ReconciliationConfig {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @unique @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  defaultRequiresReview Boolean @default(true)
+  defaultTolerance      Decimal @db.Decimal(20, 4) @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("reconciliation_config")
+}

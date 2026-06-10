@@ -26,6 +26,11 @@ import {
   getBalanceSheet,
 } from "@/lib/accounting/reports";
 import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import {
+  getReconciliationRollup,
+  rollupSummaryLine,
+} from "@/lib/recon/rollup";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -130,9 +135,11 @@ export default async function MonthEndPage({
   });
   const isClosed = !!close;
 
-  // Run the three reports + sub-ledger tie checks in parallel. All
-  // are independent reads against (entity, book, periodEnd).
-  const [tb, is, bs, subledgerTies] = await Promise.all([
+  const tenant = await getCurrentTenant();
+
+  // Run the three reports + sub-ledger ties + recon rollup in parallel.
+  // All are independent reads against (entity, book, period).
+  const [tb, is, bs, subledgerTies, reconRollup] = await Promise.all([
     getTrialBalance(
       prisma,
       { entityCode: entity.code, bookCode: book.code },
@@ -154,10 +161,35 @@ export default async function MonthEndPage({
       bookCode: book.code,
       asOf: selectedPeriod.endsOn,
     }),
+    tenant
+      ? getReconciliationRollup(prisma, {
+          tenantId: tenant.id,
+          entityId: entity.id,
+          bookId: book.id,
+          periodId: selectedPeriod.id,
+        })
+      : Promise.resolve({
+          total: 0,
+          reconciled: 0,
+          waived: 0,
+          prepared: 0,
+          inProgress: 0,
+          open: 0,
+          exception: 0,
+          done: 0,
+          pctDone: 0,
+        }),
   ]);
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
   const bsTies = bs.totalAssets.equals(bs.totalLiabilities.plus(bs.totalEquity));
+  // "Recons signed off" is GREEN when every recon for the period is
+  // terminal (RECONCILED or WAIVED). Exceptions, in-progress, prepared,
+  // open all break the tie. Zero recons opened = not applicable rather
+  // than ✗ — first-time use shouldn't show a fail flag.
+  const reconsAllDone =
+    reconRollup.total > 0 && reconRollup.done === reconRollup.total;
+  const reconsApplicable = reconRollup.total > 0;
   const allSubTies = subledgerTies.every(
     (t) => t.status === "ok" || t.status === "no_control_account"
   );
@@ -221,6 +253,16 @@ export default async function MonthEndPage({
                 ·{" "}
                 <span className={allSubTies ? "text-emerald-700" : "text-red-700"}>
                   {allSubTies ? "✓" : "✗"} Sub-ledger ties
+                </span>
+              </>
+            )}
+            {reconsApplicable && (
+              <>
+                {" "}
+                ·{" "}
+                <span className={reconsAllDone ? "text-emerald-700" : "text-red-700"}>
+                  {reconsAllDone ? "✓" : "✗"} Recons signed off (
+                  {reconRollup.done}/{reconRollup.total})
                 </span>
               </>
             )}
@@ -334,6 +376,60 @@ export default async function MonthEndPage({
                 ))}
               </TBody>
             </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Reconciliation rollup — BlackLine arc Phase 1 PR 8. Shows on
+          any period where at least one recon has been opened. The cover
+          page check above ("Recons signed off N/T") rolls up to this
+          card's per-status histogram. */}
+      {reconsApplicable && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span>Account reconciliations</span>
+              <Badge tone={reconsAllDone ? "positive" : "negative"}>
+                {reconRollup.pctDone}% done
+              </Badge>
+            </CardTitle>
+            <span className="text-xs text-ink-500">
+              {rollupSummaryLine(reconRollup)} ·{" "}
+              <Link
+                href={`/close/reconciliations?period=${selectedPeriod.code}`}
+                className="text-accent-600 hover:underline"
+              >
+                Open list
+              </Link>
+            </span>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
+              {[
+                { label: "Reconciled", count: reconRollup.reconciled, tone: "positive" as const },
+                { label: "Waived", count: reconRollup.waived, tone: "neutral" as const },
+                { label: "Prepared", count: reconRollup.prepared, tone: "warning" as const },
+                { label: "In progress", count: reconRollup.inProgress, tone: "info" as const },
+                { label: "Open", count: reconRollup.open, tone: "neutral" as const },
+                { label: "Exception", count: reconRollup.exception, tone: "negative" as const },
+              ].map(({ label, count, tone }) => (
+                <div key={label} className="flex flex-col gap-1">
+                  <div className="text-xs uppercase tracking-wide text-ink-500">
+                    {label}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-semibold text-ink-900">
+                      {count}
+                    </span>
+                    {count > 0 && (
+                      <Badge tone={tone}>
+                        {Math.round((count / reconRollup.total) * 100)}%
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
