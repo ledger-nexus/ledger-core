@@ -123,11 +123,22 @@ export async function sendSlackMessage(
       signal: controller.signal,
     });
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
+      // Read + discard the body so Slack's stream is drained, but do NOT
+      // echo its contents into the error string. Slack's error responses
+      // can contain the webhook URL ("Webhook URL https://hooks.slack.com/
+      // services/T.../B.../HASH is invalid") plus arbitrary detail; once
+      // that lands in NotificationDispatch.sendError (plaintext column)
+      // or audit_log.metadata it's a persistent leak surface. The URL
+      // regex scrub callers run only catches URLs; this one stays a hole
+      // for non-URL content. The HTTP status code is the only signal we
+      // need for operational debugging — Slack's webhook-side error
+      // codes ("invalid_payload", "channel_is_archived") are knowable
+      // from the status.
+      await res.text().catch(() => "");
       return {
         ok: false,
         status: res.status,
-        error: `Slack returned ${res.status}: ${body.slice(0, 200)}`,
+        error: `Slack returned HTTP ${res.status}`,
       };
     }
     return { ok: true, status: res.status };
