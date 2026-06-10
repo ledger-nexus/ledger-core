@@ -118,41 +118,23 @@ CREATE TRIGGER "close_task_state_change_no_delete"
   FOR EACH ROW EXECUTE FUNCTION "close_task_state_change_block_mutation"();
 
 -- ════════════════════════════════════════════════════════════════════
--- 4. No-rewrite trigger on audit_log (SOC 2 CC7.2)
---    Blocks UPDATE: once recorded, an audit row cannot be silently
---    rewritten. NOTE: this trigger had no migration of its own — it
---    predates the practice. Reconstructed 2026-06-10 after the reset
---    incident dropped it from production.
+-- 4. audit_log append-only enforcement (SOC 2 CC5/CC7.2)
+--    Lives in its own file: prisma/sql/audit-log-append-only.sql —
+--    silent Postgres RULEs that no-op UPDATE and DELETE (see that
+--    file's header for why RULE-over-trigger was chosen, and
+--    tests/_helpers/audit-log-cleanup.ts for the test-only escape
+--    hatch that must stay in sync with the rule names).
+--    `npm run db:restore-ddl` applies BOTH files; if you apply this
+--    file by hand, apply that one too.
 --
---    DELETE is deliberately NOT blocked (yet). The test suite isolates
---    audit assertions by deleting its own audit rows in ~12 files'
---    hooks — a DELETE trigger fails 21 tests until that cleanup
---    pattern is reworked (the suite's history confirms the original
---    trigger never blocked DELETE either). Direct deletes in
---    production are still constrained by the FK posture (audit_log →
---    tenant is ON DELETE RESTRICT) and by there being no runtime code
---    path that deletes audit rows. Tracked as an open deficiency in
---    docs/policies/control-deficiency-log.md — when test cleanup is
---    reworked, add the no_delete trigger HERE.
---    Rollback: DROP TRIGGER "audit_log_no_update" ON "audit_log";
---              DROP FUNCTION "audit_log_block_mutation"();
+--    The block below only removes the loud-trigger variant that the
+--    2026-06-10 first draft of this file installed, so re-running
+--    db:restore-ddl converges any environment on the RULE mechanism.
 -- ════════════════════════════════════════════════════════════════════
 
-CREATE OR REPLACE FUNCTION "audit_log_block_mutation"()
-RETURNS TRIGGER AS $$
-BEGIN
-  RAISE EXCEPTION 'audit_log is append-only — % blocked', TG_OP;
-END;
-$$ LANGUAGE plpgsql;
-
 DROP TRIGGER IF EXISTS "audit_log_no_update" ON "audit_log";
-CREATE TRIGGER "audit_log_no_update"
-  BEFORE UPDATE ON "audit_log"
-  FOR EACH ROW EXECUTE FUNCTION "audit_log_block_mutation"();
-
--- Clean up the DELETE trigger from any environment where the
--- 2026-06-10 first-draft of this file installed it.
 DROP TRIGGER IF EXISTS "audit_log_no_delete" ON "audit_log";
+DROP FUNCTION IF EXISTS "audit_log_block_mutation"();
 
 -- ════════════════════════════════════════════════════════════════════
 -- 5. Lineage partial unique index on gl_entry_header

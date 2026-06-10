@@ -49,15 +49,16 @@ jobs:
       # production rollouts but won't replay against a fresh DB.
       - run: npx prisma db push --skip-generate
 
-      # Migration-only DDL (append-only triggers, CHECK constraints,
-      # GIN + partial unique indexes) that `prisma db push` cannot
-      # create — Prisma's schema language can't express them. The
-      # mirror file is the single source of truth, shared with
-      # `npm run db:restore-ddl` for post-reset recovery. Adding
-      # migration-only DDL in a new migration? Add it to the mirror
-      # file (idempotently) and this step picks it up.
+      # Migration-only DDL (append-only triggers/rules, CHECK
+      # constraints, GIN + partial unique indexes) that `prisma db
+      # push` cannot create — Prisma's schema language can't express
+      # them. db:restore-ddl applies the prisma/sql/ DDL files; the
+      # same command recovers a database after `db:reset`. Adding
+      # migration-only DDL in a new migration? Add it to
+      # prisma/sql/migration-mirror.sql (idempotently) and this step
+      # picks it up.
       - name: Apply migration-mirror DDL
-        run: npx prisma db execute --file prisma/sql/migration-mirror.sql
+        run: npm run db:restore-ddl
 
       # The seed self-bootstraps the default tenant + owner user
       # (ensureDefaultTenant) — the rows migration 0002_multi_tenancy's
