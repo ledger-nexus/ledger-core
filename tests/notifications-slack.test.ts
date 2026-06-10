@@ -129,9 +129,16 @@ describe("sendSlackMessage", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ text: "hello" });
   });
 
-  it("returns ok:false on non-2xx response with status + error body", async () => {
+  it("returns ok:false on non-2xx with status only — never echoes response body", async () => {
+    // Slack's response body could contain the webhook URL or other
+    // sensitive content that would then land in NotificationDispatch
+    // .sendError (a plaintext column). The sender drains the body but
+    // does NOT include any of it in the error string.
     vi.spyOn(global, "fetch").mockResolvedValueOnce(
-      new Response("invalid_payload", { status: 400 }) as unknown as Response
+      new Response(
+        "secret_marker_should_never_appear https://hooks.slack.com/services/SECRET/PATH/HASH",
+        { status: 400 }
+      ) as unknown as Response
     );
     const r = await sendSlackMessage("https://hooks.slack.com/services/X/Y/Z", {
       text: "broken",
@@ -140,7 +147,8 @@ describe("sendSlackMessage", () => {
     if (!r.ok) {
       expect(r.status).toBe(400);
       expect(r.error).toContain("400");
-      expect(r.error).toContain("invalid_payload");
+      expect(r.error).not.toContain("secret_marker_should_never_appear");
+      expect(r.error).not.toContain("hooks.slack.com");
     }
   });
 
