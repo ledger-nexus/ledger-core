@@ -520,6 +520,14 @@ model Account {
   isControlAccount Boolean       @default(false) // true for AR/AP control accounts
   isBank           Boolean       @default(false)
 
+  // ASC 830 / IAS 21: monetary accounts (cash, receivables, payables, debt)
+  // hold a fixed number of currency units, so a foreign-currency balance is
+  // re-measured to the functional currency at the period-end CLOSE rate and
+  // the delta hits FX gain/loss. Non-monetary accounts (inventory, fixed
+  // assets, prepaids, equity) stay at historical rate and are NOT revalued.
+  // The revaluation engine walks accounts where isMonetary = true.
+  isMonetary       Boolean       @default(false)
+
   parentAccountId String?   @db.Uuid
   parent          Account?  @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
   children        Account[] @relation("AccountHierarchy")
