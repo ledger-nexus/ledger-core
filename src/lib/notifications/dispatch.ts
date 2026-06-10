@@ -41,17 +41,16 @@
 //   CC7.2  every dispatch (success or fail) writes a row; the row IS
 //          the audit trail for the outbound action
 
-import type { Prisma, PrismaClient } from "@prisma/client";
-
-import { decryptWebhookUrl, maskWebhookUrl } from "@/lib/notifications/crypto";
+import { decryptWebhookUrl } from "@/lib/notifications/crypto";
 import { formatSlackBlocks, sendSlackMessage } from "@/lib/notifications/slack";
+import type { CloseAlert } from "@/lib/close/alerts";
 import {
-  getCloseAlerts,
-  type CloseAlert,
-  type AlertSeverity,
-} from "@/lib/close/alerts";
-
-type DbClient = PrismaClient | Prisma.TransactionClient;
+  collectOpenPeriodAlerts,
+  matchesSeverityFilter,
+  scrubSlackUrls,
+  type DbClient,
+  type ScopeKey,
+} from "@/lib/notifications/shared";
 
 export interface DispatchOptions {
   /** Override the default base URL used to render deep-link "Open" buttons. */
@@ -178,45 +177,14 @@ async function dispatchForTenant(
     errors: 0,
   };
 
-  // Find all (entity, book) tuples for this tenant that have at
-  // least one OPEN period. We scan the top N most-recent periods per
-  // (entity, book) and pick the first one without a close row.
-  const entities = await prisma.legalEntity.findMany({
-    where: { tenantId: args.tenantId },
-    select: { id: true, code: true },
-  });
-  const books = await prisma.book.findMany({ select: { id: true, code: true } });
-
-  // For each (entity, book, openPeriod) scope, pull alerts.
-  const allAlerts: { scope: ScopeKey; alert: CloseAlert }[] = [];
-  for (const entity of entities) {
-    for (const book of books) {
-      const openPeriod = await findLatestOpenPeriod(prisma, {
-        tenantId: args.tenantId,
-        entityId: entity.id,
-        bookId: book.id,
-        limit: args.maxPeriodsPerTenant,
-      });
-      if (!openPeriod) continue;
-      const alerts = await getCloseAlerts(prisma, {
-        tenantId: args.tenantId,
-        entityId: entity.id,
-        bookId: book.id,
-        periodId: openPeriod.id,
-        periodCode: openPeriod.code,
-      });
-      for (const alert of alerts) {
-        allAlerts.push({
-          scope: {
-            entity: entity.code,
-            book: book.code,
-            period: openPeriod.code,
-          },
-          alert,
-        });
-      }
-    }
-  }
+  // Every (entity, book, latest-open-period) alert for this tenant —
+  // collected by the module shared with the digest cadence so the two
+  // dispatchers can't silently diverge on scope resolution.
+  const allAlerts = await collectOpenPeriodAlerts(
+    prisma,
+    args.tenantId,
+    args.maxPeriodsPerTenant
+  );
   result.alertsConsidered = allAlerts.length;
 
   // For each (alert, channel) pair: severity filter + dedupe check +
@@ -315,67 +283,13 @@ async function sendOne(
       pillar: args.alert.pillar,
       severity: args.alert.severity,
       sendStatus: result.ok ? result.status : (result.status ?? null),
-      sendError: result.ok
-        ? null
-        : // Mask any URL that might have leaked into the error string.
-          // We never log webhook URLs even on failure. The regex is the
-          // authoritative scrub — we don't pre-gate with .includes()
-          // because that opens a substring-sanitization gap CodeQL
-          // flags (and the regex is a no-op when there's no match).
-          result.error.replace(
-            /https?:\/\/hooks\.slack\.com\/services\/[^\s)]+/g,
-            maskWebhookUrl(plaintextUrl)
-          ),
+      // Never persist webhook URLs, even on failure — shared scrub.
+      sendError: result.ok ? null : scrubSlackUrls(result.error, plaintextUrl),
     },
   });
 
   return result.ok ? "SENT" : "ERROR";
 }
 
-interface ScopeKey {
-  entity: string;
-  book: string;
-  period: string;
-}
-
-interface FindOpenPeriodArgs {
-  tenantId: string;
-  entityId: string;
-  bookId: string;
-  limit: number;
-}
-
-async function findLatestOpenPeriod(
-  prisma: DbClient,
-  args: FindOpenPeriodArgs
-): Promise<{ id: string; code: string } | null> {
-  const periods = await prisma.period.findMany({
-    where: {
-      tenantId: args.tenantId,
-      calendar: { entityId: args.entityId },
-    },
-    orderBy: { startsOn: "desc" },
-    take: args.limit,
-    select: { id: true, code: true },
-  });
-  if (periods.length === 0) return null;
-  const closes = await prisma.periodClose.findMany({
-    where: {
-      tenantId: args.tenantId,
-      entityId: args.entityId,
-      bookId: args.bookId,
-      periodId: { in: periods.map((p) => p.id) },
-    },
-    select: { periodId: true },
-  });
-  const closedIds = new Set(closes.map((c) => c.periodId));
-  return periods.find((p) => !closedIds.has(p.id)) ?? null;
-}
-
-function matchesSeverityFilter(
-  severity: AlertSeverity,
-  filter: string[]
-): boolean {
-  if (filter.length === 0) return true;
-  return filter.includes(severity);
-}
+// ScopeKey / findLatestOpenPeriod / matchesSeverityFilter live in
+// ./shared — one source of truth for both cadences.
