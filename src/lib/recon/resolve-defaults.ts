@@ -23,9 +23,8 @@
 // docs/blackline-arc-design.md § "Sign-off resolution".
 
 import { Decimal } from "decimal.js";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface ResolvedReconDefaults {
   requiresReview: boolean;

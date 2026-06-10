@@ -15,9 +15,8 @@
 // Each alert carries an `href` deep-link so the operator clicks
 // through to the exact place to act.
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export type AlertSeverity = "high" | "medium" | "low";
 export type AlertPillar = "recon" | "task" | "flux";

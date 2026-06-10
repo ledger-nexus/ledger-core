@@ -11,9 +11,9 @@
 // different questions because `requiredForClose=false` tasks
 // (post-mortem) count toward done% but never block the close.
 
-import type { Prisma, PrismaClient, CloseTaskStatus } from "@prisma/client";
+import type { CloseTaskStatus } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface CloseTaskRollup {
   total: number;

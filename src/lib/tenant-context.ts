@@ -30,11 +30,10 @@
 
 import { PrismaClient, Prisma } from "@prisma/client";
 
+import { UUID_RE } from "@/lib/utils/uuid";
+
 /** The Postgres GUC future RLS policies will read. Keep in sync with the policies. */
 export const TENANT_GUC = "app.current_tenant_id";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class InvalidTenantIdError extends Error {
   constructor(value: string) {

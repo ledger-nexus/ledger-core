@@ -44,9 +44,8 @@
 // later PR if customer demand surfaces it.
 
 import { Decimal } from "decimal.js";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export type SupportingSource =
   | "AR_SUBLEDGER"

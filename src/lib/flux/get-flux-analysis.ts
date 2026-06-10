@@ -23,14 +23,14 @@
 // material (NEEDS_COMMENT); otherwise IMMATERIAL.
 
 import { Decimal } from "decimal.js";
-import type { Prisma, PrismaClient, FluxLineStatus, AccountType } from "@prisma/client";
+import type { FluxLineStatus, AccountType, PrismaClient } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
 import {
   getTrialBalance,
   type TrialBalanceRow,
 } from "@/lib/accounting/reports";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface FluxAnalysisLine {
   accountId: string;

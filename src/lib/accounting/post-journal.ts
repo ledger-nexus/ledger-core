@@ -38,14 +38,17 @@ import {
   EntityMissingTenantError,
 } from "./types";
 import { fireInsertRules, type FireRulesResult } from "../rules/integration";
+import { toDecimal } from "../utils/decimal";
 
 // Accepts either a full PrismaClient or an active TransactionClient so
 // callers can nest postJournalEntry inside a larger transaction (e.g.
 // the fixed-asset record-depreciation endpoint posts N JEs + advances
 // FixedAssetBookAttributes in one atomic operation). When given a
 // TransactionClient, the internal $transaction wrapper is skipped —
-// the outer transaction provides atomicity.
-export type DbClient = PrismaClient | Prisma.TransactionClient;
+// the outer transaction provides atomicity. Canonical definition lives
+// in @/lib/db; re-exported here for existing importers.
+export type { DbClient } from "../db";
+import type { DbClient } from "../db";
 
 function hasTransaction(db: DbClient): db is PrismaClient {
   // TransactionClient is Omit<PrismaClient, "$transaction" | "$connect" | ...>.
@@ -60,11 +63,6 @@ Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
 const DEFAULT_BOOK = "US_GAAP";
 
-function toDecimal(v: Decimal | string | number | undefined): Decimal {
-  if (v === undefined || v === null) return new Decimal(0);
-  if (v instanceof Decimal) return v;
-  return new Decimal(v);
-}
 
 export async function postJournalEntry(
   prisma: DbClient,
