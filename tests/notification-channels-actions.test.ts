@@ -303,7 +303,13 @@ describe("setEnabled", () => {
 });
 
 describe("testChannel", () => {
-  it("returns SLACK_REJECTED on 4xx with masked URL in the error", async () => {
+  it("returns SLACK_REJECTED on 4xx without leaking response body or URL", async () => {
+    // After the sendSlackMessage hotfix (PR #215), the error string
+    // is just "Slack returned HTTP <status>" — Slack's response body
+    // never lands in the result. This test pins BOTH invariants:
+    //   - status code present in the error
+    //   - response body marker absent
+    //   - webhook URL absent (even if it appeared in the body)
     signInAs(adminUser, adminTenant);
     vi.spyOn(global, "fetch").mockResolvedValueOnce(
       new Response(
@@ -329,9 +335,11 @@ describe("testChannel", () => {
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("should fail");
     expect(r.code).toBe("SLACK_REJECTED");
-    // Critical: the raw URL must NOT appear in the error string.
+    expect(r.error).toContain("400");
+    // Critical: no part of the response body should appear.
     expect(r.error).not.toContain("SHOULD-NEVER-APPEAR");
-    expect(r.error).toMatch(/\*\*\*/); // masked
+    expect(r.error).not.toContain("invalid_payload");
+    expect(r.error).not.toContain("hooks.slack.com");
     vi.restoreAllMocks();
   });
 

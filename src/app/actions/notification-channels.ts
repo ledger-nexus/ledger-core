@@ -285,6 +285,21 @@ export async function testChannel(
     ],
   });
 
+  // Defense-in-depth URL scrub. After the upstream sendSlackMessage
+  // fix landed on main, result.error no longer contains response-body
+  // content (only "Slack returned HTTP <status>" + AbortError/network
+  // strings), so in practice the regex never matches. We keep it
+  // defensive against future changes that might re-introduce body
+  // echo. The regex is the authoritative scrub — no pre-gate with
+  // .includes() (CodeQL flags that as incomplete-URL-substring-
+  // sanitization, and the regex is a no-op when there's no match).
+  const scrubbedError = result.ok
+    ? null
+    : result.error.replace(
+        /https?:\/\/hooks\.slack\.com\/services\/[^\s)]+/g,
+        maskWebhookUrl(plaintextUrl)
+      );
+
   await auditPrivilegedAction({
     actor: { id: ctx.user.id, email: ctx.user.email },
     action: "notificationChannel.test",
@@ -294,30 +309,12 @@ export async function testChannel(
     metadata: {
       outcome: result.ok ? "sent" : "failed",
       status: result.ok ? result.status : (result.status ?? null),
-      // Scrub URL from any error string before persisting.
-      ...(result.ok
-        ? {}
-        : {
-            error: result.error.includes("hooks.slack.com")
-              ? result.error.replace(
-                  /https?:\/\/hooks\.slack\.com\/[^\s)]+/g,
-                  maskWebhookUrl(plaintextUrl)
-                )
-              : result.error,
-          }),
+      ...(result.ok ? {} : { error: scrubbedError }),
     },
   });
 
-  if (!result.ok) {
-    return fail(
-      "SLACK_REJECTED",
-      result.error.includes("hooks.slack.com")
-        ? result.error.replace(
-            /https?:\/\/hooks\.slack\.com\/[^\s)]+/g,
-            maskWebhookUrl(plaintextUrl)
-          )
-        : result.error
-    );
+  if (!result.ok && scrubbedError !== null) {
+    return fail("SLACK_REJECTED", scrubbedError);
   }
   return { ok: true, channelId: existing.id };
 }
