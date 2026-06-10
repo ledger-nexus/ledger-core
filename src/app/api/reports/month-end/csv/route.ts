@@ -32,6 +32,7 @@ import {
   getReconciliationRollup,
   rollupSummaryLine,
 } from "@/lib/recon/rollup";
+import { getFluxRollup, fluxRollupLine } from "@/lib/flux/rollup";
 import { toCsv, csvFilename, type CsvCell } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
@@ -107,10 +108,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const tenant = await getCurrentTenant();
 
-  const [tb, is, bs, fluxRollup] = await Promise.all([
+  const [tb, is, bs, reconRollup, fluxRollup] = await Promise.all([
     getTrialBalance(prisma, scope, selected.endsOn),
     getIncomeStatement(prisma, scope, selected.startsOn, selected.endsOn),
     getBalanceSheet(prisma, scope, selected.endsOn),
+    tenant
+      ? getReconciliationRollup(prisma, {
+          tenantId: tenant.id,
+          entityId: entity.id,
+          bookId: book.id,
+          periodId: selected.id,
+        })
+      : Promise.resolve(null),
     tenant
       ? getFluxRollup(prisma, {
           tenantId: tenant.id,
@@ -123,18 +132,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
   const bsTies = bs.totalAssets.equals(bs.totalLiabilities.plus(bs.totalEquity));
-
-  // Reconciliation rollup — added in BlackLine arc Phase 1 PR 8. The
-  // existing tenant lookup further down is reused via this hoist.
-  const tenant = await getCurrentTenant();
-  const reconRollup = tenant
-    ? await getReconciliationRollup(prisma, {
-        tenantId: tenant.id,
-        entityId: entity.id,
-        bookId: book.id,
-        periodId: selected.id,
-      })
-    : null;
   const reconsAllDone =
     reconRollup !== null &&
     reconRollup.total > 0 &&
