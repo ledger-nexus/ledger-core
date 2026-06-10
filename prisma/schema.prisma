@@ -97,6 +97,9 @@ model Tenant {
   notifications          Notification[]
   recurringEntries       RecurringEntry[]
   journalEntryNotes      JournalEntryNote[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements         FluxStatement[]
+  fluxLines              FluxLine[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -194,6 +197,8 @@ model LegalEntity {
   arOpenItems      ArOpenItem[]
   apOpenItems      ApOpenItem[]
   recurringEntries RecurringEntry[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements   FluxStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -226,6 +231,8 @@ model Book {
   arOpenItems                   ArOpenItem[]
   apOpenItems                   ApOpenItem[]
   recurringEntries              RecurringEntry[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements                FluxStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -282,6 +289,10 @@ model Period {
 
   journalEntries JournalEntry[]
   closes         PeriodClose[]
+  // BlackLine arc Phase 3: flux / variance analysis. A period can be
+  // either the "from" or "to" side of an N-side flux statement.
+  fluxStatementsFrom FluxStatement[] @relation("FluxFromPeriod")
+  fluxStatementsTo   FluxStatement[] @relation("FluxToPeriod")
 
   @@unique([calendarId, code])
   @@unique([calendarId, ordinal])
@@ -500,6 +511,8 @@ model Account {
   active Boolean @default(true)
 
   lines JournalLine[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxLines FluxLine[]
 
   sourceSystem     String?
   sourceRecordType String?
@@ -1455,6 +1468,11 @@ model User {
   notificationsActed Notification[] @relation("NotificationActor")
   auditEvents        AuditLog[]     @relation("AuditLogActor")
   journalEntryNotes  JournalEntryNote[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  // A user can finalize N flux statements and author N pieces of
+  // commentary on individual flux lines.
+  fluxStatementsFinalized FluxStatement[] @relation("FluxFinalizer")
+  fluxLineComments        FluxLine[]      @relation("FluxLineCommenter")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1753,6 +1771,147 @@ enum NotificationCategory {
   APPROVAL_NEEDED // record is in your queue awaiting action
   ORPHAN_DETECTED // a record you previously owned is now an orphan
   SYSTEM // catch-all for engine-level events
+}
+
+// =========================================================================
+// BlackLine arc — Phase 3: Flux / Variance Analysis
+// =========================================================================
+//
+// "Flux" is the controller's period-over-period delta scan: for each
+// account, compute (currentPeriod − priorPeriod), flag the lines that
+// breach a $/% threshold, and force commentary on those before the
+// period close packet ships. This is the third pillar of BlackLine
+// after Account Reconciliations (Phase 1) and Close Tasks (Phase 2).
+//
+// Shape:
+//
+//   FluxStatement → ONE per (entity, book, fromPeriod, toPeriod).
+//     Carries the threshold config + status. Generated on demand by
+//     getFluxAnalysis (PR 2); commentary is collected on its
+//     FluxLines (PR 3); finalized once all material lines have
+//     commentary or are waived.
+//
+//   FluxLine → ONE per Account that appears in the FluxStatement.
+//     priorAmount, currentAmount, deltaAmount, deltaPercent are
+//     FROZEN at generation time so the auditor sees the exact
+//     numbers the controller signed against, not whatever the GL
+//     looks like after a backdated post.
+//
+// Why no FluxAdjustment table: flux is analysis, not posting. If the
+// review surfaces an error, the fix is a corrective JE through
+// postJournalEntry, not a record on the flux row. Audit trail of
+// commentary is sufficient evidence for the review itself.
+//
+// Threshold model:
+//   absoluteThreshold ($ amount, e.g. 5000)
+//   percentThreshold  (e.g. 10.00 = 10%)
+// A line is "material" if abs(delta) >= absoluteThreshold OR
+// abs(deltaPercent) >= percentThreshold. The controller can tune
+// both per-statement (so a Q4 statement can use a tighter threshold
+// than a routine month).
+//
+// Design doc: docs/blackline-arc-design.md → Phase 3.
+
+enum FluxStatementStatus {
+  DRAFT       // commentary being collected
+  FINALIZED   // signed off, locked from further edits
+}
+
+enum FluxLineStatus {
+  IMMATERIAL    // below both thresholds; no commentary required
+  NEEDS_COMMENT // material; awaits commentary
+  EXPLAINED     // material; commentary provided
+  WAIVED        // material; admin waived the commentary requirement
+}
+
+model FluxStatement {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+
+  // The comparison anchors. fromPeriod is the prior; toPeriod is the
+  // period being reviewed. Two separate FK relations because Period
+  // shows up twice; named relations keep Prisma's generator happy.
+  fromPeriodId String @db.Uuid
+  fromPeriod   Period @relation("FluxFromPeriod", fields: [fromPeriodId], references: [id])
+  toPeriodId   String @db.Uuid
+  toPeriod     Period @relation("FluxToPeriod", fields: [toPeriodId], references: [id])
+
+  // Threshold config. Stored on the statement so a future "tighten
+  // Q4 thresholds" doesn't retroactively flip already-signed
+  // statements in/out of material.
+  absoluteThreshold Decimal @db.Decimal(20, 4) @default(0)
+  // Percent stored as a number, NOT a fraction — 10.00 means 10%.
+  percentThreshold  Decimal @db.Decimal(8, 4) @default(0)
+
+  status FluxStatementStatus @default(DRAFT)
+
+  finalizedBy   String?   @db.Uuid
+  finalizer     User?     @relation("FluxFinalizer", fields: [finalizedBy], references: [id])
+  finalizedAt   DateTime?
+
+  lines FluxLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Idempotent regeneration on the (entity, book, from, to) tuple —
+  // re-running the analysis on the same comparison reuses the row
+  // and just refreshes the line snapshots.
+  @@unique([entityId, bookId, fromPeriodId, toPeriodId])
+  @@index([tenantId, toPeriodId, status])
+  @@map("flux_statement")
+}
+
+model FluxLine {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  statementId String        @db.Uuid
+  statement   FluxStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id])
+
+  // FROZEN snapshots — the numbers the auditor sees on this line
+  // exactly match the controller's signoff, regardless of any
+  // backdated posts that land after generation.
+  priorAmount   Decimal @db.Decimal(20, 4)
+  currentAmount Decimal @db.Decimal(20, 4)
+  // currentAmount − priorAmount, stored so a sort-by-magnitude query
+  // is fast (no per-row computation in the WHERE).
+  deltaAmount   Decimal @db.Decimal(20, 4)
+  // (currentAmount − priorAmount) / |priorAmount| × 100. Null when
+  // priorAmount is exactly zero (division-by-zero guard — the UI
+  // renders it as "n/a" or "new account").
+  deltaPercent  Decimal? @db.Decimal(12, 4)
+
+  status FluxLineStatus @default(IMMATERIAL)
+
+  // Commentary lives on the row so the auditor reads the explanation
+  // next to the number. Plain Text in v1; encrypted via the
+  // PrismaExtension confidential-column path when wired (mirrors the
+  // recon/close-task pattern).
+  commentary   String?
+  commentaryBy String?   @db.Uuid
+  commenter    User?     @relation("FluxLineCommenter", fields: [commentaryBy], references: [id])
+  commentaryAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([statementId, accountId])
+  @@index([statementId, status])
+  @@index([tenantId])
+  @@map("flux_line")
 }
 
 // =========================================================================
