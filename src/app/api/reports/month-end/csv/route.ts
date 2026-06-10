@@ -28,6 +28,7 @@ import {
   getIncomeStatement,
   getBalanceSheet,
 } from "@/lib/accounting/reports";
+import { getFluxRollup, fluxRollupLine } from "@/lib/flux/rollup";
 import { toCsv, csvFilename, type CsvCell } from "@/lib/utils/csv";
 
 export const runtime = "nodejs";
@@ -101,16 +102,42 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     select: { closedAt: true, closedBy: true },
   });
 
-  const [tb, is, bs] = await Promise.all([
+  const tenant = await getCurrentTenant();
+
+  const [tb, is, bs, fluxRollup] = await Promise.all([
     getTrialBalance(prisma, scope, selected.endsOn),
     getIncomeStatement(prisma, scope, selected.startsOn, selected.endsOn),
     getBalanceSheet(prisma, scope, selected.endsOn),
+    tenant
+      ? getFluxRollup(prisma, {
+          tenantId: tenant.id,
+          entityId: entity.id,
+          bookId: book.id,
+          toPeriodId: selected.id,
+        })
+      : Promise.resolve(null),
   ]);
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
   const bsTies = bs.totalAssets.equals(bs.totalLiabilities.plus(bs.totalEquity));
 
-  const tenant = await getCurrentTenant();
+  // Fetch flux commentary lines for the dedicated section (only when
+  // a statement exists for this period). Sort: material first.
+  const fluxLines = fluxRollup
+    ? await prisma.fluxLine.findMany({
+        where: { statementId: fluxRollup.statementId },
+        orderBy: [{ status: "asc" }, { deltaAmount: "desc" }],
+        select: {
+          status: true,
+          priorAmount: true,
+          currentAmount: true,
+          deltaAmount: true,
+          deltaPercent: true,
+          commentary: true,
+          account: { select: { code: true, name: true } },
+        },
+      })
+    : [];
   const currentUser = await getCurrentUser();
   await auditDataExport({
     actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
@@ -142,8 +169,48 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     close ? `on ${close.closedAt.toISOString().slice(0, 10)}` : "",
     close ? `by ${close.closedBy ?? ""}` : "",
   ]);
-  rows.push(["Tie-out", `TB DR=CR: ${tbTies ? "PASS" : "FAIL"}`, `BS A=L+E: ${bsTies ? "PASS" : "FAIL"}`]);
+  rows.push([
+    "Tie-out",
+    `TB DR=CR: ${tbTies ? "PASS" : "FAIL"}`,
+    `BS A=L+E: ${bsTies ? "PASS" : "FAIL"}`,
+    fluxRollup
+      ? `Flux signed off: ${fluxRollup.signedOff ? "PASS" : "FAIL"} (${fluxRollup.signed}/${fluxRollup.material})`
+      : "Flux: n/a",
+  ]);
   rows.push([]);
+
+  // ─── Flux / Variance analysis (BlackLine arc Phase 3 PR 4) ──────────
+  // Only emit when a statement exists; empty periods skip the section.
+  // Per-line commentary lands inline so the auditor sees the explanation
+  // next to the number without leaving the packet.
+  if (fluxRollup && fluxLines.length > 0) {
+    rows.push(["Flux / Variance analysis", fluxRollupLine(fluxRollup)]);
+    rows.push([
+      "Account code",
+      "Account name",
+      "Status",
+      "Prior",
+      "Current",
+      "Delta",
+      "Delta %",
+      "Commentary",
+    ]);
+    for (const line of fluxLines) {
+      rows.push([
+        line.account.code,
+        line.account.name,
+        line.status,
+        line.priorAmount.toString(),
+        line.currentAmount.toString(),
+        line.deltaAmount.toString(),
+        line.deltaPercent ? line.deltaPercent.toString() : "",
+        // Commentary may be multi-line; the toCsv helper handles
+        // newline escaping. Empty for IMMATERIAL lines.
+        line.commentary ?? "",
+      ]);
+    }
+    rows.push([]);
+  }
 
   // ─── Income statement ────────────────────────────────────────────────
   rows.push(["Income statement", `${selected.startsOn.toISOString().slice(0, 10)} → ${selected.endsOn.toISOString().slice(0, 10)}`]);

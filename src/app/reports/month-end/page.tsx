@@ -26,6 +26,8 @@ import {
   getBalanceSheet,
 } from "@/lib/accounting/reports";
 import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
+import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getFluxRollup, fluxRollupLine } from "@/lib/flux/rollup";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -130,9 +132,11 @@ export default async function MonthEndPage({
   });
   const isClosed = !!close;
 
-  // Run the three reports + sub-ledger tie checks in parallel. All
-  // are independent reads against (entity, book, periodEnd).
-  const [tb, is, bs, subledgerTies] = await Promise.all([
+  const tenant = await getCurrentTenant();
+
+  // Run the three reports + sub-ledger ties + flux rollup in parallel.
+  // All are independent reads against (entity, book, periodEnd).
+  const [tb, is, bs, subledgerTies, fluxRollup] = await Promise.all([
     getTrialBalance(
       prisma,
       { entityCode: entity.code, bookCode: book.code },
@@ -154,6 +158,14 @@ export default async function MonthEndPage({
       bookCode: book.code,
       asOf: selectedPeriod.endsOn,
     }),
+    tenant
+      ? getFluxRollup(prisma, {
+          tenantId: tenant.id,
+          entityId: entity.id,
+          bookId: book.id,
+          toPeriodId: selectedPeriod.id,
+        })
+      : Promise.resolve(null),
   ]);
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
@@ -221,6 +233,20 @@ export default async function MonthEndPage({
                 ·{" "}
                 <span className={allSubTies ? "text-emerald-700" : "text-red-700"}>
                   {allSubTies ? "✓" : "✗"} Sub-ledger ties
+                </span>
+              </>
+            )}
+            {fluxRollup && (
+              <>
+                {" "}
+                ·{" "}
+                <span
+                  className={
+                    fluxRollup.signedOff ? "text-emerald-700" : "text-red-700"
+                  }
+                >
+                  {fluxRollup.signedOff ? "✓" : "✗"} Flux signed off (
+                  {fluxRollup.signed}/{fluxRollup.material})
                 </span>
               </>
             )}
@@ -334,6 +360,61 @@ export default async function MonthEndPage({
                 ))}
               </TBody>
             </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Flux / Variance rollup — BlackLine arc Phase 3 PR 4. Shows
+          when a flux statement exists for the period. Deep-links to
+          /close/flux/[id] for the controller to work the gaps. */}
+      {fluxRollup && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span>Flux analysis</span>
+              <Badge tone={fluxRollup.signedOff ? "positive" : "negative"}>
+                {fluxRollup.signedOff
+                  ? "Signed off"
+                  : fluxRollup.status === "FINALIZED"
+                    ? "Finalized"
+                    : "Draft"}
+              </Badge>
+            </CardTitle>
+            <span className="text-xs text-ink-500">
+              {fluxRollupLine(fluxRollup)} ·{" "}
+              <Link
+                href={`/close/flux/${fluxRollup.statementId}`}
+                className="text-accent-600 hover:underline"
+              >
+                Open statement
+              </Link>
+            </span>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+              {[
+                { label: "Explained", count: fluxRollup.explained, tone: "positive" as const },
+                { label: "Waived", count: fluxRollup.waived, tone: "neutral" as const },
+                { label: "Pending", count: fluxRollup.needsComment, tone: "negative" as const },
+                { label: "Immaterial", count: fluxRollup.immaterial, tone: "neutral" as const },
+              ].map(({ label, count, tone }) => (
+                <div key={label} className="flex flex-col gap-1">
+                  <div className="text-xs uppercase tracking-wide text-ink-500">
+                    {label}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-semibold text-ink-900">
+                      {count}
+                    </span>
+                    {count > 0 && fluxRollup.total > 0 && (
+                      <Badge tone={tone}>
+                        {Math.round((count / fluxRollup.total) * 100)}%
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
