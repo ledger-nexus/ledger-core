@@ -94,13 +94,25 @@ export default async function CloseRetrospectivePage({
 
   return (
     <div className="flex flex-col gap-4">
-      <header>
-        <h1 className="text-xl font-semibold text-ink-900">
-          Close retrospective
-        </h1>
-        <p className="text-sm text-ink-500">
-          Last {lookback} periods · target close-day +{targetDays}
-        </p>
+      <header className="flex flex-col gap-1">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-ink-900">
+              Close retrospective
+            </h1>
+            <p className="text-sm text-ink-500">
+              Last {lookback} periods · target close-day +{targetDays}
+            </p>
+          </div>
+          {/* Download CSV — board-deck export. Carries the same scope
+              + params via the same URL conventions as the page. */}
+          <a
+            href={`/api/close/retrospective/csv?lookback=${lookback}&target=${targetDays}`}
+            className="rounded-md border border-ink-200 px-3 py-1.5 text-xs text-ink-700 hover:bg-ink-50"
+          >
+            Download CSV
+          </a>
+        </div>
         <p className="mt-1 text-xs text-ink-500">
           Scope: <span className="font-mono">{entity.code}</span> ·{" "}
           <span className="font-mono">{book.code}</span>
