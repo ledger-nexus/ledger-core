@@ -109,6 +109,9 @@ model Tenant {
   // BlackLine arc Phase 3: flux / variance analysis.
   fluxStatements         FluxStatement[]
   fluxLines              FluxLine[]
+  // Notifications arc: per-tenant Slack/etc channels for close alerts.
+  notificationChannels   NotificationChannel[]
+  notificationDispatches NotificationDispatch[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1508,6 +1511,8 @@ model User {
   closeTasksCompleted      CloseTask[]            @relation("CloseTaskCompleter")
   closeTaskComments        CloseTaskComment[]
   closeTaskStateChangesMade CloseTaskStateChange[]
+  // Notifications arc: which channels did this user create.
+  notificationChannelsCreated NotificationChannel[]
   // BlackLine arc Phase 3: flux / variance analysis.
   fluxStatementsFinalized FluxStatement[] @relation("FluxFinalizer")
   fluxLineComments        FluxLine[]      @relation("FluxLineCommenter")
@@ -2249,4 +2254,88 @@ model ReconciliationConfig {
   updatedAt DateTime @updatedAt
 
   @@map("reconciliation_config")
+}
+
+// =========================================================================
+// Notifications arc — Slack/etc outbound delivery
+// =========================================================================
+
+enum NotificationChannelType {
+  SLACK
+  // Future: EMAIL, MICROSOFT_TEAMS, WEBHOOK_GENERIC. The schema is
+  // typed so multiple per tenant can fan out the same alert.
+}
+
+// A configured outbound delivery target (Slack webhook). The
+// `webhookUrl` column stores the application-layer AES-256-GCM
+// ciphertext from src/lib/notifications/crypto.ts — never plaintext.
+// Operators see the masked URL (maskWebhookUrl) in the admin UI.
+model NotificationChannel {
+  id        String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String                  @db.Uuid
+  tenant    Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  type      NotificationChannelType
+  name      String
+
+  // Encrypted via src/lib/notifications/crypto.ts (AES-256-GCM, IV +
+  // tag + ciphertext packed into one base64 string). Never decrypted
+  // on the read path — only the cron dispatcher decrypts at send time.
+  webhookUrl String
+
+  // Which severities push to this channel. JSON array of values from
+  // `AlertSeverity` (high / medium / low). Empty → all severities.
+  severityFilter String[]
+
+  enabled Boolean @default(true)
+
+  // Audit ownership: who set this up. Used in the admin UI's
+  // "created by" column. Audit-trail correlation goes through
+  // the audit_log row written on createChannel.
+  createdById String? @db.Uuid
+  createdBy   User?   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dispatches NotificationDispatch[]
+
+  @@index([tenantId, enabled])
+  @@map("notification_channel")
+}
+
+// Per-(channel, alert) idempotency record. The cron dispatcher
+// upserts one row when an alert is sent; if a row already exists,
+// the alert is skipped (already pinged for this period). Operators
+// re-trigger by deleting the matching dispatch row, OR by changing
+// the alert's source data so it gets a new id.
+model NotificationDispatch {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String @db.Uuid
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  channelId String              @db.Uuid
+  channel   NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  // The alert.id from getCloseAlerts (e.g. "recon:<uuid>",
+  // "task:<uuid>", "flux:<uuid>"). Plain text — the underlying record
+  // ids are surrogate UUIDs, not PII.
+  alertFingerprint String
+
+  // Pillar + severity captured at send time. Useful for audit replay
+  // ("which severities have we pinged this month") without rejoining
+  // the source data.
+  pillar   String
+  severity String
+
+  // HTTP status from Slack — 200 on success, anything else on the
+  // failure leg of SlackSendResult. Kept for forensic queries.
+  sendStatus Int?
+  sendError  String?
+
+  sentAt DateTime @default(now())
+
+  // Dedupe: a given (channel, alert) tuple sends at most once.
+  @@unique([channelId, alertFingerprint])
+  @@index([tenantId, sentAt])
+  @@map("notification_dispatch")
 }
