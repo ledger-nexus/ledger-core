@@ -21,6 +21,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { logAuditEvent } from "@/lib/audit/log";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -75,13 +76,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
     where: {
       OR: [
         { tenantId: { in: [tenantA.id, tenantB.id] } },
         { action: { contains: SUFFIX } },
       ],
     },
+  });
   });
   await prisma.tenant.deleteMany({
     where: { id: { in: [tenantA.id, tenantB.id] } },

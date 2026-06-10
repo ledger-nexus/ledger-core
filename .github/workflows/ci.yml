@@ -49,67 +49,21 @@ jobs:
       # production rollouts but won't replay against a fresh DB.
       - run: npx prisma db push --skip-generate
 
-      # Bootstrap a user + default tenant. The Northwind seed AND
-      # several integration tests call `getDefaultTenantId()` which
-      # expects `tenant.slug='default'` to exist. In production this
-      # row is created by migration 0002_multi_tenancy's DO block —
-      # which we just skipped (see comment above). Inline the
-      # essential rows here so the rest of the CI pipeline can run.
-      - name: Bootstrap default tenant
-        env:
-          PGPASSWORD: postgres
-        run: |
-          psql -h localhost -U postgres -d mini_ledger_test <<'SQL'
-          INSERT INTO "app_user" ("id", "email", "displayName", "isActive", "createdAt", "updatedAt")
-          VALUES (gen_random_uuid(), 'ci-bootstrap@northwind.test', 'CI Bootstrap', TRUE, NOW(), NOW())
-          ON CONFLICT ("email") DO NOTHING;
+      # Migration-only DDL (append-only triggers/rules, CHECK
+      # constraints, GIN + partial unique indexes) that `prisma db
+      # push` cannot create — Prisma's schema language can't express
+      # them. db:restore-ddl applies the prisma/sql/ DDL files; the
+      # same command recovers a database after `db:reset`. Adding
+      # migration-only DDL in a new migration? Add it to
+      # prisma/sql/migration-mirror.sql (idempotently) and this step
+      # picks it up.
+      - name: Apply migration-mirror DDL
+        run: npm run db:restore-ddl
 
-          INSERT INTO "tenant" ("id", "slug", "name", "ownerUserId", "createdAt", "updatedAt")
-          SELECT gen_random_uuid(), 'default', 'Default Tenant', id, NOW(), NOW()
-          FROM "app_user" WHERE "email" = 'ci-bootstrap@northwind.test'
-          ON CONFLICT ("slug") DO NOTHING;
-          SQL
-
-      # Install append-only triggers. Migration SQL files create these
-      # in deployed environments, but `prisma db push` (used above for
-      # the schema sync) skips migration SQL entirely and only mirrors
-      # the schema.prisma datamodel. Prisma's schema language can't
-      # express triggers — so each new append-only trigger added to a
-      # migration needs a mirror block here so the test runner can
-      # actually probe the enforcement.
-      #
-      # Adding a new trigger: copy the CREATE FUNCTION + CREATE TRIGGER
-      # statements from your migration SQL into this step. Use
-      # DROP TRIGGER IF EXISTS for idempotency.
-      - name: Install append-only triggers (migration 0011)
-        env:
-          PGPASSWORD: postgres
-        run: |
-          psql -h localhost -U postgres -d mini_ledger_test <<'SQL'
-          CREATE OR REPLACE FUNCTION "close_task_state_change_block_mutation"()
-          RETURNS TRIGGER AS $$
-          BEGIN
-            IF TG_OP = 'DELETE' AND pg_trigger_depth() > 1 THEN
-              RETURN OLD;
-            END IF;
-            RAISE EXCEPTION
-              'close_task_state_change is append-only — % blocked',
-              TG_OP;
-          END;
-          $$ LANGUAGE plpgsql;
-
-          DROP TRIGGER IF EXISTS "close_task_state_change_no_update"
-            ON "close_task_state_change";
-          CREATE TRIGGER "close_task_state_change_no_update"
-            BEFORE UPDATE ON "close_task_state_change"
-            FOR EACH ROW EXECUTE FUNCTION "close_task_state_change_block_mutation"();
-
-          DROP TRIGGER IF EXISTS "close_task_state_change_no_delete"
-            ON "close_task_state_change";
-          CREATE TRIGGER "close_task_state_change_no_delete"
-            BEFORE DELETE ON "close_task_state_change"
-            FOR EACH ROW EXECUTE FUNCTION "close_task_state_change_block_mutation"();
-          SQL
-
+      # The seed self-bootstraps the default tenant + owner user
+      # (ensureDefaultTenant) — the rows migration 0002_multi_tenancy's
+      # DO block would create in a migrate-deploy world. Running it
+      # against this fresh database is what proves the bootstrap path
+      # works.
       - run: npm run db:seed
       - run: npm test

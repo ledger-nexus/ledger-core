@@ -42,6 +42,7 @@ vi.mock("next/headers", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import { _internal as authInternal } from "@/lib/auth/current-user";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 import {
   createAccountAction,
   updateAccountAction,
@@ -101,7 +102,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   // Includes both entity-scoped and shared (entityId=null) accounts
   // created in this tenant by any test.
   await prisma.account.deleteMany({ where: { tenantId: tenant.id } });
@@ -117,8 +120,10 @@ afterAll(async () => {
 beforeEach(async () => {
   // Each test starts with a clean account set (entity-scoped AND shared).
   await prisma.account.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
     where: { tenantId: tenant.id, resource: "Account" },
+  });
   });
 });
 
