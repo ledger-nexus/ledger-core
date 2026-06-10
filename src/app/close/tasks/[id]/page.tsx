@@ -100,6 +100,20 @@ export default async function CloseTaskDetailPage({
           author: { select: { displayName: true } },
         },
       },
+      // State-change timeline (migration 0011). Append-only log of
+      // every status transition this task has gone through. Rendered
+      // chronologically below the Details card.
+      stateChanges: {
+        orderBy: { changedAt: "asc" },
+        select: {
+          id: true,
+          fromStatus: true,
+          toStatus: true,
+          reason: true,
+          changedAt: true,
+          changedBy: { select: { displayName: true, email: true } },
+        },
+      },
     },
   });
   if (!task) return notFound();
@@ -321,6 +335,66 @@ export default async function CloseTaskDetailPage({
           </dl>
         </CardContent>
       </Card>
+
+      {/* State-change timeline (migration 0011). Append-only log of
+          every status transition this task has been through. Hidden
+          for tasks with no history (rare — only backfill rows on
+          pre-0011 data can leave a task with no entries). */}
+      {task.stateChanges.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              State history ({task.stateChanges.length})
+            </CardTitle>
+            <span className="text-xs text-ink-500">
+              Append-only — auditor record of every status transition
+            </span>
+          </CardHeader>
+          <CardContent>
+            <ol className="flex flex-col gap-2 text-sm">
+              {task.stateChanges.map((sc) => {
+                const isBackfill = sc.changedBy === null;
+                return (
+                  <li
+                    key={sc.id}
+                    className="flex flex-col gap-0.5 rounded-md border border-ink-100 px-3 py-2"
+                  >
+                    <div className="flex items-center gap-2 text-xs text-ink-500">
+                      <span className="font-mono text-ink-700">
+                        {sc.fromStatus ?? "INITIAL"}
+                      </span>
+                      <span>→</span>
+                      <Badge tone={STATUS_TONES[sc.toStatus]}>
+                        {sc.toStatus}
+                      </Badge>
+                      <span className="ml-auto">{formatDate(sc.changedAt)}</span>
+                    </div>
+                    <div className="text-xs text-ink-500">
+                      {isBackfill ? (
+                        <span className="italic">
+                          system backfill (pre-0011)
+                        </span>
+                      ) : (
+                        <>
+                          by{" "}
+                          <span className="text-ink-700">
+                            {sc.changedBy?.displayName ?? sc.changedBy?.email ?? "—"}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {sc.reason && (
+                      <p className="mt-1 whitespace-pre-wrap text-ink-700">
+                        {sc.reason}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Comment thread — chronological. Append-only form below. */}
       <Card>

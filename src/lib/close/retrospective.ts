@@ -19,11 +19,13 @@
 //      total recons. The headline number for "how clean are our
 //      tie-outs". Trend down = process improving.
 //
-//   4. recurringBlockers — top close-task templates by BLOCKED-hit
-//      count across the lookback window. These are the upstream
-//      dependency problems eating the most close cycles —
-//      candidates for permanent process fixes (e.g. "always wait on
-//      the auditor → escalate to weekly status call").
+//   4. recurringBlockers — top close-task templates by EVER-BLOCKED
+//      count across the lookback window. Uses the state-change log
+//      (migration 0011) to capture tasks that hit BLOCKED at any
+//      point — including those that were since unblocked. These
+//      are the upstream dependency problems eating the most close
+//      cycles — candidates for permanent process fixes (e.g.
+//      "always wait on the auditor → escalate to weekly status").
 //
 // All math is read-only; no mutations. Sub-second runtime because the
 // scope tuple lets us hit just the indices on (entity, book, period).
@@ -231,26 +233,43 @@ export async function getCloseRetrospective(
   }
   exceptionRateTrend.reverse(); // oldest → newest
 
-  // 5. Recurring blockers: aggregate over all in-window tasks.
-  //    Bucket by templateKey when present; fall back to name.
-  //    `blockedCount` = task rows with status === "BLOCKED" right
-  //    now. We don't have a state-history table, so this measures
-  //    *current* blocked tasks rather than historical-ever-blocked.
-  //    For periods that closed, BLOCKED at close-time would have
-  //    forced the gate to fail — so in practice this captures the
-  //    cohort of still-blocked tasks in the open period plus any
-  //    that finished blocked-then-waived in prior periods.
+  // 5. Recurring blockers: HISTORICAL count via the state-change log
+  //    (migration 0011). `blockedCount` is the number of distinct
+  //    in-window tasks per template that EVER hit BLOCKED — not the
+  //    number currently in BLOCKED status. This catches the cohort
+  //    that hit a blocker mid-period and then got unblocked, which
+  //    is the actual signal for "this step keeps causing friction."
+  //
+  //    Two-query strategy:
+  //      a. pull all tasks in window for total + name + templateKey
+  //      b. pull all state-change rows with toStatus=BLOCKED for
+  //         those task ids; build a set of EVER-blocked task ids
+  //      c. bucket by templateKey (fallback adhoc:name); count
+  //         ever-blocked per bucket
   const allTasks = await prisma.closeTask.findMany({
     where: {
       tenantId: scope.tenantId,
       periodId: { in: periodIds },
     },
     select: {
+      id: true,
       templateKey: true,
       name: true,
-      status: true,
     },
   });
+  const taskIds = allTasks.map((t) => t.id);
+  const blockedTransitions = taskIds.length > 0
+    ? await prisma.closeTaskStateChange.findMany({
+        where: {
+          tenantId: scope.tenantId,
+          closeTaskId: { in: taskIds },
+          toStatus: "BLOCKED",
+        },
+        select: { closeTaskId: true },
+      })
+    : [];
+  const everBlockedTaskIds = new Set(blockedTransitions.map((r) => r.closeTaskId));
+
   const blockerBuckets = new Map<
     string,
     { templateKey: string | null; name: string; blocked: number; total: number }
@@ -264,7 +283,7 @@ export async function getCloseRetrospective(
       total: 0,
     };
     bucket.total += 1;
-    if (t.status === "BLOCKED") bucket.blocked += 1;
+    if (everBlockedTaskIds.has(t.id)) bucket.blocked += 1;
     blockerBuckets.set(key, bucket);
   }
   const recurringBlockers: RecurringBlocker[] = Array.from(blockerBuckets.values())

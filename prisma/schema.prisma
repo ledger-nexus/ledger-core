@@ -105,6 +105,7 @@ model Tenant {
   closeTasks             CloseTask[]
   closeTaskTemplates     CloseTaskTemplate[]
   closeTaskComments      CloseTaskComment[]
+  closeTaskStateChanges  CloseTaskStateChange[]
   // BlackLine arc Phase 3: flux / variance analysis.
   fluxStatements         FluxStatement[]
   fluxLines              FluxLine[]
@@ -1503,9 +1504,10 @@ model User {
   reconciliationAttachments  ReconciliationAttachment[]
   // BlackLine arc Phase 2: close-task calendar. A user can own N close
   // tasks (assigned executor), complete N, and author N comments.
-  closeTasksOwned      CloseTask[]        @relation("CloseTaskOwner")
-  closeTasksCompleted  CloseTask[]        @relation("CloseTaskCompleter")
-  closeTaskComments    CloseTaskComment[]
+  closeTasksOwned          CloseTask[]            @relation("CloseTaskOwner")
+  closeTasksCompleted      CloseTask[]            @relation("CloseTaskCompleter")
+  closeTaskComments        CloseTaskComment[]
+  closeTaskStateChangesMade CloseTaskStateChange[]
   // BlackLine arc Phase 3: flux / variance analysis.
   fluxStatementsFinalized FluxStatement[] @relation("FluxFinalizer")
   fluxLineComments        FluxLine[]      @relation("FluxLineCommenter")
@@ -1907,6 +1909,9 @@ model CloseTask {
 
   owner    User?              @relation("CloseTaskOwner", fields: [ownerId], references: [id])
   comments CloseTaskComment[]
+  // Append-only state-change log (migration 0011). One row per status
+  // transition + one row at instantiation (fromStatus=null).
+  stateChanges CloseTaskStateChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1972,6 +1977,47 @@ model CloseTaskComment {
   @@index([closeTaskId])
   @@index([tenantId])
   @@map("close_task_comment")
+}
+
+// Append-only state transition log for CloseTask. Migration 0011.
+// Closes a documented v1.18 limitation: the recurring-blockers helper
+// in src/lib/close/retrospective.ts was current-snapshot only, so a
+// template that hit BLOCKED four periods ago and was since unblocked
+// would not appear. With this table, the replay walker counts
+// EVER-blocked, not currently-blocked.
+//
+// Write protocol: every status-mutating Server Action wraps the
+// `closeTask.update` + state-change insert in one $transaction. The
+// `changedById` field is REQUIRED for live transitions; nullable only
+// to permit the backfill migration to land an initial row for every
+// pre-existing task without inventing a fake actor.
+model CloseTaskStateChange {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  closeTaskId String    @db.Uuid
+  closeTask   CloseTask @relation(fields: [closeTaskId], references: [id], onDelete: Cascade)
+
+  // fromStatus is null for the initial INSTANTIATE row only.
+  fromStatus CloseTaskStatus?
+  toStatus   CloseTaskStatus
+  // Optional context. Populated for BLOCKED (the blockedReason value)
+  // and WAIVED (the waive reason). Always null for start/complete/
+  // unblock to avoid noise.
+  reason     String?
+
+  // Nullable to support the migration backfill — rows minted for pre-
+  // existing tasks have no real actor. All NEW writes through the
+  // recordStateChange helper require a non-null value (enforced in
+  // the helper, not the schema, so backfill stays clean).
+  changedById String?  @db.Uuid
+  changedBy   User?    @relation(fields: [changedById], references: [id])
+  changedAt   DateTime @default(now())
+
+  @@index([closeTaskId, changedAt])
+  @@index([tenantId, changedAt])
+  @@index([tenantId, toStatus])
+  @@map("close_task_state_change")
 }
 
 // =========================================================================
