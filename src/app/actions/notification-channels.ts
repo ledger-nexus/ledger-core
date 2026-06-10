@@ -40,6 +40,7 @@ import {
   maskWebhookUrl,
 } from "@/lib/notifications/crypto";
 import { sendSlackMessage } from "@/lib/notifications/slack";
+import { scrubSlackUrls } from "@/lib/notifications/shared";
 
 const uuid = z.string().uuid();
 
@@ -291,20 +292,13 @@ export async function testChannel(
     ],
   });
 
-  // Defense-in-depth URL scrub. After the upstream sendSlackMessage
-  // fix landed on main, result.error no longer contains response-body
-  // content (only "Slack returned HTTP <status>" + AbortError/network
-  // strings), so in practice the regex never matches. We keep it
-  // defensive against future changes that might re-introduce body
-  // echo. The regex is the authoritative scrub — no pre-gate with
-  // .includes() (CodeQL flags that as incomplete-URL-substring-
-  // sanitization, and the regex is a no-op when there's no match).
+  // Defense-in-depth URL scrub (shared with both dispatchers). After
+  // the sendSlackMessage fix, result.error carries no response-body
+  // content, so in practice this never matches — kept defensive
+  // against future changes that might re-introduce body echo.
   const scrubbedError = result.ok
     ? null
-    : result.error.replace(
-        /https?:\/\/hooks\.slack\.com\/services\/[^\s)]+/g,
-        maskWebhookUrl(plaintextUrl)
-      );
+    : scrubSlackUrls(result.error, plaintextUrl);
 
   await auditPrivilegedAction({
     actor: { id: ctx.user.id, email: ctx.user.email },
