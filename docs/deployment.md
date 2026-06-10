@@ -127,12 +127,27 @@ Live since v0.8. Authenticated by an `ADMIN_TOKEN` env var.
 
 ### Option 2 — `npm run db:reset` (local with prod DATABASE_URL)
 
-For a truly clean slate (drops everything, re-pushes the schema from
-`schema.prisma`, re-seeds):
+For a truly clean slate:
 
 ```bash
 DATABASE_URL=<neon-pooled-url> npm run db:reset
 ```
+
+This runs three steps in order:
+
+1. `prisma db push --force-reset` — drops everything, re-creates the schema
+   from `schema.prisma`;
+2. `npm run db:restore-ddl` — applies `prisma/sql/migration-mirror.sql`, the
+   migration-only DDL that `db push` cannot create (append-only triggers on
+   `audit_log` and `close_task_state_change`, the ledger CHECK constraints,
+   GIN indexes, and the lineage partial unique index). Skipping this step
+   silently strips the SOC 2 append-only enforcement — exactly what the
+   2026-06-10 incident did to production;
+3. `npm run db:seed` — self-bootstraps the default tenant (the
+   `ensureDefaultTenant` helper creates `app_user`
+   `ci-bootstrap@northwind.test` + tenant `slug='default'` when missing —
+   the rows migration `0002_multi_tenancy`'s DO block would create in a
+   migrate-deploy world) and loads Northwind + the consolidation demo.
 
 This is destructive — it also drops QBO/NS-imported entities. Use Option 1
 unless you want a from-scratch wipe.
@@ -156,23 +171,11 @@ created the base tables — and the database is left EMPTY. This happened on
    `prisma db push` from a companion repo: a companion's schema doesn't
    include ledger-core's tables, so its push would drop them.
 
-2. **Migration-only DDL is not applied by `db push`** and must be mirrored by
-   hand after a reset: the append-only triggers on `close_task_state_change`
-   and `audit_log`, and the lineage partial unique index. Use the
-   migration-mirror block in `.github/workflows/ci.yml` (the "Install
-   append-only triggers" step) as the reference for the trigger SQL. The
-   CHECK constraints and GIN indexes from `0001_constraints` are likewise
-   skipped — CI runs without them, but a prod-fidelity reset should re-apply
-   that migration's SQL too.
-
-3. **The default-tenant bootstrap is skipped too — the seed fails without
-   it.** Migration `0002_multi_tenancy`'s DO block creates the
-   `tenant.slug='default'` row that `getDefaultTenantId()` (and therefore the
-   Northwind seed) requires. On a freshly reset database the seed step of
-   `db:reset` stops with "Default tenant not found": run the "Bootstrap
-   default tenant" SQL from `.github/workflows/ci.yml` (inserts `app_user`
-   `ci-bootstrap@northwind.test` + tenant `slug='default'`), then run
-   `npm run db:seed` again.
+2. **Adding migration-only DDL in a future migration?** Add it to
+   `prisma/sql/migration-mirror.sql` too (idempotently), or fresh and reset
+   databases won't have it. CI applies the same file (the "Apply
+   migration-mirror DDL" step), so a forgotten mirror entry shows up as a
+   red build the moment a test probes the enforcement.
 
 ---
 

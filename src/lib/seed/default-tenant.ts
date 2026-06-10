@@ -30,3 +30,36 @@ export async function getDefaultTenantId(prisma: PrismaClient): Promise<string> 
   }
   return t.id;
 }
+
+// Same bootstrap identity CI uses, so a locally-reset database and the CI
+// database agree on who owns the default tenant.
+const BOOTSTRAP_USER_EMAIL = "ci-bootstrap@northwind.test";
+
+// SEED/CLI USE ONLY. Creates the default tenant (and its owner user) when
+// missing. In a migrate-deploy world this is migration 0002_multi_tenancy's
+// DO block — but the schema is `db push`-managed (no baseline migration), so
+// a fresh or force-reset database has no tenant row at all and the Northwind
+// seed would throw in getDefaultTenantId.
+//
+// Runtime code must never call this: tenants are provisioned through
+// sign-up, and a runtime path that silently mints a tenant would bypass it.
+// getDefaultTenantId stays strict (throws) for exactly that reason.
+export async function ensureDefaultTenant(prisma: PrismaClient): Promise<string> {
+  const owner = await prisma.user.upsert({
+    where: { email: BOOTSTRAP_USER_EMAIL },
+    update: {},
+    create: { email: BOOTSTRAP_USER_EMAIL, displayName: "CI Bootstrap" },
+    select: { id: true },
+  });
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: DEFAULT_TENANT_SLUG },
+    update: {},
+    create: {
+      slug: DEFAULT_TENANT_SLUG,
+      name: "Default Tenant",
+      ownerUserId: owner.id,
+    },
+    select: { id: true },
+  });
+  return tenant.id;
+}
