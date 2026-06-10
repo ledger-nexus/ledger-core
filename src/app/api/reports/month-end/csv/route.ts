@@ -105,10 +105,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     select: { closedAt: true, closedBy: true },
   });
 
-  const [tb, is, bs] = await Promise.all([
+  const tenant = await getCurrentTenant();
+
+  const [tb, is, bs, fluxRollup] = await Promise.all([
     getTrialBalance(prisma, scope, selected.endsOn),
     getIncomeStatement(prisma, scope, selected.startsOn, selected.endsOn),
     getBalanceSheet(prisma, scope, selected.endsOn),
+    tenant
+      ? getFluxRollup(prisma, {
+          tenantId: tenant.id,
+          entityId: entity.id,
+          bookId: book.id,
+          toPeriodId: selected.id,
+        })
+      : Promise.resolve(null),
   ]);
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
