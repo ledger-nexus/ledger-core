@@ -267,9 +267,18 @@ Productionalizes `/api/close/alerts` — closes the controller's loop. Open clos
 
 **Verified:** 30+ new tests pass (13 crypto + 9 Slack formatter + 7 dispatcher + 8 cron-auth + 8 channel actions). All on real Postgres. Tsc clean. CodeQL findings (`js/incomplete-url-substring-sanitization`) addressed by dropping `.includes()` URL-substring gates in favor of authoritative regex scrub.
 
-### v1.22+ — ergonomics + polish (deferred)
+### v1.22 — Recurring JE auto-run cron (shipped 2026-06-10)
+
+Cleanup discovery: the recurring-JE *engine* + UI + Server Actions were already shipped (see `src/lib/accounting/recurring.ts` with `runRecurringEntries`, `addMonthsAnchored`, `enumerateDueDates` + idempotent lineage triple; `/recurring-entries` list + new + detail pages; 4 Server Actions). What was missing: an unattended cron driver. Operators had to click "Run all" in the UI each month-end to flush due posts.
+
+This release adds `POST /api/cron/recurring-je-run` — a thin route gated by `CRON_SECRET` that drives `runRecurringEntries(prisma, { throughDate: today })` across every active template in every tenant. Idempotent (the engine's existing `sourceSystem="SUBSTRATE", sourceRecordType="RecurringEntry"` lineage triple dedupes against the partial unique index on `journal_entry`). One aggregate `audit_log` row per cron tick.
+
+`vercel.json` schedule: **daily at 02:00 UTC** (`0 2 * * *`). Aligned with month-end — any template anchored on the last day of the month gets posted before the next business day. The dedupe makes any cadence safe, so daily is just sufficient.
+
+The "Recurring journal entry templates" item in the v1.22+ queue was stale (the feature was ~95% done; only the cron driver was the gap). Removed from the deferred list.
+
+### v1.23+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
-- [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
 - [ ] Multi-currency revaluation
 - [ ] FX gain/loss accounts wired into journal lines properly
