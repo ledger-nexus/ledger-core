@@ -27,6 +27,13 @@
 -- expected writer.
 --
 -- Idempotent: drops existing rule first so re-applying is safe.
+--
+-- Provenance: these definitions are confirmed byte-exact against
+-- pre-incident production (Neon point-in-time branch,
+-- 2026-06-10T21:00:00Z) and committed as the numbered migration
+-- prisma/migrations/0015_audit_log_rules_and_lineage_uniq/. Keep this
+-- file, that migration, and the withAuditLogMutable re-arm statements
+-- (tests/_helpers/audit-log-cleanup.ts) in sync.
 
 DROP RULE IF EXISTS audit_log_no_update ON "audit_log";
 DROP RULE IF EXISTS audit_log_no_delete ON "audit_log";

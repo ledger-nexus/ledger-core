@@ -138,17 +138,31 @@ DROP FUNCTION IF EXISTS "audit_log_block_mutation"();
 
 -- ════════════════════════════════════════════════════════════════════
 -- 5. Lineage partial unique index on gl_entry_header
+--    (from 0015_audit_log_rules_and_lineage_uniq, verbatim)
 --    DB-level idempotency backstop for source-lineage posts: the
---    recurring-entries runner (src/lib/accounting/recurring.ts) and the
---    ERP importers dedupe on the (sourceSystem, sourceRecordType,
---    sourceRecordId) triple. The app checks before insert; this index
---    is what makes a crashed run safe to re-run. Partial: manual /
---    seeded JEs carry NULL lineage and are exempt. NOTE: like the
---    audit_log trigger, this index had no migration of its own —
---    reconstructed 2026-06-10 from the recurring.ts commentary.
---    Rollback: DROP INDEX "gl_entry_header_lineage_unique";
+--    recurring-entries runner (src/lib/accounting/recurring.ts), the
+--    ERP importers, and the internal journal-entries endpoint dedupe
+--    on the (sourceSystem, sourceRecordType, sourceRecordId) triple.
+--    The app checks before insert; this index is what makes a crashed
+--    or racing run safe to re-run. Scope is (tenantId, bookId) + the
+--    triple: tenantId so two tenants importing the same ERP record id
+--    never collide (QBO ids are small per-company integers — CC6.1),
+--    bookId because Pattern 2 multi-book posting writes the same
+--    triple to N books. Partial: manual / seeded JEs carry NULL
+--    lineage and are exempt. Byte-exact capture of pre-incident
+--    production via a Neon point-in-time branch (2026-06-10T21:00:00Z)
+--    — the earlier reconstruction from recurring.ts commentary was a
+--    tenant-less bare triple, repaired below.
+--    Rollback: DROP INDEX "gl_entry_header_lineage_uniq";
 -- ════════════════════════════════════════════════════════════════════
 
-CREATE UNIQUE INDEX IF NOT EXISTS "gl_entry_header_lineage_unique"
-  ON "gl_entry_header" ("sourceSystem", "sourceRecordType", "sourceRecordId")
-  WHERE "sourceSystem" IS NOT NULL;
+-- Repair: drop the 2026-06-10 interim tenant-less reconstruction —
+-- under it, the second tenant to import a given ERP record id fails
+-- its import with a unique violation.
+DROP INDEX IF EXISTS "gl_entry_header_lineage_unique";
+
+CREATE UNIQUE INDEX IF NOT EXISTS "gl_entry_header_lineage_uniq"
+  ON "gl_entry_header" ("tenantId", "bookId", "sourceSystem", "sourceRecordType", "sourceRecordId")
+  WHERE "sourceSystem" IS NOT NULL
+    AND "sourceRecordType" IS NOT NULL
+    AND "sourceRecordId" IS NOT NULL;
