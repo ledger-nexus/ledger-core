@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-06-10
 
-**Current state:** **Slack notifier complete through v1.24 (daily-digest variant).** Channels now pick a cadence — `IMMEDIATE` (per-tick ping, every 15m business hours, one Slack message per alert) or `DIGEST_DAILY` (one batched message at 09:00 UTC summarizing every fresh alert since the last successful digest). Same dedupe table, same audit trail, same encryption-at-rest envelope. Admin UI gains a Cadence picker on create + edit. Closes the third and final item from the v1.24+ deferred queue.
+**Current state:** **Multi-currency revaluation shipped (v1.25) — the deferred queue is empty.** Period-end ASC 830 / IAS 21 remeasurement of foreign-currency monetary balances at the CLOSE rate: `Account.isMonetary` + `resolveFxRate` (PR 1), `computeRevaluation` engine over GL + AR/AP open items (PR 2), `postRevaluation` posting the adjustment + an auto-reversal next period (PR 3), and `/reports/fx-revaluation` with a tenant-admin "Post revaluation" gate (PR 4). Posts `source=AI_APPROVED` behind human approval. Before this, the Slack notifier completed through v1.24 (immediate + daily-digest cadences).
 
 Right before this, **BlackLine arc** (Phase 1-4, 22 PRs across 23 commits, +15,847 LOC) shipped F1000-grade close management: Account Reconciliations with state machine + signoff + attachments + sub-ledger auto-pull (Phase 1, 8 PRs), Close Task Calendar with dependency DAG + cycle prevention + 50 canonical templates (Phase 2, 6 PRs), Flux / Variance Analysis with frozen-snapshot evidence + materiality cascade (Phase 3, 4 PRs), and the cross-pillar integration capstone with `/close` dashboard + `/close/alerts` cross-pillar feed + `/close/retrospective` process-improvement metrics (Phase 4, 4 PRs). Followed by close-task state-history (3 PRs, v1.19) and Retrospective CSV (1 PR, v1.20).
 
@@ -297,9 +297,19 @@ Failure modes inherit the existing pattern: Slack 4xx / network / timeout / decr
 
 Same SOC 2 lineage as the IMMEDIATE cadence: CC6.1 tenant-scoped reads/writes; CC6.3 timing-safe `CRON_SECRET`; CC6.7 webhook URLs decrypted only at send time; CC7.2 per-alert dispatch row + one aggregate audit row per tick (action=`notifications.cron.digest`). Tests in `tests/notifications-digest.test.ts` (cadence separation, batching, severity filter, idempotency, 4xx, decrypt, URL scrub) + `tests/close-alerts-digest-route.test.ts` (auth + audit + 405).
 
-### v1.25+ — ergonomics + polish (deferred)
-- [ ] Multi-currency revaluation
-- [ ] FX gain/loss accounts wired into journal lines properly
+### v1.25 — Multi-currency revaluation (ASC 830 / IAS 21) — shipped 2026-06-10
+
+Both remaining FX items closed as one 4-PR arc. Period-end remeasurement of foreign-currency monetary balances to the book's reporting currency at the CLOSE rate, with the unrealized gain/loss posted and auto-reversed next period. This empties the deferred queue.
+
+- **PR 1 (#221)** — `Account.isMonetary` flag (migration 0014) + `src/lib/accounting/fx.ts` (`resolveFxRate`: on-or-before `asOf`, rateType curve, inverse fallback; the first code to read the dormant FxRate table) + new P&L accounts 8300 Unrealized / 8310 Realized FX Gain/Loss + GBP currency and H1-2026 EUR/GBP CLOSE+AVG seed rates.
+- **PR 2 (#222)** — `computeRevaluation` pure engine. GL-sourced math in signed (debit−credit) space so AR/AP signs fall out: `foreignBalance × closeRate − carrying`. Walks every monetary account; AR/AP control-account rows are enriched with per-invoice open-item detail (no double-count — the total sums each GL group once; `openItemForeignTotal` surfaces sub-ledger drift). Same-currency lines excluded.
+- **PR 3 (#223)** — `postRevaluation`: one balanced adjustment JE in the reporting currency (per-account line + offset to 8300), `source=AI_APPROVED`, idempotent on the lineage triple `(FX_REVAL, MonetaryRevaluation, "<entity>-<book>-<period>")`, + a reversing entry dated day 1 of the next period via `reversalOfId`, both atomic in one `$transaction`. Reverse-next-period keeps each period revaluing against the original historical basis (proven by a TB test: 8300 holds the gain at period end, nets to zero after the reversal lands). Fixed a CC6.1 tenant-scope gap in the FX-account lookup mid-build.
+- **PR 4 (this)** — `/reports/fx-revaluation` page (read-only preview: per-account table, CLOSE rate, gain/loss, net total) + the `postFxRevaluationAction` Server Action (the human-approval gate: `requireTenantAdmin` → `postRevaluation`). Already-posted state shows the entry number and the button no-ops. Sidebar link under Reports (hint `ASC 830`). The existing `POST_FX_REVALUATION` close-task is the controller's checklist pointer to this page.
+
+"AI suggests; humans approve; the system posts": `computeRevaluation` + `postRevaluation` are machine logic; nothing posts until a tenant admin clicks "Post revaluation", which posts `source=AI_APPROVED`. Money math is decimal.js throughout; the offset = −Σ(rounded gains) so entries balance to the cent.
+
+### v1.26+ — beyond
+The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) is fully shipped. Remaining FX depth — CTA for consolidated foreign entities (`POST_CTA` close-task stub), realized FX gain/loss on settlement (8310 account exists) — is open for when a multi-entity foreign-currency engagement asks for it.
 
 ---
 
