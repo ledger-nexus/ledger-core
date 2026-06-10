@@ -185,6 +185,39 @@ Vercel cron times are **UTC**. Adjust the hours window if your team isn't on EU/
 
 Every dispatch — successful or failed — writes a row to `notification_dispatch` with status code + error. Every admin action on a channel (create / update / delete / test / setEnabled) writes a `PRIVILEGED_ACTION` row to `audit_log` with the masked URL only — the plaintext webhook URL never appears in any audit-visible payload. The cron tick itself writes one aggregate `PRIVILEGED_ACTION` row per invocation summarizing tenants scanned + alerts dispatched + errors.
 
+### Rotating WEBHOOK_ENCRYPTION_KEY
+
+The encryption key should rotate periodically (SOC 2 CC6.7 — annual minimum; sooner if a deploy team-member leaves with prior access to the secret). The repo ships a one-shot rotation script:
+
+1. Generate a new key:
+   ```bash
+   NEW_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
+   ```
+
+2. Set the OLD + NEW keys as separate env vars locally (do NOT touch the live `WEBHOOK_ENCRYPTION_KEY` yet — it must stay set to OLD until the script finishes):
+   ```bash
+   export WEBHOOK_ENCRYPTION_KEY_OLD=<the current Vercel value>
+   export WEBHOOK_ENCRYPTION_KEY_NEW="$NEW_KEY"
+   export DATABASE_URL=<your production connection string>
+   ```
+
+3. Run the rotation:
+   ```bash
+   npx tsx scripts/rotate-webhook-encryption-key.ts
+   ```
+
+   Output is JSON with `{ok, total, rotated, alreadyOnNew, errors, durationMs}`. The script is idempotent — re-runs after a partial failure re-do only what's still on the OLD key.
+
+4. **Confirm `ok: true` and `errors: []` before proceeding.** Investigate any errors first (the channel's webhook URL was encrypted under neither OLD nor NEW; likely the row predates this key OR a previous rotation left it in a different state).
+
+5. In Vercel → Settings → Env Vars, update `WEBHOOK_ENCRYPTION_KEY` to the NEW value. Redeploy.
+
+6. Smoke-test: open the admin UI, click **Test** on every channel; each should still deliver. If any fail with `DECRYPT_FAILED`, restore the OLD env value, investigate, retry.
+
+7. Once production is verified, wipe the OLD key from your secret store.
+
+The rotation does NOT re-encrypt other column-level encrypted fields (those are managed by the PrismaExtension stack with its own key). For a portfolio-wide rotation, run the equivalent script in each repo.
+
 ### Disabling the notifier
 
 To pause without removing config: in the admin UI, click **Disable** on every channel (or toggle individual ones). The cron continues to run but emits no dispatches. To remove entirely: delete `vercel.json`'s `crons` block and unset the env vars.

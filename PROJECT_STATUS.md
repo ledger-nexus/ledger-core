@@ -277,13 +277,20 @@ This release adds `POST /api/cron/recurring-je-run` — a thin route gated by `C
 
 The "Recurring journal entry templates" item in the v1.22+ queue was stale (the feature was ~95% done; only the cron driver was the gap). Removed from the deferred list.
 
-### v1.23+ — ergonomics + polish (deferred)
-- [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
-- [ ] AR / AP aging with sortable columns
+### v1.23 — Ergonomic wins + webhook key rotation tooling (shipped 2026-06-10)
+
+Three documented v1.22+ items closed in one stretch.
+
+**(a) Tab→add JE line** (`/journal-entries/new`) — Tab from the last row's Amount cell appends a new same-side line and focuses the new Account input. Shift+Tab still navigates backwards normally; Tab on non-last rows is unchanged. Implementation: `onKeyDown` handler on the Amount input; `data-je-line-account` attribute on the account input lets focus move there after React commits via `requestAnimationFrame`.
+
+**(b) Sortable AR/AP aging columns** (`/reports/ar-aging` + `/reports/ap-aging`) — every column header is a clickable sort link. 9 sortable fields per page (reference, customer/vendor, opened, due, daysOverdue, bucket, status, original, balance). Default unchanged: dueDate ASC. Smart direction defaults: text/date columns get ASC, amount + daysOverdue columns get DESC (biggest first). URL allowlist on `searchParams.sort` prevents query-string fiddling. Sort runs in-memory because `daysOverdue` and `bucket` are computed from `asOf`, not column data.
+
+**(c) Webhook encryption key rotation** — `scripts/rotate-webhook-encryption-key.ts` re-encrypts every `notification_channel.webhookUrl` from OLD key to NEW key. Idempotent: rows that already decrypt under NEW are reported as `alreadyOnNew` and not re-written. Errors are logged per-row (channel id only, never plaintext URL) so the operator can investigate before flipping the live env var. `docs/deployment.md` gains a 7-step rotation runbook covering: generate new key → run script → verify ok → swap env var → redeploy → smoke test → wipe old key. SOC 2 CC6.7 — annual rotation minimum.
+
+### v1.24+ — ergonomics + polish (deferred)
 - [ ] Multi-currency revaluation
 - [ ] FX gain/loss accounts wired into journal lines properly
 - [ ] Slack notifier — per-tenant daily digest variant (the cron currently fires per-tick; daily-summary would batch high-severity items into one Slack message per day per channel)
-- [ ] Slack notifier — webhook URL rotation tooling (one-shot manual is acceptable at portfolio scale; versioned KMS scheme for larger deployments)
 
 ---
 
