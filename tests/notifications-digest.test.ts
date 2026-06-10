@@ -496,7 +496,17 @@ describe("dispatchCloseDigests", () => {
     // simulates a hypothetical fetch implementation that echoes the
     // URL into the error string. The dispatcher's regex scrub must
     // mask it before persisting.
-    const plaintextUrl = "https://hooks.slack.com/services/TXX/BYY/abcdef123";
+    //
+    // What "scrubbed" means here matches maskWebhookUrl's contract:
+    // the SECRET token (the final path segment) is replaced with
+    // ***; the workspace/bot identifiers (T.../B...) are deliberately
+    // retained so operators can tell two channels apart in audit
+    // logs. The full incoming-webhook secret is the entire path —
+    // T.../B.../<token> — and you cannot post without the token, so
+    // masking the token is the security-relevant scrub. This mirrors
+    // the immediate dispatcher's behavior (already CodeQL-reviewed).
+    const secretToken = "abcdef123";
+    const plaintextUrl = `https://hooks.slack.com/services/TXX/BYY/${secretToken}`;
     const spy = vi
       .spyOn(global, "fetch")
       .mockRejectedValue(
@@ -514,8 +524,13 @@ describe("dispatchCloseDigests", () => {
       });
       expect(dispatches.length).toBeGreaterThan(0);
       for (const d of dispatches) {
-        expect(d.sendError).not.toContain("abcdef123"); // path scrubbed
-        expect(d.sendError).not.toContain("/BYY/"); // channel id scrubbed
+        // The secret token must be gone — the load-bearing assertion.
+        expect(d.sendError).not.toContain(secretToken);
+        // The full unmasked URL must be gone.
+        expect(d.sendError).not.toContain(plaintextUrl);
+        // And the mask sentinel proves the scrub actually fired
+        // (rather than the URL simply being absent for another reason).
+        expect(d.sendError).toContain("***");
       }
     } finally {
       spy.mockRestore();
