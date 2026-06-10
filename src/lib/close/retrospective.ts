@@ -33,9 +33,8 @@
 // SOC 2 CC6.1: every query carries tenantId + entityId + bookId.
 // Cross-tenant retrospective is impossible.
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface RetrospectiveScope {
   tenantId: string;

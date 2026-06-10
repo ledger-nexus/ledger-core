@@ -28,9 +28,9 @@
 // query filters on it before the (entity, book, period) tuple to
 // keep the plan tight on the (tenantId, periodId, status) index.
 
-import type { Prisma, PrismaClient, ReconStatus } from "@prisma/client";
+import type { ReconStatus } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface ReconciliationRollup {
   total: number;

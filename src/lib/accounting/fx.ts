@@ -26,10 +26,10 @@
 // Money discipline (CLAUDE.md): all math is decimal.js. Prisma Decimals
 // are converted via new Decimal(value.toString()). Never Number.
 
-import { Prisma, PrismaClient, FxRateType } from "@prisma/client";
+import { FxRateType } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 import { Decimal } from "decimal.js";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export class FxRateNotFoundError extends Error {
   constructor(

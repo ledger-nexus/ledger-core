@@ -10,9 +10,9 @@
 // Returns null when no statement exists for that scope — the
 // month-end page renders the line as "n/a" rather than ✗.
 
-import type { Prisma, PrismaClient, FluxLineStatus, FluxStatementStatus } from "@prisma/client";
+import type { FluxLineStatus, FluxStatementStatus } from "@prisma/client";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface FluxRollup {
   statementId: string;

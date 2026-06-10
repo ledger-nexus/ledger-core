@@ -258,12 +258,14 @@ export async function computeRevaluation(
     };
 
     // Enrich AR/AP rows with open-item detail (transparency, not math).
-    if (source === "AR_SUBLEDGER") {
-      const detail = await arOpenItemDetail(prisma, entity.id, book.id, g.currency);
-      line.openItems = detail.items;
-      line.openItemForeignTotal = detail.foreignTotal;
-    } else if (source === "AP_SUBLEDGER") {
-      const detail = await apOpenItemDetail(prisma, entity.id, book.id, g.currency);
+    if (source === "AR_SUBLEDGER" || source === "AP_SUBLEDGER") {
+      const detail = await openItemDetail(
+        prisma,
+        source === "AR_SUBLEDGER" ? "AR" : "AP",
+        entity.id,
+        book.id,
+        g.currency
+      );
       line.openItems = detail.items;
       line.openItemForeignTotal = detail.foreignTotal;
     }
@@ -291,47 +293,43 @@ export async function computeRevaluation(
 
 const OPEN_STATUSES = ["OPEN", "PARTIAL", "REOPENED"] as const;
 
-async function arOpenItemDetail(
+// One detail fetcher for both sub-ledgers — the AR/AP open-item tables
+// are deliberate mirrors, so a single status-filter change covers both.
+async function openItemDetail(
   prisma: PrismaClient,
+  kind: "AR" | "AP",
   entityId: string,
   bookId: string,
   currency: string
 ): Promise<{ items: RevaluationOpenItemDetail[]; foreignTotal: Decimal }> {
-  const rows = await prisma.arOpenItem.findMany({
-    where: {
-      entityId,
-      bookId,
-      currencyId: currency,
-      status: { in: [...OPEN_STATUSES] },
-    },
-    select: {
-      referenceNumber: true,
-      currentBalance: true,
-      party: { select: { code: true, displayName: true } },
-    },
-  });
-  return summarizeOpenItems(rows);
-}
-
-async function apOpenItemDetail(
-  prisma: PrismaClient,
-  entityId: string,
-  bookId: string,
-  currency: string
-): Promise<{ items: RevaluationOpenItemDetail[]; foreignTotal: Decimal }> {
-  const rows = await prisma.apOpenItem.findMany({
-    where: {
-      entityId,
-      bookId,
-      currencyId: currency,
-      status: { in: [...OPEN_STATUSES] },
-    },
-    select: {
-      referenceNumber: true,
-      currentBalance: true,
-      party: { select: { code: true, displayName: true } },
-    },
-  });
+  const rows =
+    kind === "AR"
+      ? await prisma.arOpenItem.findMany({
+          where: {
+            entityId,
+            bookId,
+            currencyId: currency,
+            status: { in: [...OPEN_STATUSES] },
+          },
+          select: {
+            referenceNumber: true,
+            currentBalance: true,
+            party: { select: { code: true, displayName: true } },
+          },
+        })
+      : await prisma.apOpenItem.findMany({
+          where: {
+            entityId,
+            bookId,
+            currencyId: currency,
+            status: { in: [...OPEN_STATUSES] },
+          },
+          select: {
+            referenceNumber: true,
+            currentBalance: true,
+            party: { select: { code: true, displayName: true } },
+          },
+        });
   return summarizeOpenItems(rows);
 }
 
