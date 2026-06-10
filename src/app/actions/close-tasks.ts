@@ -102,6 +102,41 @@ function fail(code: string, error: string): TaskResult {
 const TERMINAL: CloseTaskStatus[] = ["DONE", "WAIVED"];
 
 // ─────────────────────────────────────────────────────────────────────────
+// recordStateChange (migration 0011 — close-task state history)
+//
+// Append-only state-transition log writer. Called inside every
+// status-mutating action's transaction. The DB trigger on
+// close_task_state_change refuses UPDATE/DELETE, so once written this
+// row is part of the permanent audit trail.
+//
+// `changedById` is REQUIRED on live writes (only the migration
+// backfill rows have a null actor; that's enforced here, not at the
+// schema level, to keep backfill SQL clean).
+// ─────────────────────────────────────────────────────────────────────────
+async function recordStateChange(
+  tx: Prisma.TransactionClient,
+  args: {
+    tenantId: string;
+    closeTaskId: string;
+    fromStatus: CloseTaskStatus | null;
+    toStatus: CloseTaskStatus;
+    reason: string | null;
+    changedById: string;
+  }
+): Promise<void> {
+  await tx.closeTaskStateChange.create({
+    data: {
+      tenantId: args.tenantId,
+      closeTaskId: args.closeTaskId,
+      fromStatus: args.fromStatus,
+      toStatus: args.toStatus,
+      reason: args.reason,
+      changedById: args.changedById,
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // startTask
 //
 // NOT_STARTED|BLOCKED → IN_PROGRESS. Refuses if any dependency isn't
@@ -165,9 +200,19 @@ export async function startTask(
     // when its targets vanish.
   }
 
-  await prisma.closeTask.update({
-    where: { id: task.id },
-    data: { status: "IN_PROGRESS" },
+  await prisma.$transaction(async (tx) => {
+    await tx.closeTask.update({
+      where: { id: task.id },
+      data: { status: "IN_PROGRESS" },
+    });
+    await recordStateChange(tx, {
+      tenantId: tenant.id,
+      closeTaskId: task.id,
+      fromStatus: task.status,
+      toStatus: "IN_PROGRESS",
+      reason: null,
+      changedById: user.id,
+    });
   });
 
   await auditPrivilegedAction({
@@ -209,15 +254,25 @@ export async function completeTask(
     );
   }
 
-  await prisma.closeTask.update({
-    where: { id: task.id },
-    data: {
-      status: "DONE",
-      completedById: user.id,
-      completedAt: new Date(),
-      evidenceUrl: parsed.data.evidenceUrl ?? null,
-      evidenceNote: parsed.data.evidenceNote ?? null,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.closeTask.update({
+      where: { id: task.id },
+      data: {
+        status: "DONE",
+        completedById: user.id,
+        completedAt: new Date(),
+        evidenceUrl: parsed.data.evidenceUrl ?? null,
+        evidenceNote: parsed.data.evidenceNote ?? null,
+      },
+    });
+    await recordStateChange(tx, {
+      tenantId: tenant.id,
+      closeTaskId: task.id,
+      fromStatus: task.status,
+      toStatus: "DONE",
+      reason: null,
+      changedById: user.id,
+    });
   });
 
   await auditPrivilegedAction({
@@ -259,12 +314,23 @@ export async function blockTask(
   }
   if (task.status === "BLOCKED") return { ok: true, taskId: task.id };
 
-  await prisma.closeTask.update({
-    where: { id: task.id },
-    data: {
-      status: "BLOCKED",
-      blockedReason: parsed.data.reason.trim(),
-    },
+  const reasonTrimmed = parsed.data.reason.trim();
+  await prisma.$transaction(async (tx) => {
+    await tx.closeTask.update({
+      where: { id: task.id },
+      data: {
+        status: "BLOCKED",
+        blockedReason: reasonTrimmed,
+      },
+    });
+    await recordStateChange(tx, {
+      tenantId: tenant.id,
+      closeTaskId: task.id,
+      fromStatus: task.status,
+      toStatus: "BLOCKED",
+      reason: reasonTrimmed,
+      changedById: user.id,
+    });
   });
 
   await auditPrivilegedAction({
@@ -305,12 +371,22 @@ export async function unblockTask(
     return fail("WRONG_STATUS", `Cannot unblock a ${task.status} task`);
   }
 
-  await prisma.closeTask.update({
-    where: { id: task.id },
-    data: {
-      status: "IN_PROGRESS",
-      blockedReason: null,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.closeTask.update({
+      where: { id: task.id },
+      data: {
+        status: "IN_PROGRESS",
+        blockedReason: null,
+      },
+    });
+    await recordStateChange(tx, {
+      tenantId: tenant.id,
+      closeTaskId: task.id,
+      fromStatus: "BLOCKED",
+      toStatus: "IN_PROGRESS",
+      reason: null,
+      changedById: user.id,
+    });
   });
 
   await auditPrivilegedAction({
@@ -358,17 +434,29 @@ export async function waiveTask(
     return fail("TERMINAL", `Cannot waive a ${task.status} task`);
   }
 
-  await prisma.closeTask.update({
-    where: { id: task.id },
-    data: {
-      status: "WAIVED",
-      completedById: user.id,
-      completedAt: new Date(),
-      // Stash the reason in evidenceNote so the audit-trail is read-out
-      // from the same field downstream renderers use for completion
-      // evidence. (The audit_log row also carries it.)
-      evidenceNote: `WAIVED: ${parsed.data.reason.trim()}`,
-    },
+  const waiveReason = parsed.data.reason.trim();
+  await prisma.$transaction(async (tx) => {
+    await tx.closeTask.update({
+      where: { id: task.id },
+      data: {
+        status: "WAIVED",
+        completedById: user.id,
+        completedAt: new Date(),
+        // Stash the reason in evidenceNote so the audit-trail is
+        // read-out from the same field downstream renderers use for
+        // completion evidence. (The audit_log + state-change rows
+        // also carry it.)
+        evidenceNote: `WAIVED: ${waiveReason}`,
+      },
+    });
+    await recordStateChange(tx, {
+      tenantId: tenant.id,
+      closeTaskId: task.id,
+      fromStatus: task.status,
+      toStatus: "WAIVED",
+      reason: waiveReason,
+      changedById: user.id,
+    });
   });
 
   await auditPrivilegedAction({
@@ -679,6 +767,27 @@ export async function instantiateCalendarForPeriod(
     await prisma.closeTask.update({
       where: { id: newTaskId },
       data: { dependsOnIds: resolvedIds },
+    });
+  }
+
+  // Third pass: state-history initial rows (fromStatus=null) for
+  // each just-created task. createMany lands them all in one round
+  // trip — append-only trigger lets the bulk-insert through. We can't
+  // bundle this with the createMany at the top because we need the
+  // task ids, which only land after the find-by-templateKey above.
+  const newTaskIds = toCreate
+    .map((t) => keyToId.get(t.key))
+    .filter((id): id is string => !!id);
+  if (newTaskIds.length > 0) {
+    await prisma.closeTaskStateChange.createMany({
+      data: newTaskIds.map((id) => ({
+        tenantId: tenant.id,
+        closeTaskId: id,
+        fromStatus: null,
+        toStatus: "NOT_STARTED" as const,
+        reason: null,
+        changedById: user.id,
+      })),
     });
   }
 
