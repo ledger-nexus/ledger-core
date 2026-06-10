@@ -357,6 +357,21 @@ describe("Recurring blockers", () => {
       select: { id: true },
     });
     createdTaskIds.push(blockedAuditTask.id);
+    // After PR 2/3, recurring-blockers reads from the state-change
+    // log rather than the snapshot status. The Server Action path
+    // would write this transition automatically; here we mint the
+    // fixture row directly because we created the task via raw
+    // Prisma (bypassing the action layer).
+    await prisma.closeTaskStateChange.create({
+      data: {
+        tenantId,
+        closeTaskId: blockedAuditTask.id,
+        fromStatus: "IN_PROGRESS",
+        toStatus: "BLOCKED",
+        reason: "Waiting on auditor sign-off",
+        changedById: userId,
+      },
+    });
 
     const cleanRunningTask = await prisma.closeTask.create({
       data: {
