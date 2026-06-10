@@ -162,15 +162,18 @@ async function cleanup(): Promise<void> {
   await prisma.legalEntity.deleteMany({
     where: { id: { in: createdEntityIds } },
   });
-  // Audit rows referencing the fixture users must go first: the
-  // append-only RULE rewrites the actorUserId FK's ON DELETE SET NULL
-  // action, so deleting a still-referenced user errors with XX000.
+  // The user delete must run INSIDE the escape-hatch window: the
+  // append-only RULE structurally rewrites the actorUserId FK's
+  // ON DELETE SET NULL action, so ANY app_user delete errors with
+  // XX000 while the rules are armed — even with zero referencing
+  // audit rows. Delete the fixture-actor audit rows in the same
+  // window so they don't leak as orphans.
   await withAuditLogMutable(prisma, async () => {
     await prisma.auditLog.deleteMany({
       where: { actorUserId: { in: createdUserIds } },
     });
+    await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
   });
-  await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
 }
 
 /** Pure helper: compute the next status given inputs. Mirrors the
