@@ -137,12 +137,13 @@ This runs three steps in order:
 
 1. `prisma db push --force-reset` — drops everything, re-creates the schema
    from `schema.prisma`;
-2. `npm run db:restore-ddl` — applies `prisma/sql/migration-mirror.sql`, the
-   migration-only DDL that `db push` cannot create (append-only triggers on
-   `audit_log` and `close_task_state_change`, the ledger CHECK constraints,
-   GIN indexes, and the lineage partial unique index). Skipping this step
-   silently strips the SOC 2 append-only enforcement — exactly what the
-   2026-06-10 incident did to production;
+2. `npm run db:restore-ddl` — applies `prisma/sql/migration-mirror.sql` and
+   `prisma/sql/audit-log-append-only.sql`, the migration-only DDL that
+   `db push` cannot create (the silent append-only RULE pair on `audit_log`,
+   the append-only triggers on `close_task_state_change`, the ledger CHECK
+   constraints, GIN indexes, and the lineage partial unique index). Skipping
+   this step silently strips the SOC 2 append-only enforcement — exactly
+   what the 2026-06-10 incident did to production;
 3. `npm run db:seed` — self-bootstraps the default tenant (the
    `ensureDefaultTenant` helper creates `app_user`
    `ci-bootstrap@northwind.test` + tenant `slug='default'` when missing —
@@ -175,7 +176,13 @@ created the base tables — and the database is left EMPTY. This happened on
    `prisma/sql/migration-mirror.sql` too (idempotently), or fresh and reset
    databases won't have it. CI applies the same file (the "Apply
    migration-mirror DDL" step), so a forgotten mirror entry shows up as a
-   red build the moment a test probes the enforcement.
+   red build the moment a test probes the enforcement. The two objects that
+   historically had no in-repo source at all — the `audit_log` append-only
+   RULE pair and the `gl_entry_header_lineage_uniq` partial unique index —
+   now have one: `prisma/migrations/0015_audit_log_rules_and_lineage_uniq/`
+   carries byte-exact captures of pre-incident production (recovered via a
+   Neon point-in-time branch); the applied forms live in
+   `prisma/sql/audit-log-append-only.sql` and mirror section 5.
 
 ---
 

@@ -36,7 +36,7 @@ Full version history lives in `PROJECT_STATUS.md` — read that for the "when/wh
 - **Recurring JEs** — templates + anchored monthly enumeration + daily cron auto-run (`src/lib/accounting/recurring.ts`), idempotent via lineage.
 - **FX revaluation (ASC 830 / IAS 21)** — `Account.isMonetary`, `resolveFxRate` (CLOSE/AVG curves, on-or-before, inverse fallback) in `src/lib/accounting/fx.ts`, pure `computeRevaluation` + posting `postRevaluation` (adjustment + auto-reversal next period) behind the human-approval gate. P&L accounts 8300/8310.
 - **Multi-tenancy** — every customer-data table carries `tenantId`; scope resolves from session via `getCurrentScope()` / `requireCurrentTenant()`, never client input. **RLS status: Phase 1 only** — `withTenantContext` (`src/lib/tenant-context.ts`) sets the `app.current_tenant_id` GUC but NO policies exist and queries use the raw singleton; enforcement is application-level WHERE clauses. Do not assume RLS is live (deficiency #12, open).
-- **SOC 2 stack** — append-only `audit_log` (DB trigger), `logAuditEvent`/`auditPrivilegedAction`, column-level encryption extension, DSR export/erasure, timing-safe cron auth (`src/lib/auth/cron.ts`), control matrix + deficiency log under `docs/policies/`.
+- **SOC 2 stack** — append-only `audit_log` (DB RULE pair, silent no-op on UPDATE/DELETE; migration 0015 — tests clean audit rows via `withAuditLogMutable`, and `app_user` hard-deletes need the same window), `logAuditEvent`/`auditPrivilegedAction`, column-level encryption extension, DSR export/erasure, timing-safe cron auth (`src/lib/auth/cron.ts`), control matrix + deficiency log under `docs/policies/`.
 
 Open items beyond v1.25: RLS Phases 2–4 (policies → query-path migration → FORCE; see `docs/multi-tenancy.md`), CTA for foreign consolidated entities, realized FX on settlement.
 
@@ -55,7 +55,7 @@ Open items beyond v1.25: RLS Phases 2–4 (policies → query-path migration →
 
 ### Database writes
 - All ledger writes flow through `postJournalEntry`. No exceptions. It accepts `PrismaClient | Prisma.TransactionClient` so it can nest inside outer transactions.
-- Schema changes require a Prisma migration; never edit the DB directly. NOTE: CI uses `prisma db push`, which skips migration SQL — triggers and other non-Prisma DDL added in a migration also need a mirror block in `.github/workflows/ci.yml` (see the migration-0011 step there).
+- Schema changes require a Prisma migration; never edit the DB directly. NOTE: CI uses `prisma db push`, which skips migration SQL — triggers, rules, and other non-Prisma DDL added in a migration must ALSO be added (idempotently) to `prisma/sql/migration-mirror.sql`, which `npm run db:restore-ddl` applies (CI's "Apply migration-mirror DDL" step and `db:reset` both call it).
 - New columns on `Account` / `JournalEntry` / `JournalLine` must respect the anti-patterns list in `docs/universal-schema.md`.
 
 ### Tenant scoping
