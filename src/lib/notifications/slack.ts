@@ -99,6 +99,90 @@ export function formatSlackBlocks(
   };
 }
 
+/**
+ * Builds a Slack Block Kit payload for a daily digest — one Slack
+ * message that summarizes N fresh alerts. Header section names the
+ * date and the alert count; each alert renders as a colored
+ * attachment (same per-alert layout as the immediate cadence, so a
+ * digest item is recognizable to operators).
+ *
+ * `digestDate` is formatted YYYY-MM-DD in the header. The cron
+ * passes the wall-clock date for the run so a re-trigger on a given
+ * day shows the same date stamp.
+ */
+export function formatSlackDigest(
+  items: Array<{
+    alert: CloseAlert;
+    scope: { entity: string; book: string; period: string };
+  }>,
+  context: {
+    appBaseUrl: string;
+    digestDate: string;
+    channelName: string;
+  }
+): Record<string, unknown> {
+  const headerText =
+    items.length === 1
+      ? "1 new close-quality alert"
+      : `${items.length} new close-quality alerts`;
+  return {
+    // Fallback text for notification previews / non-Block-Kit clients.
+    text: `:date: Daily digest — ${headerText} for ${context.digestDate}`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `:date: *Daily digest* — *${headerText}* for \`${context.digestDate}\`\nChannel: \`${context.channelName}\``,
+        },
+      },
+      { type: "divider" },
+    ],
+    // One attachment per alert. Slack renders attachments stacked
+    // beneath the message blocks, so the digest reads top-down:
+    // header → divider → alerts in scope/severity order.
+    attachments: items.map(({ alert, scope }) => {
+      const ageLabel =
+        alert.ageDays === 0
+          ? "today"
+          : alert.ageDays === 1
+            ? "1 day ago"
+            : `${alert.ageDays} days ago`;
+      return {
+        color: SEVERITY_COLOR[alert.severity],
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `${SEVERITY_EMOJI[alert.severity]} *${alert.severity.toUpperCase()}* · *${alert.pillar.toUpperCase()}* · ${ageLabel}\n*${alert.title}*\n${alert.description}`,
+            },
+          },
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `Scope: \`${scope.entity}\` · \`${scope.book}\` · Period \`${scope.period}\``,
+              },
+            ],
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: { type: "plain_text", text: "Open" },
+                url: `${context.appBaseUrl}${alert.href}`,
+              },
+            ],
+          },
+        ],
+      };
+    }),
+  };
+}
+
 export type SlackSendResult =
   | { ok: true; status: number }
   | { ok: false; status: number | null; error: string };

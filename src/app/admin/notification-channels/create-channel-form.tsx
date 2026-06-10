@@ -9,11 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 type Severity = "high" | "medium" | "low";
+type Mode = "IMMEDIATE" | "DIGEST_DAILY";
 
 export default function CreateChannelForm() {
   const [name, setName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [severities, setSeverities] = useState<Severity[]>([]);
+  const [mode, setMode] = useState<Mode>("IMMEDIATE");
   const [showUrl, setShowUrl] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,7 @@ export default function CreateChannelForm() {
         name: trimmedName,
         webhookUrl: url,
         severityFilter: severities,
+        mode,
         enabled: true,
       });
       if (!r.ok) {
@@ -50,6 +53,7 @@ export default function CreateChannelForm() {
       setName("");
       setWebhookUrl("");
       setSeverities([]);
+      setMode("IMMEDIATE");
     });
   }
 
@@ -99,32 +103,67 @@ export default function CreateChannelForm() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-ink-600">
-          Severity filter
-          <span className="ml-1 text-ink-400 font-normal">
-            (leave blank for all severities)
-          </span>
-        </label>
-        <div className="flex flex-wrap gap-2">
-          {(["high", "medium", "low"] as Severity[]).map((s) => {
-            const active = severities.includes(s);
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => toggleSeverity(s)}
-                disabled={pending}
-                className={
-                  active
-                    ? "rounded-full bg-ink-900 px-3 py-0.5 text-xs font-medium text-white"
-                    : "rounded-full border border-ink-200 px-3 py-0.5 text-xs text-ink-700 hover:bg-ink-50"
-                }
-              >
-                {s}
-              </button>
-            );
-          })}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-ink-600">
+            Severity filter
+            <span className="ml-1 text-ink-400 font-normal">
+              (leave blank for all severities)
+            </span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {(["high", "medium", "low"] as Severity[]).map((s) => {
+              const active = severities.includes(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleSeverity(s)}
+                  disabled={pending}
+                  className={
+                    active
+                      ? "rounded-full bg-ink-900 px-3 py-0.5 text-xs font-medium text-white"
+                      : "rounded-full border border-ink-200 px-3 py-0.5 text-xs text-ink-700 hover:bg-ink-50"
+                  }
+                >
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-ink-600">
+            Cadence
+            <span className="ml-1 text-ink-400 font-normal">
+              (immediate pings every 15m; daily digest batches at 09:00 UTC)
+            </span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                { value: "IMMEDIATE" as Mode, label: "Immediate" },
+                { value: "DIGEST_DAILY" as Mode, label: "Daily digest" },
+              ]
+            ).map((opt) => {
+              const active = mode === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setMode(opt.value)}
+                  disabled={pending}
+                  className={
+                    active
+                      ? "rounded-full bg-ink-900 px-3 py-0.5 text-xs font-medium text-white"
+                      : "rounded-full border border-ink-200 px-3 py-0.5 text-xs text-ink-700 hover:bg-ink-50"
+                  }
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

@@ -52,6 +52,7 @@ export default async function NotificationChannelsPage() {
       name: true,
       webhookUrl: true,
       severityFilter: true,
+      mode: true,
       enabled: true,
       createdAt: true,
       createdBy: { select: { displayName: true, email: true } },
@@ -103,8 +104,10 @@ export default async function NotificationChannelsPage() {
           Notification channels
         </h1>
         <p className="text-sm text-ink-500">
-          Slack webhooks that receive close alerts when the cron dispatcher
-          fires (typically every 15 minutes during business hours).
+          Slack webhooks that receive close alerts. <em>Immediate</em>{" "}
+          channels ping every 15 minutes during business hours;{" "}
+          <em>Daily digest</em> channels get one batched message per day
+          at 09:00 UTC.
         </p>
       </header>
 
@@ -140,6 +143,7 @@ export default async function NotificationChannelsPage() {
                   <th className="py-1 font-medium">Name</th>
                   <th className="py-1 font-medium">Webhook</th>
                   <th className="py-1 font-medium">Severity</th>
+                  <th className="py-1 font-medium">Cadence</th>
                   <th className="py-1 font-medium">Status</th>
                   <th className="py-1 font-medium">Sent</th>
                   <th className="py-1 font-medium">Last</th>
@@ -170,6 +174,11 @@ export default async function NotificationChannelsPage() {
                       )}
                     </td>
                     <td className="py-1.5">
+                      <Badge tone={c.mode === "DIGEST_DAILY" ? "info" : "neutral"}>
+                        {c.mode === "DIGEST_DAILY" ? "daily digest" : "immediate"}
+                      </Badge>
+                    </td>
+                    <td className="py-1.5">
                       <Badge tone={c.enabled ? "positive" : "neutral"}>
                         {c.enabled ? "enabled" : "disabled"}
                       </Badge>
@@ -196,6 +205,7 @@ export default async function NotificationChannelsPage() {
                         enabled={c.enabled}
                         name={c.name}
                         severityFilter={c.severityFilter}
+                        mode={c.mode}
                       />
                     </td>
                   </tr>

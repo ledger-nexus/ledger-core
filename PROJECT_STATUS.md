@@ -8,7 +8,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 **Last updated:** 2026-06-10
 
-**Current state:** **Slack notifier arc just shipped (v1.21).** Close alerts now ping operator-configured Slack channels through a cron-driven dispatcher with dedupe + severity filtering + admin UI. 4 PRs + 1 hotfix; webhook URLs encrypted at rest via AES-256-GCM; `WEBHOOK_ENCRYPTION_KEY` + `CRON_SECRET` env-driven. Closes the controller's loop — the BlackLine arc's `/api/close/alerts` endpoint is no longer a hypothetical integration surface but a live production feature.
+**Current state:** **Slack notifier complete through v1.24 (daily-digest variant).** Channels now pick a cadence — `IMMEDIATE` (per-tick ping, every 15m business hours, one Slack message per alert) or `DIGEST_DAILY` (one batched message at 09:00 UTC summarizing every fresh alert since the last successful digest). Same dedupe table, same audit trail, same encryption-at-rest envelope. Admin UI gains a Cadence picker on create + edit. Closes the third and final item from the v1.24+ deferred queue.
 
 Right before this, **BlackLine arc** (Phase 1-4, 22 PRs across 23 commits, +15,847 LOC) shipped F1000-grade close management: Account Reconciliations with state machine + signoff + attachments + sub-ledger auto-pull (Phase 1, 8 PRs), Close Task Calendar with dependency DAG + cycle prevention + 50 canonical templates (Phase 2, 6 PRs), Flux / Variance Analysis with frozen-snapshot evidence + materiality cascade (Phase 3, 4 PRs), and the cross-pillar integration capstone with `/close` dashboard + `/close/alerts` cross-pillar feed + `/close/retrospective` process-improvement metrics (Phase 4, 4 PRs). Followed by close-task state-history (3 PRs, v1.19) and Retrospective CSV (1 PR, v1.20).
 
@@ -287,10 +287,19 @@ Three documented v1.22+ items closed in one stretch.
 
 **(c) Webhook encryption key rotation** — `scripts/rotate-webhook-encryption-key.ts` re-encrypts every `notification_channel.webhookUrl` from OLD key to NEW key. Idempotent: rows that already decrypt under NEW are reported as `alreadyOnNew` and not re-written. Errors are logged per-row (channel id only, never plaintext URL) so the operator can investigate before flipping the live env var. `docs/deployment.md` gains a 7-step rotation runbook covering: generate new key → run script → verify ok → swap env var → redeploy → smoke test → wipe old key. SOC 2 CC6.7 — annual rotation minimum.
 
-### v1.24+ — ergonomics + polish (deferred)
+### v1.24 — Slack daily digest variant (shipped 2026-06-10)
+
+The Slack notifier's third item — daily-digest cadence — landed as a 1 PR.
+
+A `NotificationChannelMode` enum (`IMMEDIATE` | `DIGEST_DAILY`) hangs off `notification_channel`. Existing rows backfill to `IMMEDIATE` so the per-tick cron's behavior is unchanged at deploy. The IMMEDIATE channel filter on the existing dispatcher (`type: "SLACK", enabled: true, mode: "IMMEDIATE"`) keeps that cron honest. A new `dispatchCloseDigests` function in `src/lib/notifications/digest.ts` mirrors the per-tick walker but: pulls only DIGEST_DAILY channels, collects ALL alerts across the tenant's open periods (severity-filtered), bulk-probes `notification_dispatch` to drop already-sent ones, sends ONE Slack message batching every fresh alert (header + N attachments via `formatSlackDigest`), then writes N dispatch rows — one per batched alert with the send outcome. Quiet days send nothing. The new cron route is `/api/cron/close-alerts-digest`, scheduled `0 9 * * *` in `vercel.json` (09:00 UTC daily). Admin UI gains a Cadence picker on both the create form and the per-row edit panel; the channels table shows the current mode as a badge.
+
+Failure modes inherit the existing pattern: Slack 4xx / network / timeout / decrypt-failure all write dispatch rows for every batched alert with `sendStatus` + scrubbed `sendError` — the dedupe lock prevents tomorrow's digest from re-pinging. URL scrub uses the same regex-without-`.includes()` pattern that closed the CodeQL `js/incomplete-url-substring-sanitization` finding earlier in the Slack arc.
+
+Same SOC 2 lineage as the IMMEDIATE cadence: CC6.1 tenant-scoped reads/writes; CC6.3 timing-safe `CRON_SECRET`; CC6.7 webhook URLs decrypted only at send time; CC7.2 per-alert dispatch row + one aggregate audit row per tick (action=`notifications.cron.digest`). Tests in `tests/notifications-digest.test.ts` (cadence separation, batching, severity filter, idempotency, 4xx, decrypt, URL scrub) + `tests/close-alerts-digest-route.test.ts` (auth + audit + 405).
+
+### v1.25+ — ergonomics + polish (deferred)
 - [ ] Multi-currency revaluation
 - [ ] FX gain/loss accounts wired into journal lines properly
-- [ ] Slack notifier — per-tenant daily digest variant (the cron currently fires per-tick; daily-summary would batch high-severity items into one Slack message per day per channel)
 
 ---
 
