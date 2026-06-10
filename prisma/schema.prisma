@@ -2266,6 +2266,15 @@ enum NotificationChannelType {
   // typed so multiple per tenant can fan out the same alert.
 }
 
+// Dispatch cadence. The IMMEDIATE cron (every 15m business hours) and
+// the DIGEST_DAILY cron (once daily 09:00 UTC) read disjoint slices of
+// this enum, so a channel belongs to exactly one cadence at a time —
+// flip the mode on the channel to move it between them.
+enum NotificationChannelMode {
+  IMMEDIATE
+  DIGEST_DAILY
+}
+
 // A configured outbound delivery target (Slack webhook). The
 // `webhookUrl` column stores the application-layer AES-256-GCM
 // ciphertext from src/lib/notifications/crypto.ts — never plaintext.
@@ -2286,6 +2295,13 @@ model NotificationChannel {
   // `AlertSeverity` (high / medium / low). Empty → all severities.
   severityFilter String[]
 
+  // IMMEDIATE = the per-alert dispatcher fires every 15m and pings on
+  // every NEW alert. DIGEST_DAILY = the digest dispatcher fires once
+  // daily and batches all NEW alerts since the last successful digest
+  // into ONE Slack message. Existing channels default to IMMEDIATE so
+  // current behavior is preserved post-migration.
+  mode NotificationChannelMode @default(IMMEDIATE)
+
   enabled Boolean @default(true)
 
   // Audit ownership: who set this up. Used in the admin UI's
@@ -2300,6 +2316,7 @@ model NotificationChannel {
   dispatches NotificationDispatch[]
 
   @@index([tenantId, enabled])
+  @@index([mode, enabled])
   @@map("notification_channel")
 }
 

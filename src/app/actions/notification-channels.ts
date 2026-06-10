@@ -44,11 +44,13 @@ import { sendSlackMessage } from "@/lib/notifications/slack";
 const uuid = z.string().uuid();
 
 const SEVERITY = z.enum(["high", "medium", "low"]);
+const MODE = z.enum(["IMMEDIATE", "DIGEST_DAILY"]);
 
 const CreateInput = z.object({
   name: z.string().min(1).max(120),
   webhookUrl: z.string().url().max(500),
   severityFilter: z.array(SEVERITY).max(3),
+  mode: MODE.default("IMMEDIATE"),
   enabled: z.boolean().default(true),
 });
 
@@ -58,6 +60,7 @@ const UpdateInput = z.object({
   // Pass to rotate. Omit (or send empty string) to keep existing.
   webhookUrl: z.string().url().max(500).optional(),
   severityFilter: z.array(SEVERITY).max(3).optional(),
+  mode: MODE.optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -98,7 +101,7 @@ async function requireAdminContext(): Promise<
 // createChannel
 // ─────────────────────────────────────────────────────────────────────────
 export async function createChannel(
-  input: z.infer<typeof CreateInput>
+  input: z.input<typeof CreateInput>
 ): Promise<ChannelResult> {
   const parsed = CreateInput.safeParse(input);
   if (!parsed.success) {
@@ -114,6 +117,7 @@ export async function createChannel(
       name: parsed.data.name.trim(),
       webhookUrl: encryptWebhookUrl(parsed.data.webhookUrl),
       severityFilter: parsed.data.severityFilter,
+      mode: parsed.data.mode,
       enabled: parsed.data.enabled,
       createdById: ctx.user.id,
     },
@@ -129,6 +133,7 @@ export async function createChannel(
     metadata: {
       name: parsed.data.name.trim(),
       severityFilter: parsed.data.severityFilter,
+      mode: parsed.data.mode,
       maskedUrl: maskWebhookUrl(parsed.data.webhookUrl),
     },
   });
@@ -141,7 +146,7 @@ export async function createChannel(
 // updateChannel
 // ─────────────────────────────────────────────────────────────────────────
 export async function updateChannel(
-  input: z.infer<typeof UpdateInput>
+  input: z.input<typeof UpdateInput>
 ): Promise<ChannelResult> {
   const parsed = UpdateInput.safeParse(input);
   if (!parsed.success) {
@@ -162,6 +167,7 @@ export async function updateChannel(
   if (parsed.data.severityFilter !== undefined) {
     data.severityFilter = parsed.data.severityFilter;
   }
+  if (parsed.data.mode !== undefined) data.mode = parsed.data.mode;
   if (parsed.data.enabled !== undefined) data.enabled = parsed.data.enabled;
   // Only rotate webhookUrl if a non-empty string came in.
   let rotatedMaskedUrl: string | undefined;
@@ -196,7 +202,7 @@ export async function updateChannel(
 // deleteChannel
 // ─────────────────────────────────────────────────────────────────────────
 export async function deleteChannel(
-  input: z.infer<typeof DeleteInput>
+  input: z.input<typeof DeleteInput>
 ): Promise<ChannelResult> {
   const parsed = DeleteInput.safeParse(input);
   if (!parsed.success) {
@@ -236,7 +242,7 @@ export async function deleteChannel(
 // so quarterly access reviews see who tested when (and the result).
 // ─────────────────────────────────────────────────────────────────────────
 export async function testChannel(
-  input: z.infer<typeof TestInput>
+  input: z.input<typeof TestInput>
 ): Promise<ChannelResult> {
   const parsed = TestInput.safeParse(input);
   if (!parsed.success) {
@@ -323,7 +329,7 @@ export async function testChannel(
 // setEnabled — quick toggle without rendering the full edit form
 // ─────────────────────────────────────────────────────────────────────────
 export async function setEnabled(
-  input: z.infer<typeof ToggleInput>
+  input: z.input<typeof ToggleInput>
 ): Promise<ChannelResult> {
   const parsed = ToggleInput.safeParse(input);
   if (!parsed.success) {

@@ -154,7 +154,7 @@ Two env vars need to be set in **Vercel → Settings → Environment Variables**
 
 ### Configure the cron schedule
 
-`vercel.json` ships with a 15-minute-during-business-hours cadence:
+`vercel.json` ships with two cron entries — one for each cadence:
 
 ```json
 {
@@ -162,12 +162,18 @@ Two env vars need to be set in **Vercel → Settings → Environment Variables**
     {
       "path": "/api/cron/close-alerts-dispatch",
       "schedule": "*/15 9-18 * * 1-5"
+    },
+    {
+      "path": "/api/cron/close-alerts-digest",
+      "schedule": "0 9 * * *"
     }
   ]
 }
 ```
 
 Vercel cron times are **UTC**. Adjust the hours window if your team isn't on EU/UK time. The dedupe table (`notification_dispatch` with `@@unique([channelId, alertFingerprint])`) makes any cadence safe — every (channel, alert) tuple pings at most once regardless of how often the cron fires. Aggressive cadences waste compute but never double-page.
+
+**Two cadences, one channel chooses one.** A channel is either `IMMEDIATE` (per-alert ping, every 15m business hours) or `DIGEST_DAILY` (one batched message at 09:00 UTC summarizing every fresh alert since the last successful digest). Pick the mode when you create the channel; flip it later from the channel's edit panel. Same dedupe table backs both modes — flipping a channel mid-day moves it to the new cadence on the next cron tick.
 
 ### Wire a Slack channel
 
@@ -178,6 +184,7 @@ Vercel cron times are **UTC**. Adjust the hours window if your team isn't on EU/
    - **Channel name** — operator-facing label, e.g. `#finance close alerts`
    - **Slack webhook URL** — create at https://api.slack.com/messaging/webhooks; copy the full URL (starts with `https://hooks.slack.com/services/T.../B.../...`). The form masks the value as you type.
    - **Severity filter** — pick `high` only, or leave blank for all severities.
+   - **Cadence** — `Immediate` (pings every 15m business hours, one Slack message per alert) or `Daily digest` (one batched message at 09:00 UTC summarizing all fresh alerts). Defaults to Immediate.
 5. Click **Add channel**. The URL is encrypted under `WEBHOOK_ENCRYPTION_KEY` before the row lands in the DB.
 6. Click **Test** on the new row. A diagnostic message lands in the Slack channel ("Test message from ledger-core notification channel ..."). If you see `SLACK_REJECTED` or `DECRYPT_FAILED`, the audit log under **Admin → Audit log** carries the diagnostic — filter by `resource=NotificationChannel`.
 

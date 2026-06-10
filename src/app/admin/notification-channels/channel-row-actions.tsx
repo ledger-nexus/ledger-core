@@ -16,17 +16,20 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 type Severity = "high" | "medium" | "low";
+type Mode = "IMMEDIATE" | "DIGEST_DAILY";
 
 export default function ChannelRowActions({
   channelId,
   enabled,
   name,
   severityFilter,
+  mode,
 }: {
   channelId: string;
   enabled: boolean;
   name: string;
   severityFilter: string[];
+  mode: Mode;
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{
@@ -39,6 +42,7 @@ export default function ChannelRowActions({
   const [editSeverities, setEditSeverities] = useState<Severity[]>(
     severityFilter as Severity[]
   );
+  const [editMode, setEditMode] = useState<Mode>(mode);
 
   function doTest() {
     setMessage(null);
@@ -83,6 +87,7 @@ export default function ChannelRowActions({
           JSON.stringify([...severityFilter].sort())
             ? editSeverities
             : undefined,
+        mode: editMode !== mode ? editMode : undefined,
       });
       if (!r.ok) {
         setMessage({ kind: "err", text: r.error });
@@ -194,6 +199,36 @@ export default function ChannelRowActions({
                     }
                   >
                     {s}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] uppercase tracking-wide text-ink-500">
+              Cadence
+            </label>
+            <div className="flex gap-1.5">
+              {(
+                [
+                  { value: "IMMEDIATE" as Mode, label: "Immediate" },
+                  { value: "DIGEST_DAILY" as Mode, label: "Daily digest" },
+                ]
+              ).map((opt) => {
+                const active = editMode === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setEditMode(opt.value)}
+                    disabled={pending}
+                    className={
+                      active
+                        ? "rounded-full bg-ink-900 px-2.5 py-0.5 text-[11px] font-medium text-white"
+                        : "rounded-full border border-ink-200 px-2.5 py-0.5 text-[11px] text-ink-700 hover:bg-ink-50"
+                    }
+                  >
+                    {opt.label}
                   </button>
                 );
               })}

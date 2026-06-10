@@ -98,9 +98,12 @@ export async function dispatchCloseAlerts(
   const maxPeriodsPerTenant =
     opts.maxPeriodsPerTenant ?? DEFAULT_MAX_PERIODS_PER_TENANT;
 
-  // Pull all enabled SLACK channels at once; group by tenant.
+  // Pull all enabled SLACK channels in IMMEDIATE mode; group by
+  // tenant. DIGEST_DAILY channels are handled by a separate cron
+  // route (close-alerts-digest) so the two cadences don't fight
+  // over the same dedupe rows mid-tick.
   const channels = await prisma.notificationChannel.findMany({
-    where: { type: "SLACK", enabled: true },
+    where: { type: "SLACK", enabled: true, mode: "IMMEDIATE" },
     select: {
       id: true,
       tenantId: true,
