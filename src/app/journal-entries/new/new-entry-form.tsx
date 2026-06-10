@@ -222,6 +222,7 @@ export function NewEntryForm({
                       placeholder="Type code or name"
                       className="min-w-[260px] font-mono"
                       autoComplete="off"
+                      data-je-line-account
                     />
                   </TD>
                   <TD>
@@ -245,6 +246,35 @@ export function NewEntryForm({
                     <Input
                       value={line.amount}
                       onChange={(e) => updateLine(line.uid, { amount: e.target.value })}
+                      onKeyDown={(e) => {
+                        // Tab from the LAST row's Amount cell appends a
+                        // new line of the same side. Shift+Tab is
+                        // navigation-backwards; leave it alone. Letting
+                        // the browser take Tab AFTER append focuses the
+                        // ✕ Remove button by default — we explicitly
+                        // focus the new line's account select with a
+                        // microtask after React re-renders.
+                        if (
+                          e.key === "Tab" &&
+                          !e.shiftKey &&
+                          line.uid === lines[lines.length - 1].uid
+                        ) {
+                          e.preventDefault();
+                          addLine(line.side);
+                          // Focus the new last row's first focusable
+                          // input after React commits. The new row's
+                          // <select> is named `line-accountCode` —
+                          // querySelectorAll inside the tbody returns
+                          // the rendered rows in order.
+                          requestAnimationFrame(() => {
+                            const accounts = document.querySelectorAll<HTMLInputElement>(
+                              'input[data-je-line-account]'
+                            );
+                            const last = accounts[accounts.length - 1];
+                            last?.focus();
+                          });
+                        }
+                      }}
                       placeholder="0.00"
                       inputMode="decimal"
                       className="text-right font-mono tabular-nums"
