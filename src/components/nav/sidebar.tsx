@@ -32,6 +32,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
     label: "Close",
     items: [
       { href: "/periods", label: "Periods", hint: "open / closed" },
+      { href: "/close/flux", label: "Flux analysis", hint: "variance" },
       { href: "/reports/month-end", label: "Month-end review", hint: "TB + IS + BS" },
     ],
   },
