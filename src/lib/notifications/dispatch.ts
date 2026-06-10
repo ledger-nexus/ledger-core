@@ -315,10 +315,14 @@ async function sendOne(
       sendError: result.ok
         ? null
         : // Mask any URL that might have leaked into the error string.
-          // We never log webhook URLs even on failure.
-          result.error.includes("hooks.slack.com")
-          ? result.error.replace(/https?:\/\/hooks\.slack\.com\/[^\s)]+/g, maskWebhookUrl(plaintextUrl))
-          : result.error,
+          // We never log webhook URLs even on failure. The regex is the
+          // authoritative scrub — we don't pre-gate with .includes()
+          // because that opens a substring-sanitization gap CodeQL
+          // flags (and the regex is a no-op when there's no match).
+          result.error.replace(
+            /https?:\/\/hooks\.slack\.com\/services\/[^\s)]+/g,
+            maskWebhookUrl(plaintextUrl)
+          ),
     },
   });
 
