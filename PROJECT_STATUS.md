@@ -6,7 +6,7 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-09
+**Last updated:** 2026-06-10
 
 **Current state:** **BlackLine arc just shipped.** Phase 1-4 (22 PRs across 23 commits, +15,847 LOC) ships F1000-grade close management on top of the v1.0 substrate: Account Reconciliations with state machine + signoff + attachments + sub-ledger auto-pull (Phase 1, 8 PRs), Close Task Calendar with dependency DAG + cycle prevention + 50 canonical templates (Phase 2, 6 PRs), Flux / Variance Analysis with frozen-snapshot evidence + materiality cascade (Phase 3, 4 PRs), and the cross-pillar integration capstone with `/close` dashboard + `/close/alerts` cross-pillar feed + `/close/retrospective` process-improvement metrics (Phase 4, 4 PRs — PR 4/4 is this status amendment).
 
@@ -186,14 +186,51 @@ The portfolio's biggest single arc: 22 PRs across 4 phases, +15,847 LOC, 15 new 
 
 **Verified:** 528 / 559 tests pass (98.75%). The 7 failing tests are pre-existing infrastructure flake in `tests/tenant-context.test.ts:406` (audit_log append-only constraint blocks tenant cleanup → leak); none of the 15 new arc test files are in the failing set. Arc-owned tests verified passing per-PR.
 
-### v1.19+ — ergonomics + polish (deferred)
+### v1.19 — Close-task state history (shipped 2026-06-10)
+
+Closes the documented v1.18 limitation in `src/lib/close/retrospective.ts`:
+recurring-blockers was current-snapshot only, so a template that hit
+BLOCKED four periods ago and was since unblocked would not appear.
+Now the rollup reads from an append-only state-change log and counts
+ever-blocked, not currently-blocked — the actual signal a controller
+wants when planning process improvements.
+
+- [x] **PR 1/3** — Schema + migration 0011 + Server Action wiring. New
+  `CloseTaskStateChange` table with append-only DB trigger (cascade
+  carve-out via `pg_trigger_depth()` so tenant teardown still works).
+  All 5 status-mutating actions (`startTask`, `completeTask`,
+  `blockTask`, `unblockTask`, `waiveTask`) wrap their update +
+  state-change insert in a single `$transaction`. Bulk
+  `instantiateCalendarForPeriod` writes one INITIAL row per task via
+  `createMany`. Migration backfills an INITIAL row for every
+  pre-existing task with the current status as the baseline
+  (`changedById = null` documents "pre-0011 backfill").
+- [x] **PR 2/3** — Replay walker integration. `getCloseRetrospective`
+  recurring-blockers section rewritten as a two-query strategy:
+  fetch tasks in window + fetch state-change rows where
+  `toStatus = BLOCKED` for those task ids, then bucket by templateKey
+  using a `Set` of ever-blocked task ids. Same return shape — UI
+  code keeps working. Distinct task ids (not transitions) — a
+  task that hit BLOCKED twice counts as ONE.
+- [x] **PR 3/3** — UI timeline on `/close/tasks/[id]` + this status
+  doc amendment. State-change card rendered chronologically below
+  Details, above Comments. Each row shows `fromStatus → toStatus`,
+  actor, timestamp, and reason (when populated). Backfill rows
+  surface "system backfill (pre-0011)" so the auditor can distinguish
+  baseline rows from live transitions.
+
+**Verified:** 14 new tests (8 schema + wiring, 6 replay integration), plus
+1 fixture update on the pre-existing recurring-blockers test for the
+behavior change. Total 13/13 retrospective tests pass; total 8/8
+state-history tests pass.
+
+### v1.20+ — ergonomics + polish (deferred)
 - [ ] Keyboard shortcut for "+ Add line" (Tab from last cell)
 - [ ] Recurring journal entry templates
 - [ ] AR / AP aging with sortable columns
 - [ ] Multi-currency revaluation
 - [ ] FX gain/loss accounts wired into journal lines properly
 - [ ] Retrospective CSV export — controller may want numbers for the board deck
-- [ ] Close-task state-history table — current recurring-blockers helper is current-snapshot only; a state-change audit replay would surface ever-blocked templates
 - [ ] Slack notifier wired to `/api/close/alerts` — daily digest of high-severity items
 
 ---
@@ -247,6 +284,15 @@ The portfolio's biggest single arc: 22 PRs across 4 phases, +15,847 LOC, 15 new 
 - **Severity matrix for cross-pillar alerts** — high (immediate eyes) / medium (slipping but not stuck) / low (informational). Tuned for a 5-7 day close window: recon EXCEPTION = high; recon PREPARED ≥2d stale = medium; task BLOCKED + required = high; flux statement NEEDS_COMMENT ≥3d = high. The aging thresholds are the controller's institutional knowledge.
 - **Retrospective metrics are read-only and lookback-bounded** — `getCloseRetrospective(prisma, scope, lookbackPeriods, targetDays)`. Lookback clamped [3, 36] periods; target clamped [1, 30] days. Recurring-blockers is current-snapshot (no state-history table yet); doc'd as accepted v1.18 limitation, candidate for v1.19+ enhancement when an `audit_log` replay walker lands.
 - **Close-task templates use `defaultDependsOnKeys` (not ids)** — instantiation resolves keys → ids at the tenant level. Reason: re-seeding against a fresh tenant gives matching dependency wiring without UUID juggling. Same pattern as the QBO/NS mapper lineage triples. The portability dividend.
+
+### Close-task state-history decisions (2026-06-10)
+
+- **Append-only DB trigger with `pg_trigger_depth()` cascade carve-out** — same as `audit_log`, but the FK chain `close_task → close_task_state_change` would deadlock with a strict refuse-all-DELETE trigger when a tenant tears down. Solution: trigger checks `pg_trigger_depth()` and lets cascade-context deletes through (depth > 1). Direct DELETE from a client query is always depth = 1 and stays blocked. SOC 2 audit-trail property preserved; right-to-erasure still works.
+- **Nullable `changedById` is a deliberate concession to the backfill** — the migration can't invent an actor for historical rows. Schema permits null; the `recordStateChange` helper requires non-null on live writes. The UI surfaces "system backfill (pre-0011)" so the auditor can distinguish baseline rows from live transitions. The alternative — backfilling to a "system user" id — would have been a lie.
+- **State-change writes inside `$transaction` with the close-task update** — atomic. A failed insert rolls the status update back too. The audit_log call stays outside the transaction (matches the existing pattern across the codebase; audit is best-effort).
+- **`recurringBlockers` semantics changed from current-snapshot to ever-blocked** — the return shape stayed identical so the UI didn't need touching, but the meaning changed. Documented in the docstring + commit message. The fixture update on the pre-existing test was unavoidable — the test was implicitly relying on snapshot semantics; under the new contract it had to mint the matching state-change row by hand because it created the task via raw Prisma, bypassing the action layer.
+- **`createMany` for INITIAL rows on bulk instantiation** — one round trip for N tasks instead of N transactions. Append-only trigger allows bulk INSERT (only UPDATE/DELETE blocked), so this is clean.
+- **`reason` populated only for BLOCKED + WAIVED** — start/complete/unblock leave it null. Reduces noise; captures the audit-relevant signal. The block reason is the most-asked-about field when reviewing close history.
 
 ---
 
