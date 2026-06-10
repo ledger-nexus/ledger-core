@@ -705,8 +705,12 @@ export async function instantiateCalendarForPeriod(
   // those that have deps in a second pass.
   const toCreate = templates.filter((t) => !existingKeys.has(t.key));
 
-  // First pass: createMany with empty dependsOnIds. Returns count, not
-  // ids, so we need a follow-up findMany to build the key→id map.
+  // Wrap ALL write steps in one transaction so a partial failure
+  // can't leave tasks without their initial state-change rows.
+  // Pre-2026-06-10 this ran as four separate awaits — fresh-eyes
+  // review caught the atomicity gap: if state-change createMany failed
+  // after the task createMany committed, tasks would exist without an
+  // audit trail, silently corrupting the retrospective rollup.
   const createData: Prisma.CloseTaskCreateManyInput[] = toCreate.map(
     (t) => ({
       tenantId: tenant.id,
@@ -730,66 +734,73 @@ export async function instantiateCalendarForPeriod(
       dependsOnIds: [],
     })
   );
-  const createResult = await prisma.closeTask.createMany({
-    data: createData,
-    skipDuplicates: false,
-  });
 
-  // Second pass: build the key→id map (now including pre-existing
-  // tasks from earlier instantiations) and update rows that have
-  // dependsOnKeys → dependsOnIds.
-  const allTasksForPeriod = await prisma.closeTask.findMany({
-    where: {
-      tenantId: tenant.id,
-      periodId: period.id,
-      templateKey: { in: templates.map((t) => t.key) },
-    },
-    select: { id: true, templateKey: true },
-  });
-  const keyToId = new Map<string, string>();
-  for (const t of allTasksForPeriod) {
-    if (t.templateKey) keyToId.set(t.templateKey, t.id);
-  }
+  const { createResult, allTasksForPeriod } = await prisma.$transaction(
+    async (tx) => {
+      // First pass: createMany. Returns count, not ids.
+      const createResult = await tx.closeTask.createMany({
+        data: createData,
+        skipDuplicates: false,
+      });
 
-  // Update each just-created task with resolved dependsOnIds. Templates
-  // without deps stay at [] (the default).
-  for (const t of toCreate) {
-    if (t.defaultDependsOnKeys.length === 0) continue;
-    const resolvedIds: string[] = [];
-    for (const depKey of t.defaultDependsOnKeys) {
-      const id = keyToId.get(depKey);
-      if (id) resolvedIds.push(id);
-      // Missing dep key → silently dropped (advisory dangling).
+      // Second pass: findMany to build the key→id map (now including
+      // any pre-existing tasks from earlier instantiations).
+      const allTasksForPeriod = await tx.closeTask.findMany({
+        where: {
+          tenantId: tenant.id,
+          periodId: period.id,
+          templateKey: { in: templates.map((t) => t.key) },
+        },
+        select: { id: true, templateKey: true },
+      });
+      const keyToId = new Map<string, string>();
+      for (const t of allTasksForPeriod) {
+        if (t.templateKey) keyToId.set(t.templateKey, t.id);
+      }
+
+      // Third pass: resolve dependsOnKeys → dependsOnIds on the rows
+      // that have predecessors. Templates without deps stay at [] (the
+      // createMany default).
+      for (const t of toCreate) {
+        if (t.defaultDependsOnKeys.length === 0) continue;
+        const resolvedIds: string[] = [];
+        for (const depKey of t.defaultDependsOnKeys) {
+          const id = keyToId.get(depKey);
+          if (id) resolvedIds.push(id);
+          // Missing dep key → silently dropped (advisory dangling).
+        }
+        if (resolvedIds.length === 0) continue;
+        const newTaskId = keyToId.get(t.key);
+        if (!newTaskId) continue;
+        await tx.closeTask.update({
+          where: { id: newTaskId },
+          data: { dependsOnIds: resolvedIds },
+        });
+      }
+
+      // Fourth pass: INITIAL state-change row per newly-created task.
+      // Bundled into the same transaction so a failure here rolls the
+      // task creation back too. Append-only trigger lets the bulk
+      // INSERT through (only UPDATE/DELETE blocked).
+      const newTaskIds = toCreate
+        .map((t) => keyToId.get(t.key))
+        .filter((id): id is string => !!id);
+      if (newTaskIds.length > 0) {
+        await tx.closeTaskStateChange.createMany({
+          data: newTaskIds.map((id) => ({
+            tenantId: tenant.id,
+            closeTaskId: id,
+            fromStatus: null,
+            toStatus: "NOT_STARTED" as const,
+            reason: null,
+            changedById: user.id,
+          })),
+        });
+      }
+
+      return { createResult, allTasksForPeriod };
     }
-    if (resolvedIds.length === 0) continue;
-    const newTaskId = keyToId.get(t.key);
-    if (!newTaskId) continue;
-    await prisma.closeTask.update({
-      where: { id: newTaskId },
-      data: { dependsOnIds: resolvedIds },
-    });
-  }
-
-  // Third pass: state-history initial rows (fromStatus=null) for
-  // each just-created task. createMany lands them all in one round
-  // trip — append-only trigger lets the bulk-insert through. We can't
-  // bundle this with the createMany at the top because we need the
-  // task ids, which only land after the find-by-templateKey above.
-  const newTaskIds = toCreate
-    .map((t) => keyToId.get(t.key))
-    .filter((id): id is string => !!id);
-  if (newTaskIds.length > 0) {
-    await prisma.closeTaskStateChange.createMany({
-      data: newTaskIds.map((id) => ({
-        tenantId: tenant.id,
-        closeTaskId: id,
-        fromStatus: null,
-        toStatus: "NOT_STARTED" as const,
-        reason: null,
-        changedById: user.id,
-      })),
-    });
-  }
+  );
 
   // ONE aggregate audit row per invocation.
   await auditPrivilegedAction({
