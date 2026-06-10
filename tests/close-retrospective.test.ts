@@ -58,11 +58,25 @@ beforeAll(async () => {
   if (!book) throw new Error("Need US_GAAP book.");
   bookId = book.id;
 
-  const cal = await prisma.fiscalCalendar.findFirst({
-    where: { entityId },
+  // Mint a DEDICATED calendar for this suite (not the shared Northwind
+  // one) so our period ordinals can't collide. The earlier "reuse the
+  // Northwind calendar + random ordinal in 700..792" scheme was flaky:
+  // the per-i random ranges OVERLAP within a single run, and the shared
+  // calendar accumulates periods across runs on the persistent CI DB —
+  // both produce P2002 on (calendarId, ordinal). A fresh calendar scopes
+  // ordinals to rows nobody else touches. It still belongs to the
+  // Northwind entity, so the (entity, book)-scoped retrospective query
+  // sees these periods exactly as before.
+  const cal = await prisma.fiscalCalendar.create({
+    data: {
+      tenantId,
+      entityId,
+      code: `${SUFFIX}-CAL`.slice(0, 32),
+      name: "Retrospective Test Calendar",
+      periodFrequency: "MONTHLY",
+    },
     select: { id: true },
   });
-  if (!cal) throw new Error("Need a calendar.");
   calendarId = cal.id;
 
   // Mint three fresh periods to isolate the test from other suites.
@@ -79,10 +93,9 @@ beforeAll(async () => {
         tenantId,
         calendarId,
         code: spec.code,
-        // Pick ordinals in a distant range to avoid collisions with
-        // any other test suite that may have created periods on the
-        // same calendar.
-        ordinal: 700 + i + Math.floor(Math.random() * 90),
+        // Deterministic ordinals — collision-proof now that the calendar
+        // is dedicated to this suite.
+        ordinal: i + 1,
         startsOn: new Date(spec.starts),
         endsOn: new Date(spec.ends),
       },
@@ -121,6 +134,14 @@ afterAll(async () => {
       await prisma.period.delete({ where: { id: pid } });
     } catch {
       /* leftover FKs from earlier failing runs — leak */
+    }
+  }
+  // Remove the dedicated calendar once its periods are gone.
+  if (calendarId) {
+    try {
+      await prisma.fiscalCalendar.delete({ where: { id: calendarId } });
+    } catch {
+      /* periods may have leaked above — leave the calendar too */
     }
   }
   await prisma.$disconnect();
