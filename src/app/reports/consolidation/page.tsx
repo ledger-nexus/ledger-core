@@ -40,13 +40,19 @@ export default async function ConsolidationPage({
   // sensible roots. Tenant-scoped (Phase 4c): only show the current
   // tenant's entities so consolidation can't cross tenant boundaries.
   const tenant = await getCurrentTenant();
-  const allEntities = tenant
-    ? await prisma.legalEntity.findMany({
-        where: { tenantId: tenant.id },
-        select: { id: true, code: true, name: true, parentEntityId: true },
-        orderBy: { code: "asc" },
-      })
-    : [];
+  if (!tenant) {
+    return (
+      <EmptyState
+        title="No tenant available"
+        description="Sign in and select a tenant with at least one entity before viewing reports."
+      />
+    );
+  }
+  const allEntities = await prisma.legalEntity.findMany({
+    where: { tenantId: tenant.id },
+    select: { id: true, code: true, name: true, parentEntityId: true },
+    orderBy: { code: "asc" },
+  });
   const parentIdSet = new Set(allEntities.map((e) => e.parentEntityId).filter(Boolean) as string[]);
   const rootCandidates = allEntities.filter((e) => parentIdSet.has(e.id));
 
@@ -64,10 +70,14 @@ export default async function ConsolidationPage({
     );
   }
 
+  // tenantId from the session, never from the URL: ?root= is
+  // client-controlled, and without the tenant pin it could name another
+  // tenant's entity code and consolidate that tenant's books.
   const report = await getConsolidatedTrialBalance(prisma, {
     rootEntityCode: root,
     bookCode: scope.bookCode,
     asOf: new Date(asOf),
+    tenantId: tenant.id,
   });
 
   const csvUrl = `/api/reports/consolidation/csv?root=${root}&asOf=${asOf}`;

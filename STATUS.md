@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session 2026-06-11-consolidation-tenant-scope · 2026-06-11
+- **Scope**: Tenant-scoped three unscoped lookups in the consolidation report path (account-metadata subtype/isContra bleed into IC elimination, client-controlled `?root=` cross-tenant read, `getTrialBalance` shared-account scan) + adversarial regression tests + deficiency log #15 (Closed) / #16 (Open: same pattern in IS/BS/cash-flow/M-3)
+- **Branch**: `fix/consolidation-tenant-scoped-lookups` (pushed; PR open against main)
+- **Outcome**: consolidation + tenant-isolation suites green (17/17), tsc clean; regression tests verified to fail pre-fix. Follow-up for the remaining report scans tracked as deficiency #16.
+
 <!--
 When a session finishes work, move its block here with a final timestamp.
 Keep the last ~10 entries; trim older ones to keep this file under 200 lines.

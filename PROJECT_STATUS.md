@@ -414,6 +414,13 @@ The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluatio
 
 ---
 
+### Consolidation tenant-scoping fix (2026-06-11)
+
+- **Three unscoped lookups in the consolidation path closed** (deficiency #15, Closed). The account-metadata `findMany` in `getConsolidatedTrialBalance` matched by code alone — a same-code account in another tenant carrying an IC subtype could eliminate a real balance from the consolidated TB (subtype drives `ALL_IC_SUBTYPES` classification) and `isContra` would flip the sign. Now pinned to `root.tenantId`. The root-entity `findFirst` takes an optional `tenantId` pin; both UI callers (`/reports/consolidation` page + CSV route) pass the session tenant because `?root=` is client-controlled — cross-tenant codes now fail closed. Per-entity `getTrialBalance` calls pass `tenantId` too.
+- **`getTrialBalance`'s account scan was the deeper hole** — shared accounts (`entityId=null`) exist per tenant, and the unfiltered `OR: [{entityId: null}, {entityId}]` scan pulled every tenant's shared chart: zero-row code/name leak, plus same-code shadowing via the by-code dedup (the regression test caught this when the poisoned account returned debit 0 for a real $1,000 balance). `resolveEntityBook` now returns the entity's `tenantId` and the scan filters on it — always, not just when the caller passes `tenantId`.
+- **Same pattern still open in IS / BS / cash flow / M-3 detail** — logged as deficiency #16 (Open). Lower severity: no elimination logic rides on those scans and the entity is session-derived on those pages, but the zero-row leak + name shadowing is the same. Fix is mechanical now that `resolveEntityBook` returns `entityTenantId`.
+- **Regression tests are adversarial, not just structural** — `tests/consolidation.test.ts` mints a unique per-run account code in the default tenant AND a poisoned same-code IC-subtype/contra account in a second tenant, then asserts the balance survives consolidation unclassified. Lesson from the first draft: don't assert against the shared chart's pre-existing rows (the persistent test DB's `1000` had `subtype: null`, not the chart's `CASH`) — mint your own. Second lesson re-confirmed: `app_user` hard-deletes in cleanup need `withAuditLogMutable` (deficiency #14's XX000 sharp edge).
+
 ## Notes for the next session
 
 - Architecture canon: `docs/universal-schema.md`. Schema visual: `docs/schema-erd.md`. Both are kept in sync with the actual schema.

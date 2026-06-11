@@ -105,6 +105,15 @@ export async function getConsolidatedTrialBalance(
     rootEntityCode: string;
     bookCode?: string;
     asOf: Date;
+    /**
+     * Tenant the root entity must belong to. UI/API callers MUST pass
+     * this (from the session, never from client input) — the root code
+     * arrives as a query param, and without the tenant filter a caller
+     * could name another tenant's entity code and consolidate that
+     * tenant's books. Omitting it falls back to the legacy global
+     * lookup; substrate seeds + single-tenant tests omit this.
+     */
+    tenantId?: string;
   }
 ): Promise<ConsolidationReport> {
   const bookCode = input.bookCode ?? "US_GAAP";
@@ -114,7 +123,9 @@ export async function getConsolidatedTrialBalance(
   // duplicate codes across tenants, an unscoped findMany would pull
   // entities from other tenants into the consolidation.
   const root = await prisma.legalEntity.findFirst({
-    where: { code: input.rootEntityCode },
+    where: input.tenantId
+      ? { tenantId: input.tenantId, code: input.rootEntityCode }
+      : { code: input.rootEntityCode },
     select: {
       id: true,
       code: true,
@@ -158,11 +169,18 @@ export async function getConsolidatedTrialBalance(
   }
 
   // Get TB per entity. Some entities (the parent) may have no activity —
-  // their TB is empty and contributes nothing.
+  // their TB is empty and contributes nothing. tenantId pins each TB's
+  // entity resolution to the root's tenant — entity codes are only
+  // unique per tenant (Phase 4b), so an unscoped lookup could resolve a
+  // same-code entity in another tenant.
   const perEntityTbs = await Promise.all(
     included.map(async (e) => ({
       entity: e,
-      tb: await getTrialBalance(prisma, { entityCode: e.code, bookCode }, input.asOf),
+      tb: await getTrialBalance(
+        prisma,
+        { entityCode: e.code, bookCode, tenantId: root.tenantId },
+        input.asOf
+      ),
     }))
   );
 
@@ -196,8 +214,12 @@ export async function getConsolidatedTrialBalance(
   }
 
   // Pull account metadata (subtype + isContra) for classification.
+  // Scoped to the root's tenant: account codes are only unique per
+  // tenant, and subtype drives IC elimination — a same-code account in
+  // another tenant with an IC subtype would otherwise zero out a real
+  // balance here (and isContra would flip the displayed sign).
   const accountMeta = await prisma.account.findMany({
-    where: { code: { in: Array.from(aggregates.keys()) } },
+    where: { tenantId: root.tenantId, code: { in: Array.from(aggregates.keys()) } },
     select: { code: true, subtype: true, isContra: true },
   });
   const metaByCode = new Map(accountMeta.map((a) => [a.code, a]));
