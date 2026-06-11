@@ -167,10 +167,15 @@ describe("NS multi-sub roundtrip (import → export)", () => {
     // 2. Export back in multi mode. Reconstructs the Subsidiary array
     //    from LegalEntity.extensions.nsSourcePayload + routes JEs from
     //    every discovered sub entity.
+    // _meta is optional on NsExport; the fixture always carries it.
+    // Assert-and-narrow (the portfolio's expectResponse pattern) rather
+    // than a non-null assertion.
+    const meta = original._meta;
+    if (!meta) throw new Error("fixture missing _meta");
     const exported = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta.exportedAt),
+      exportedAt: new Date(meta.exportedAt),
     });
 
     // 3. Subsidiary count + currency tie out before the full diff so a
