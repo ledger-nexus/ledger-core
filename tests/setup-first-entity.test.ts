@@ -42,6 +42,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { setupFirstEntityAction } from "@/app/actions/setup-first-entity";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -86,7 +87,9 @@ afterAll(async () => {
   await prisma.period.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   await prisma.recordEvent.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.tenant.deleteMany({ where: { id: tenant.id } });
@@ -102,8 +105,10 @@ beforeEach(async () => {
   await prisma.period.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
     where: { tenantId: tenant.id, action: "setup-first-entity" },
+  });
   });
   mockCookieStore.clear();
 });
