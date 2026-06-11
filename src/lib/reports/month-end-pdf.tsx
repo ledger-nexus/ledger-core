@@ -31,7 +31,28 @@ export interface MonthEndPdfProps {
   book: { code: string; name: string };
   period: { code: string; startsOn: string; endsOn: string };
   close: { closedAt: string; closedBy: string | null } | null;
-  tieOuts: { tbTies: boolean; bsTies: boolean };
+  tieOuts: {
+    tbTies: boolean;
+    bsTies: boolean;
+    // Recons signed off — BlackLine arc Phase 1 PR 8. null when no
+    // recons opened for the period (renders as "n/a"). true = all
+    // terminal (RECONCILED/WAIVED). false = anything outstanding.
+    reconsAllDone: boolean | null;
+    reconsDone: number;
+    reconsTotal: number;
+  };
+  // Per-status histogram — null when no recons opened.
+  reconRollup: {
+    total: number;
+    reconciled: number;
+    waived: number;
+    prepared: number;
+    inProgress: number;
+    open: number;
+    exception: number;
+    done: number;
+    pctDone: number;
+  } | null;
   incomeStatement: {
     revenue: { code: string; name: string; amount: string }[];
     expenses: { code: string; name: string; amount: string }[];
@@ -241,12 +262,25 @@ export function MonthEndDocument(props: MonthEndPdfProps) {
           <Text style={tieOuts.bsTies ? styles.tieOutOk : styles.tieOutFail}>
             {tieOuts.bsTies ? "✓" : "✗"} Balance sheet A = L + E
           </Text>
+          {tieOuts.reconsAllDone !== null && (
+            <Text
+              style={
+                tieOuts.reconsAllDone ? styles.tieOutOk : styles.tieOutFail
+              }
+            >
+              {tieOuts.reconsAllDone ? "✓" : "✗"} Recons signed off (
+              {tieOuts.reconsDone}/{tieOuts.reconsTotal})
+            </Text>
+          )}
         </View>
 
         <Text style={styles.h2}>Contents</Text>
         <Text>1. Income statement</Text>
         <Text>2. Balance sheet</Text>
         <Text>3. Trial balance</Text>
+        {props.reconRollup && (
+          <Text>4. Account reconciliations</Text>
+        )}
         <Footer {...footerProps} />
       </Page>
 
@@ -423,6 +457,52 @@ export function MonthEndDocument(props: MonthEndPdfProps) {
         </View>
         <Footer {...footerProps} />
       </Page>
+
+      {/* ─── Account reconciliations (BlackLine arc Phase 1 PR 8) ── */}
+      {/* Only rendered when at least one recon exists for the period —
+          empty periods (first-use) skip the section. */}
+      {props.reconRollup && (
+        <Page size="LETTER" style={styles.page}>
+          <Text style={styles.h1}>Account reconciliations</Text>
+          <Text style={styles.meta}>
+            {props.reconRollup.done} of {props.reconRollup.total} signed off (
+            {props.reconRollup.pctDone}%) ·{" "}
+            {props.entity.code} · {props.book.code} ·{" "}
+            {props.period.code}
+          </Text>
+          <View style={{ marginTop: 12 }}>
+            <View style={styles.thead}>
+              <Text style={styles.colCode}>Status</Text>
+              <Text style={styles.colAmount}>Count</Text>
+              <Text style={styles.colAmount}>% of total</Text>
+            </View>
+            {[
+              { label: "RECONCILED", count: props.reconRollup.reconciled },
+              { label: "WAIVED", count: props.reconRollup.waived },
+              { label: "PREPARED", count: props.reconRollup.prepared },
+              { label: "IN_PROGRESS", count: props.reconRollup.inProgress },
+              { label: "OPEN", count: props.reconRollup.open },
+              { label: "EXCEPTION", count: props.reconRollup.exception },
+            ].map(({ label, count }) => (
+              <View key={label} style={styles.trow}>
+                <Text style={styles.colCode}>{label}</Text>
+                <Text style={styles.colAmount}>{count}</Text>
+                <Text style={styles.colAmount}>
+                  {props.reconRollup!.total === 0
+                    ? "0%"
+                    : `${Math.round((count / props.reconRollup!.total) * 100)}%`}
+                </Text>
+              </View>
+            ))}
+            <View style={styles.trowTotal}>
+              <Text style={styles.colCode}>TOTAL</Text>
+              <Text style={styles.colAmount}>{props.reconRollup.total}</Text>
+              <Text style={styles.colAmount}>100%</Text>
+            </View>
+          </View>
+          <Footer {...footerProps} />
+        </Page>
+      )}
     </Document>
   );
 }

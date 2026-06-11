@@ -55,6 +55,54 @@ function postToBooksFactory(prisma: PrismaClient) {
   };
 }
 
+// ---- FX rates -------------------------------------------------------
+
+// Illustrative H1 2026 month-end CLOSE rates + period AVG rates, stored
+// foreign->USD (EUR->USD, GBP->USD). resolveFxRate inverts on demand for
+// the reverse direction, so we only seed one leg. CLOSE drives balance-
+// sheet revaluation; AVG translates the P&L. Idempotent: keyed on the
+// FxRate @@unique([from, to, asOf, rateType]) composite.
+async function seedFxRates(prisma: PrismaClient) {
+  // [from, to, YYYY-MM-DD, rateType, rate]
+  const rates: Array<
+    [string, string, string, "SPOT" | "AVG" | "CLOSE" | "HISTORICAL", string]
+  > = [
+    // EUR->USD — euro strengthens through H1.
+    ["EUR", "USD", "2026-01-31", "CLOSE", "1.0850"],
+    ["EUR", "USD", "2026-02-28", "CLOSE", "1.0910"],
+    ["EUR", "USD", "2026-03-31", "CLOSE", "1.0975"],
+    ["EUR", "USD", "2026-04-30", "CLOSE", "1.1020"],
+    ["EUR", "USD", "2026-05-31", "CLOSE", "1.1080"],
+    ["EUR", "USD", "2026-06-30", "CLOSE", "1.1150"],
+    ["EUR", "USD", "2026-06-30", "AVG", "1.1015"],
+    // GBP->USD.
+    ["GBP", "USD", "2026-03-31", "CLOSE", "1.2680"],
+    ["GBP", "USD", "2026-06-30", "CLOSE", "1.2810"],
+    ["GBP", "USD", "2026-06-30", "AVG", "1.2745"],
+  ];
+
+  for (const [from, to, asOf, rateType, rate] of rates) {
+    await prisma.fxRate.upsert({
+      where: {
+        fromCurrencyId_toCurrencyId_asOf_rateType: {
+          fromCurrencyId: from,
+          toCurrencyId: to,
+          asOf: new Date(asOf),
+          rateType,
+        },
+      },
+      create: {
+        fromCurrencyId: from,
+        toCurrencyId: to,
+        asOf: new Date(asOf),
+        rateType,
+        rate,
+      },
+      update: { rate },
+    });
+  }
+}
+
 // ---- Master data ----------------------------------------------------
 
 async function seedMasterData(prisma: PrismaClient) {
@@ -68,6 +116,18 @@ async function seedMasterData(prisma: PrismaClient) {
     create: { code: "EUR", name: "Euro", decimals: 2, symbol: "€" },
     update: {},
   });
+  await prisma.currency.upsert({
+    where: { code: "GBP" },
+    create: { code: "GBP", name: "Pound Sterling", decimals: 2, symbol: "£" },
+    update: {},
+  });
+
+  // FX rates — the first rates seeded into the dormant FxRate table.
+  // CLOSE rates at H1 2026 month-ends drive period-end revaluation; the
+  // AVG rates translate P&L. Stored EUR->USD / GBP->USD (foreign->
+  // functional); resolveFxRate inverts for the reverse direction. Rates
+  // are illustrative, not a live feed.
+  await seedFxRates(prisma);
 
   // Multi-tenancy: every entity belongs to a Tenant. Seeds belong to
   // the migration-created "default" tenant (the single-tenant fallback
@@ -151,6 +211,7 @@ async function seedAccounts(prisma: PrismaClient) {
         isContra: acct.isContra ?? false,
         isControlAccount: acct.isControlAccount ?? false,
         isBank: acct.isBank ?? false,
+        isMonetary: acct.isMonetary ?? false,
         subtype: acct.subtype,
       },
     });

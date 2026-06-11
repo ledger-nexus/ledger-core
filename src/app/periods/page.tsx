@@ -12,12 +12,14 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentTenant } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate } from "@/lib/utils/format";
 import PeriodActions from "./period-actions";
+import SeedTemplatesButton from "./seed-templates-button";
 
 export default async function PeriodsPage() {
   const scope = getScope();
@@ -79,8 +81,65 @@ export default async function PeriodsPage() {
     if (row.periodId) countByPeriod.set(row.periodId, row._count._all);
   }
 
+  // BlackLine arc Phase 2 PR 6 — close-task rollup per period. Tasks
+  // are tenant-scoped (no entity/book), so we groupBy(status) by
+  // periodId and aggregate in JS for the visible periods. One query
+  // for all periods instead of N per-period queries.
+  const tenant = await getCurrentTenant();
+  type TaskRollup = { total: number; done: number; pctDone: number };
+  const taskRollupByPeriod = new Map<string, TaskRollup>();
+  let templateCount = 0;
+  if (tenant) {
+    const visiblePeriodIds = periods.map((p) => p.id);
+    if (visiblePeriodIds.length > 0) {
+      const rows = await prisma.closeTask.groupBy({
+        by: ["periodId", "status"],
+        where: {
+          tenantId: tenant.id,
+          periodId: { in: visiblePeriodIds },
+        },
+        _count: { _all: true },
+      });
+      // Build per-period totals + terminal counts.
+      const tally = new Map<string, { total: number; terminal: number }>();
+      for (const r of rows) {
+        const cur = tally.get(r.periodId) ?? { total: 0, terminal: 0 };
+        cur.total += r._count._all;
+        if (r.status === "DONE" || r.status === "WAIVED") {
+          cur.terminal += r._count._all;
+        }
+        tally.set(r.periodId, cur);
+      }
+      for (const [pid, t] of tally) {
+        const pct = t.total === 0 ? 0 : Math.round((t.terminal / t.total) * 100);
+        taskRollupByPeriod.set(pid, {
+          total: t.total,
+          done: t.terminal,
+          pctDone: pct,
+        });
+      }
+    }
+    // Surface "no templates seeded yet" so the operator sees the
+    // first-run affordance.
+    templateCount = await prisma.closeTaskTemplate.count({
+      where: { tenantId: tenant.id, active: true },
+    });
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      {admin && templateCount === 0 && (
+        <Card>
+          <CardContent className="flex items-center justify-between gap-4">
+            <div className="text-sm text-ink-700">
+              <strong>First-run setup:</strong> seed the BlackLine-standard
+              close-task catalog (50 templates across 9 categories) so the
+              periods below can be instantiated with a checklist.
+            </div>
+            <SeedTemplatesButton />
+          </CardContent>
+        </Card>
+      )}
       <header>
         <h1 className="text-xl font-semibold text-ink-900">Periods</h1>
         <p className="text-sm text-ink-500">
@@ -126,6 +185,7 @@ export default async function PeriodsPage() {
                   <TH>Calendar</TH>
                   <TH>Range</TH>
                   <TH>JEs</TH>
+                  <TH>Tasks</TH>
                   <TH>Status</TH>
                   <TH>Closed by</TH>
                   <TH>Closed at</TH>
@@ -158,6 +218,25 @@ export default async function PeriodsPage() {
                         ) : (
                           <span className="text-ink-400">0</span>
                         )}
+                      </TD>
+                      <TD className="text-xs">
+                        {(() => {
+                          const r = taskRollupByPeriod.get(p.id);
+                          if (!r || r.total === 0) {
+                            return <span className="text-ink-400">—</span>;
+                          }
+                          const allDone = r.done === r.total;
+                          return (
+                            <Link
+                              href={`/close/tasks?period=${p.code}`}
+                              className="hover:underline"
+                            >
+                              <Badge tone={allDone ? "positive" : "warning"}>
+                                {r.done}/{r.total} · {r.pctDone}%
+                              </Badge>
+                            </Link>
+                          );
+                        })()}
                       </TD>
                       <TD>
                         {isClosed ? (

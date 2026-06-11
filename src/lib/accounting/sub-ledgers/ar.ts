@@ -12,13 +12,10 @@
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../post-journal";
+import { toDecimal } from "../../utils/decimal";
+import { isUuid } from "../../utils/uuid";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 
-function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
-  if (v === undefined || v === null) return new Decimal(0);
-  if (v instanceof Decimal) return v;
-  return new Decimal(v);
-}
 
 export interface OpenArItemInput {
   entityCode: string;
@@ -149,9 +146,6 @@ export async function openArItem(
   return { id: item.id, rulesResult };
 }
 
-function isUuid(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-}
 
 export interface ApplyArPaymentInput {
   openItemId: string;
