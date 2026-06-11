@@ -35,7 +35,11 @@ async function ensureCurrencies() {
   }
 }
 
-// Seed GBP→USD at 1.20 — DIFFERENT from the NS-supplied 1.50 below.
+// Seed GBP→USD CLOSE at 1.20 dated 2026-04-01 — AFTER the Northwind
+// seed's 2026-03-31 (1.2680) so resolveFxRate's on-or-before lookup
+// (invoice date 2026-04-15) deterministically picks THIS row, and at a
+// distinct asOf so the upsert never mutates the shared seed rows.
+// DIFFERENT from the NS-supplied 1.50 below.
 // If the importer ignores the NS rate and uses the seeded rate, the
 // test fails: the line lands at 1200 instead of 1500.
 async function ensureSeededRate() {
@@ -44,16 +48,16 @@ async function ensureSeededRate() {
       fromCurrencyId_toCurrencyId_asOf_rateType: {
         fromCurrencyId: "GBP",
         toCurrencyId: "USD",
-        asOf: new Date("2026-01-01"),
-        rateType: "SPOT",
+        asOf: new Date("2026-04-01"),
+        rateType: "CLOSE",
       },
     },
     create: {
       fromCurrencyId: "GBP",
       toCurrencyId: "USD",
-      asOf: new Date("2026-01-01"),
+      asOf: new Date("2026-04-01"),
       rate: "1.2000",
-      rateType: "SPOT",
+      rateType: "CLOSE",
     },
     update: { rate: "1.2000" },
   });
