@@ -15,6 +15,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
     label: "Master data",
     items: [
       { href: "/accounts", label: "Chart of accounts" },
+      { href: "/import/netsuite", label: "Import from NetSuite", hint: "single / multi-sub" },
     ],
   },
   {
