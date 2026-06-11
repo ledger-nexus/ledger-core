@@ -23,6 +23,7 @@ import type {
   NsCustomSegment,
   NsCustomFieldDefinition,
   NsExport,
+  NsAccountingBook,
   NsSubsidiary,
 } from "./types";
 
@@ -43,6 +44,26 @@ export interface ExportToNsInput {
     | { mode: "single"; entityCode: string }
     | { mode: "multi"; entityCodePrefix: string };
   bookCode?: string;
+  /**
+   * v0.9 NS Accounting Books Phase 4 — multi-book reverse export.
+   *
+   * Single mode (default, backward compat with v0.6 + Phase 3 single):
+   * exports JEs from ONE ledger-core book. Equivalent to `bookCode`.
+   *
+   * Multi mode: discovers JEs across EVERY mapped ledger-core book,
+   * groups them by source record id, reconstructs the AccountingBook
+   * array from the book mapping, and merges per-book JEs back into
+   * the source NS transaction. The frozen `sourcePayload` is identical
+   * across all per-book JE rows (it's the original NS transaction);
+   * the reverse exporter reads it from any one of them.
+   *
+   * `bookResolution` takes precedence over `bookCode` when both are set.
+   */
+  bookResolution?:
+    | { mode: "single"; bookCode: string }
+    | { mode: "multi"; bookMapping: Record<string, string> };
+  //                              ^ NS internalid → ledger-core book code
+  //                                (same shape as the importer's input)
   exportedAt?: Date;
 }
 
@@ -52,8 +73,34 @@ export async function exportToNs(
 ): Promise<NsExport> {
   const bookCode = input.bookCode ?? "US_GAAP";
 
-  // Resolve the exporter strategy. Single mode keeps the v0.6 behavior;
-  // multi mode discovers every NS-imported entity matching the prefix.
+  // v0.9 NS Books Phase 4 — resolve book strategy. Single mode (default,
+  // backward compat) queries JEs from ONE book. Multi mode queries
+  // across all mapped books and reconstructs the AccountingBook array.
+  const bookResolution =
+    input.bookResolution ??
+    ({ mode: "single", bookCode } as const);
+  // The list of ledger-core book codes the JE query covers.
+  const bookCodesToQuery: string[] =
+    bookResolution.mode === "single"
+      ? [bookResolution.bookCode]
+      : Array.from(new Set(Object.values(bookResolution.bookMapping)));
+  // For Subsidiary-style "where do AccountingBook entries come from"
+  // reconstruction. In multi mode each NS internalid is paired with its
+  // ledger-core book code from the mapping.
+  const accountingBooksReconstructed: NsAccountingBook[] =
+    bookResolution.mode === "multi"
+      ? Object.entries(bookResolution.bookMapping).map(([nsId, ledgerCode]) => ({
+          internalid: nsId,
+          // Reverse the ledger-core book code → an NS-style "US GAAP"
+          // name. Operators can override by passing the original NS
+          // AccountingBook[] back via the import side (Phase 4.5 polish).
+          name: ledgerCode.replace(/_/g, " "),
+        }))
+      : [];
+
+  // Resolve the entity exporter strategy. Single mode keeps the v0.6
+  // behavior; multi mode discovers every NS-imported entity matching
+  // the prefix.
   const resolution =
     input.entityResolution ??
     (input.entityCode
@@ -148,18 +195,36 @@ export async function exportToNs(
     orderBy: { sourceRecordId: "asc" },
   });
 
-  // JEs are always entity-scoped — they post to a specific entity even
-  // when the chart is global. In multi mode we want JEs from every
-  // discovered entity; in single mode just the one.
-  const entries = await prisma.journalEntry.findMany({
+  // JEs are entity- AND book-scoped. In multi-sub mode we walk every
+  // discovered entity; in multi-book mode (v0.9) we walk every mapped
+  // ledger-core book and DEDUPE by sourceRecordId (per-book JEs share
+  // the same frozen NS sourcePayload — reading one is the same as
+  // reading any).
+  const rawEntries = await prisma.journalEntry.findMany({
     where: {
       sourceSystem: "NETSUITE",
       entity: { code: { in: entityCodes } },
-      book: { code: bookCode },
+      book: { code: { in: bookCodesToQuery } },
     },
-    select: { sourceRecordType: true, sourcePayload: true },
+    select: {
+      sourceRecordType: true,
+      sourceRecordId: true,
+      sourcePayload: true,
+    },
     orderBy: [{ sourceRecordType: "asc" }, { sourceRecordId: "asc" }],
   });
+  // Dedupe by (sourceRecordType, sourceRecordId). Multiple per-book
+  // rows are intentional in v0.9 but the NS export side reconstructs
+  // ONE record per source — the per-book divergence is preserved in
+  // the AccountingBook array + (Phase 4.5) bookspecific[].
+  const seen = new Set<string>();
+  const entries: typeof rawEntries = [];
+  for (const e of rawEntries) {
+    const key = `${e.sourceRecordType}|${e.sourceRecordId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push(e);
+  }
 
   const invoices: NsInvoice[] = [];
   const bills: NsVendorBill[] = [];
@@ -265,6 +330,12 @@ export async function exportToNs(
     // LegalEntity.extensions.nsSourcePayload). Single mode keeps the v0.6
     // exporter shape — no Subsidiary key, matching the v0.6 fixture.
     Subsidiary: subsidiariesReconstructed.length ? subsidiariesReconstructed : undefined,
+    // v0.9 NS Books Phase 4 — emit AccountingBook array only in multi
+    // mode. Single mode keeps the v0.6 export shape (no AccountingBook
+    // key), matching the v0.6 fixture.
+    AccountingBook: accountingBooksReconstructed.length
+      ? accountingBooksReconstructed
+      : undefined,
     Account: accounts.filter((a) => a.sourcePayload).map((a) => a.sourcePayload as unknown as NsAccount),
     Class: classes,
     Department: departments,
@@ -316,6 +387,7 @@ export function diffNsExports(a: NsExport, b: NsExport): string | null {
 
   const keys = [
     "Subsidiary",
+    "AccountingBook",
     "Account",
     "Class",
     "Department",
