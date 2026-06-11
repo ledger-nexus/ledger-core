@@ -125,12 +125,20 @@ describe("resolveBearerToken: DB path", () => {
       select: { lastUsedAt: true },
     });
     await resolveBearerToken(plaintextA);
-    // The update is fire-and-forget; give it a beat.
-    await new Promise((r) => setTimeout(r, 100));
-    const after = await prisma.tenantApiToken.findUnique({
-      where: { id: tokenIdA },
-      select: { lastUsedAt: true },
-    });
+    // lastUsedAt is updated fire-and-forget (not awaited, to keep token
+    // resolution latency low). Poll for it instead of a fixed sleep: a
+    // loaded CI runner can take >100ms to commit the async write, which
+    // made the old `setTimeout(100)` intermittently see null. Break as
+    // soon as it's set, so this stays fast in the common case.
+    let after: { lastUsedAt: Date | null } | null = null;
+    for (let i = 0; i < 50; i++) {
+      after = await prisma.tenantApiToken.findUnique({
+        where: { id: tokenIdA },
+        select: { lastUsedAt: true },
+      });
+      if (after?.lastUsedAt != null) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(after?.lastUsedAt).not.toBeNull();
     if (before?.lastUsedAt && after?.lastUsedAt) {
       expect(after.lastUsedAt.getTime()).toBeGreaterThanOrEqual(

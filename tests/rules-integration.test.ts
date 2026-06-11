@@ -61,6 +61,11 @@ function makeTxOps(state: MockState) {
     journalEntry: {
       findUnique: async (args: { where: { id: string } }) =>
         state.journalEntries.get(args.where.id) ?? null,
+      // `reassignJournalEntry` uses `findFirst` (compound where with optional
+      // tenant filter). Same lookup semantics for the test surface — tests
+      // never pass actorTenantId.
+      findFirst: async (args: { where: { id: string } }) =>
+        state.journalEntries.get(args.where.id) ?? null,
       update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
         const existing = state.journalEntries.get(args.where.id);
         if (existing) Object.assign(existing, args.data);
@@ -69,6 +74,11 @@ function makeTxOps(state: MockState) {
     },
     arOpenItem: {
       findUnique: async (args: { where: { id: string } }) =>
+        state.arOpenItems.get(args.where.id) ?? null,
+      // `reassignArOpenItem` uses `findFirst` (compound where with optional
+      // tenant filter via actorTenantId). Tests don't pass tenant scope,
+      // so this mirrors findUnique.
+      findFirst: async (args: { where: { id: string } }) =>
         state.arOpenItems.get(args.where.id) ?? null,
       update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
         const existing = state.arOpenItems.get(args.where.id);

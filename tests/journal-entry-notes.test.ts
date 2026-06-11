@@ -43,6 +43,7 @@ import {
   deleteJournalEntryNoteAction,
 } from "@/app/actions/journal-entry-notes";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const SUFFIX = ("NOTE" + Date.now().toString(36) + Math.floor(Math.random() * 9999)).toUpperCase();
@@ -132,7 +133,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.journalEntryNote.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
@@ -147,8 +150,10 @@ afterAll(async () => {
 beforeEach(async () => {
   // Clean notes between tests so each starts fresh.
   await prisma.journalEntryNote.deleteMany({ where: { entryId } });
-  await prisma.auditLog.deleteMany({
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
     where: { tenantId: tenant.id, resource: "JournalEntryNote" },
+  });
   });
 });
 

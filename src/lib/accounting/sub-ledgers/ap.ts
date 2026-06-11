@@ -11,16 +11,10 @@
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
+import { toDecimal } from "../../utils/decimal";
+import { isUuid } from "../../utils/uuid";
 
-function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
-  if (v === undefined || v === null) return new Decimal(0);
-  if (v instanceof Decimal) return v;
-  return new Decimal(v);
-}
 
-function isUuid(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-}
 
 export interface OpenApItemInput {
   entityCode: string;
