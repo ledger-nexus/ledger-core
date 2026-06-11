@@ -41,9 +41,28 @@ import {
   nsAccountCode,
 } from "./mappers";
 import type { NsExport, NsCustomFieldDefinition } from "./types";
+import {
+  resolveEntityResolution,
+  resolveEntityCode,
+  setupSubsidiaries,
+  type EntityResolution,
+} from "./subsidiaries";
 
 export interface ImportFromNsInput {
-  entityCode: string;
+  /**
+   * Single-sub backward compat. Every transaction lands in the entity
+   * with this code. Equivalent to `entityResolution: { mode: "single",
+   * entityCode }`.
+   */
+  entityCode?: string;
+  /**
+   * Multi-sub mode: each NS Subsidiary becomes its own LegalEntity.
+   * In multi mode, accounts are imported with `entityId: null`
+   * (global chart of accounts, matching NS's "accounts global to
+   * the company" convention) and each transaction routes to the
+   * entity derived from its `subsidiary` field.
+   */
+  entityResolution?: EntityResolution;
   bookCode?: string;
   export: NsExport;
   mappingVersion?: string;
@@ -55,6 +74,8 @@ export interface ImportFromNsResult {
   dimensionsCreated: number;
   dimensionValuesCreated: number;
   dimensionSetsCreated: number;
+  /** v0.7 multi-sub: subsidiaries upserted as LegalEntities. 0 in single mode. */
+  subsidiariesUpserted: number;
   accountsImported: number;
   accountsSkipped: number;
   partiesImported: number;
@@ -66,6 +87,8 @@ export interface ImportFromNsResult {
   arOpenItemsOpened: number;
   apOpenItemsOpened: number;
   paymentsApplied: number;
+  /** v0.7 multi-sub: non-fatal warnings from setupSubsidiaries + per-tx routing. */
+  warnings: string[];
   errors: string[];
 }
 
@@ -101,17 +124,28 @@ export async function importFromNs(
   const mappingVersion = input.mappingVersion ?? "ns-v1";
   const source = input.source ?? "IMPORT";
 
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
-  const entity = await prisma.legalEntity.findFirstOrThrow({
-    where: { code: input.entityCode },
-    select: { id: true, code: true, tenantId: true },
+  // v0.7 — resolve entity strategy. Single mode keeps the v0.6 behavior;
+  // multi mode runs setupSubsidiaries first and routes each transaction
+  // to its NS-declared subsidiary.
+  const resolution = resolveEntityResolution({
+    entityCode: input.entityCode,
+    entityResolution: input.entityResolution,
   });
+
+  // The "primary entity" for things that aren't transaction-scoped:
+  //   - In single mode → the one entity the caller named.
+  //   - In multi mode → the entity that owns CustomFieldDefinitions +
+  //     Dimensions + DimensionValues (these are tenant-wide via the
+  //     existing schema, but we still need an entityCode for the
+  //     legacy lookup paths that haven't been rewritten yet).
+  // We resolve it after subsidiary upserts in multi mode.
 
   const result: ImportFromNsResult = {
     customFieldsRegistered: 0,
     dimensionsCreated: 0,
     dimensionValuesCreated: 0,
     dimensionSetsCreated: 0,
+    subsidiariesUpserted: 0,
     accountsImported: 0,
     accountsSkipped: 0,
     partiesImported: 0,
@@ -123,8 +157,86 @@ export async function importFromNs(
     arOpenItemsOpened: 0,
     apOpenItemsOpened: 0,
     paymentsApplied: 0,
+    warnings: [],
     errors: [],
   };
+
+  // Multi mode: upsert subsidiaries → LegalEntity hierarchy BEFORE any
+  // other work (accounts/transactions reference these entities).
+  let subsidiaryEntityCodeByInternalid: Map<string, string> | null = null;
+  if (resolution.mode === "multi") {
+    const subs = input.export.Subsidiary ?? [];
+    if (subs.length === 0) {
+      throw new Error(
+        "Multi-sub mode requires the NS export to include a Subsidiary array. " +
+          "The fixture or upstream export is malformed."
+      );
+    }
+    const subResult = await setupSubsidiaries(prisma, {
+      subsidiaries: subs,
+      resolution,
+    });
+    result.subsidiariesUpserted = subResult.subsidiariesUpserted;
+    result.warnings.push(...subResult.warnings);
+    // Build internalid → entityCode (the code, not id — postJournalEntry
+    // and openArItem both take code).
+    subsidiaryEntityCodeByInternalid = new Map(
+      subs.map((s) => [s.internalid, resolveEntityCode(s.internalid, resolution)])
+    );
+  }
+
+  // Resolve the "primary entity" used for:
+  //   - Account creation in SINGLE mode (entityId = primary.id).
+  //     In MULTI mode, accounts are created with entityId = null (global
+  //     chart) per Phase 3 chart-of-accounts decision; the schema's
+  //     `Account.entityId String?` already documents this as "shared
+  //     across all entities (consolidated chart)".
+  //   - Lookup-by-code paths for CustomFieldDefinitions + Dimensions
+  //     which are tenant-scoped (the entity arg is vestigial there).
+  // In multi mode the primary is the FIRST subsidiary in input order —
+  // typically the parent in a well-formed NS export.
+  const primaryEntityCode =
+    resolution.mode === "single"
+      ? resolution.entityCode
+      : resolveEntityCode(
+          (input.export.Subsidiary ?? [])[0]!.internalid,
+          resolution
+        );
+  const entity = await prisma.legalEntity.findFirstOrThrow({
+    where: { code: primaryEntityCode },
+    select: { id: true, code: true, tenantId: true },
+  });
+
+  // Per-transaction entity-code resolver. In single mode, every
+  // transaction lands in the named entity. In multi mode, look up the
+  // entity from the transaction's `subsidiary` field via the map built
+  // above.
+  const resolveEntityCodeForTransaction = (
+    nsSubsidiaryInternalid: string | undefined,
+    txKind: string,
+    txId: string
+  ): string => {
+    if (resolution.mode === "single") return resolution.entityCode;
+    if (!nsSubsidiaryInternalid) {
+      throw new Error(
+        `Multi-sub mode requires every transaction to have a 'subsidiary' field; ` +
+          `${txKind} ${txId} has none.`
+      );
+    }
+    const code = subsidiaryEntityCodeByInternalid!.get(nsSubsidiaryInternalid);
+    if (!code) {
+      throw new Error(
+        `Multi-sub mode: ${txKind} ${txId} references subsidiary "${nsSubsidiaryInternalid}" ` +
+          `which is not in the export's Subsidiary array.`
+      );
+    }
+    return code;
+  };
+
+  // In multi mode, accounts go on the global chart (entityId: null).
+  // In single mode, accounts stay on the named entity (legacy).
+  const accountEntityIdForCreate: string | null =
+    resolution.mode === "multi" ? null : entity.id;
 
   // ---- 1. Custom field definitions ---------------------------------
 
@@ -236,7 +348,7 @@ export async function importFromNs(
     await prisma.account.create({
       data: {
         tenantId: entity.tenantId,
-        entityId: entity.id,
+        entityId: accountEntityIdForCreate,
         code: m.code,
         name: m.name,
         type: m.type,
@@ -279,7 +391,7 @@ export async function importFromNs(
     const party = await prisma.party.create({
       data: {
         tenantId: entity.tenantId,
-        entityId: entity.id,
+        entityId: accountEntityIdForCreate,
         code,
         displayName,
         extensions:
@@ -349,7 +461,7 @@ export async function importFromNs(
     await prisma.item.create({
       data: {
         tenantId: entity.tenantId,
-        entityId: entity.id,
+        entityId: accountEntityIdForCreate,
         code: m.code,
         name: m.name,
         itemType: m.itemType,
@@ -422,7 +534,7 @@ export async function importFromNs(
     );
 
     await postJournalEntry(prisma, {
-      entityCode: input.entityCode,
+      entityCode: resolveEntityCodeForTransaction(nsJe.subsidiary, "JournalEntry", nsJe.internalid),
       bookCode,
       currencyCode: m.currencyCode,
       documentDate: m.documentDate,
@@ -480,7 +592,7 @@ export async function importFromNs(
     );
 
     const je = await postJournalEntry(prisma, {
-      entityCode: input.entityCode,
+      entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
       bookCode,
       currencyCode: m.currencyCode,
       documentDate: m.documentDate,
@@ -505,7 +617,7 @@ export async function importFromNs(
     await attachDimensionSets(prisma, inv.internalid, resolvedLines);
 
     const openItem = await openArItem(prisma, {
-      entityCode: input.entityCode,
+      entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
       bookCode,
       partyCode: arOpening.customerCode,
       openedByEntryId: je.id,
@@ -550,7 +662,7 @@ export async function importFromNs(
       })
     );
     const je = await postJournalEntry(prisma, {
-      entityCode: input.entityCode,
+      entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
       bookCode,
       currencyCode: m.currencyCode,
       documentDate: m.documentDate,
@@ -573,7 +685,7 @@ export async function importFromNs(
     await attachDimensionSets(prisma, bill.internalid, resolvedLines);
 
     const openItem = await openApItem(prisma, {
-      entityCode: input.entityCode,
+      entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
       bookCode,
       partyCode: apOpening.vendorCode,
       openedByEntryId: je.id,
@@ -602,7 +714,7 @@ export async function importFromNs(
     }
     const { entry: m, application } = mapNsCustomerPayment(pmt, mappingVersion);
     const je = await postJournalEntry(prisma, {
-      entityCode: input.entityCode,
+      entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "CustomerPayment", pmt.internalid),
       bookCode,
       currencyCode: m.currencyCode,
       documentDate: m.documentDate,
@@ -647,7 +759,7 @@ export async function importFromNs(
     }
     const { entry: m, application } = mapNsVendorPayment(pmt, mappingVersion);
     const je = await postJournalEntry(prisma, {
-      entityCode: input.entityCode,
+      entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "VendorPayment", pmt.internalid),
       bookCode,
       currencyCode: m.currencyCode,
       documentDate: m.documentDate,
