@@ -1,4 +1,18 @@
 {
   "buildCommand": "prisma generate && next build",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/close-alerts-dispatch",
+      "schedule": "*/15 9-18 * * 1-5"
+    },
+    {
+      "path": "/api/cron/recurring-je-run",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/close-alerts-digest",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }

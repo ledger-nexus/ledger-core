@@ -20,6 +20,11 @@ export interface SeedAccount {
   isContra?: boolean;
   isControlAccount?: boolean;
   isBank?: boolean;
+  // ASC 830 / IAS 21: true for cash, receivables, payables, and debt — the
+  // accounts whose foreign-currency balances get re-measured at the period-
+  // end CLOSE rate. Non-monetary accounts (inventory, fixed assets, prepaids,
+  // equity) stay at historical rate and are omitted from revaluation.
+  isMonetary?: boolean;
   subtype?: string;
 }
 
@@ -28,12 +33,16 @@ export interface SeedAccount {
 // find their roll-up targets without string matching.
 export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   // ---- Assets ----
-  { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
-  { code: "1010", name: "Cash — Payroll", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
-  { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, subtype: "AR_TRADE" },
+  // Cash + receivables are monetary (revalued at the CLOSE rate). isMonetary
+  // drives the ASC 830 revaluation walk; isBank/isControlAccount are unrelated
+  // roll-up tags.
+  { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT", isBank: true, isMonetary: true, subtype: "CASH" },
+  { code: "1010", name: "Cash — Payroll", type: "ASSET", normalBalance: "DEBIT", isBank: true, isMonetary: true, subtype: "CASH" },
+  { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, isMonetary: true, subtype: "AR_TRADE" },
   // Intercompany receivable (sub-A's "Due from Sub-B"). Eliminated at
-  // consolidation; subtype = DUE_FROM_AFFILIATE triggers the rule.
-  { code: "1300", name: "Due from Affiliates", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, subtype: "DUE_FROM_AFFILIATE" },
+  // consolidation; subtype = DUE_FROM_AFFILIATE triggers the rule. Monetary —
+  // a foreign-currency intercompany balance revalues like any receivable.
+  { code: "1300", name: "Due from Affiliates", type: "ASSET", normalBalance: "DEBIT", isControlAccount: true, isMonetary: true, subtype: "DUE_FROM_AFFILIATE" },
   // Allowance for Doubtful Accounts (contra-AR). Bad debt write-offs credit
   // AR direct in v0.4-alpha; full allowance-method accounting (estimate + apply)
   // lands when a customer engagement asks for it.
@@ -60,12 +69,16 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   { code: "1600", name: "Right-of-Use Asset — Leases", type: "ASSET", normalBalance: "DEBIT", subtype: "ROU_ASSET" },
 
   // ---- Liabilities ----
-  { code: "2000", name: "Accounts Payable", type: "LIABILITY", normalBalance: "CREDIT", isControlAccount: true, subtype: "AP_TRADE" },
+  // Trade payables + intercompany payables are monetary. Accrued/deferred-rev/
+  // tax-payable are settled in functional currency in our model and stay
+  // non-monetary (no revaluation) — flip isMonetary if a foreign-denominated
+  // accrual is ever modeled.
+  { code: "2000", name: "Accounts Payable", type: "LIABILITY", normalBalance: "CREDIT", isControlAccount: true, isMonetary: true, subtype: "AP_TRADE" },
   { code: "2100", name: "Accrued Expenses", type: "LIABILITY", normalBalance: "CREDIT", subtype: "ACCRUED" },
   { code: "2200", name: "Deferred Revenue", type: "LIABILITY", normalBalance: "CREDIT", subtype: "DEFERRED_REV" },
   { code: "2300", name: "Sales Tax Payable", type: "LIABILITY", normalBalance: "CREDIT", subtype: "TAX_PAYABLE" },
   // Intercompany payable (sub-B's "Due to Sub-A"). Eliminated at consolidation.
-  { code: "2400", name: "Due to Affiliates", type: "LIABILITY", normalBalance: "CREDIT", isControlAccount: true, subtype: "DUE_TO_AFFILIATE" },
+  { code: "2400", name: "Due to Affiliates", type: "LIABILITY", normalBalance: "CREDIT", isControlAccount: true, isMonetary: true, subtype: "DUE_TO_AFFILIATE" },
   // Lease liability (ASC 842 operating + finance). Paired with the ROU asset.
   { code: "2600", name: "Lease Liability — Current", type: "LIABILITY", normalBalance: "CREDIT", subtype: "LEASE_LIABILITY" },
 
@@ -101,4 +114,14 @@ export const CHART_OF_ACCOUNTS: SeedAccount[] = [
   // Interest expense — used by ASC 842 finance leases. Operating leases
   // combine interest + amortization into the lease expense line (7400).
   { code: "8200", name: "Interest Expense", type: "EXPENSE", normalBalance: "DEBIT", subtype: "INTEREST" },
+  // FX gain/loss (ASC 830 / IAS 21). Both directions post to one account each;
+  // the sign of the period movement indicates gain (credit) vs loss (debit),
+  // same single-account convention as 8100 Disposal Gain/Loss.
+  //   - UNREALIZED: period-end re-measurement of open foreign-currency
+  //     monetary balances. Conventionally reversed at the start of the next
+  //     period so only the realized portion remains when the item settles.
+  //   - REALIZED: the FX difference locked in when a foreign-currency item
+  //     actually settles (payment received / bill paid at a different rate).
+  { code: "8300", name: "Unrealized FX Gain/Loss", type: "EXPENSE", normalBalance: "DEBIT", subtype: "FX_GAIN_LOSS_UNREALIZED" },
+  { code: "8310", name: "Realized FX Gain/Loss", type: "EXPENSE", normalBalance: "DEBIT", subtype: "FX_GAIN_LOSS_REALIZED" },
 ];

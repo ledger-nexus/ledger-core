@@ -1,3 +1,18 @@
+<!-- BEGIN multi-session-orchestrator amendment (v1) -->
+
+## ⚠️ Multi-session coordination (READ FIRST)
+
+This repo may have parallel Claude sessions — they clobber each other's writes without coordination.
+
+1. **Read `STATUS.md`** at the repo root before editing any file. If your task overlaps an active claim, pick a different task or surface the conflict to the user.
+2. **Claim your scope** before your first edit: append a `### Session <id>` block to STATUS.md under "Active claims" with scope / files-globs / branch / heartbeat (format documented in STATUS.md). Commit STATUS.md atomically.
+3. **Heartbeat** every ~20 turns. Small commit.
+4. **Release** at session end: move your block to "Recent completions" with an outcome line. Commit.
+
+Never edit another session's claim, skip the read, or claim `**`.
+
+<!-- END multi-session-orchestrator amendment -->
+
 # Claude Code Instructions for ledger-core
 
 This file is auto-loaded by Claude Code on every session in this repo. It tells you what this project is, how to work in it, and what rules are non-negotiable.
@@ -8,7 +23,7 @@ If a user request conflicts with anything in this file, ask before proceeding.
 
 ## What this project is
 
-`ledger-core` is the **universal accounting substrate** — Layers 1 and 2 (with seams for 3–6) of a multi-book general ledger that can absorb data from any major ERP. It is the foundation of the `ledger-nexus` portfolio (this repo + `recon` + `revenue-rec`).
+`ledger-core` is the **universal accounting substrate** — Layers 1 and 2 (with seams for 3–6) of a multi-book general ledger that can absorb data from any major ERP. It is the foundation of the `ledger-nexus` portfolio (this repo + `recon` + `revenue-rec` + `fa-amort` + `integrations`).
 
 The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs/universal-schema.md`); you implement against it. The architecture decisions in that doc are LOCKED — do not re-litigate them in conversation, do not propose alternatives, do not soften them. Read the file. Ask if anything is unclear.
 
@@ -18,113 +33,86 @@ The owner is a CPA shipping with AI. They wrote the universal schema spec (`docs
 
 2. **Every ledger write goes through `postJournalEntry`.** It enforces debits = credits, atomicity, account validity, book scope, and period close. If you find yourself bypassing it, stop.
 
-3. **AI suggests; humans approve; the system posts.** AI is not trusted to post entries directly. Any AI-influenced entry flows through `postJournalEntry` with `source: "AI_APPROVED"` after human confirmation.
+3. **AI suggests; humans approve; the system posts.** AI is not trusted to post entries directly. Any AI-influenced entry flows through `postJournalEntry` with `source: "AI_APPROVED"` after human confirmation (reference example: the FX revaluation gate at `/reports/fx-revaluation`).
 
-4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test.
+4. **The invariant tests are the contract.** If a change you make causes one to fail, the change is wrong — not the test. Never disable a test to go green; fix the test or the code.
 
-## What's wired now (v1.0)
+## Current state (v1.25)
 
-- ✅ Layer 1 — `Account`, `JournalEntry`, `JournalLine` with three currency amounts, lineage columns, multi-book scope, GIN-indexed extensions
-- ✅ Layer 2 — `LegalEntity`, `Book`, `Currency`, `FxRate`, `FiscalCalendar`, `Period`, `PeriodClose`, `Party`, `PartyRole`, `Item`
-- ✅ Layer 3 — Dimension engine tables (no values seeded yet)
-- ✅ Layer 4 — `PostingRule` table + posting-rules engine (`src/lib/accounting/posting-rules.ts`) with minimal `$.path` DSL and `${$.path}` interpolation. `registerUniformRule` is the helper for the common multi-book case.
-- ✅ Layer 5 — `extensions Json` + `CustomFieldDefinition` registry
-- ✅ Layer 6 — Source-system / source-record-id lineage columns
-- ✅ Native sub-ledgers (v0.3 base + v0.4 additions):
-  - AR open items + applications + bad-debt write-off (posts paired Dr Bad Debt / Cr AR)
-  - AP open items + applications
-  - FixedAsset + book-aware attributes + `runDepreciation` + `disposeFixedAsset` (catches up dep, posts paired JE, marks DISPOSED)
-  - Lease + book-aware classification + `runLeaseAccounting` (full ASC 842 mechanics: commencement → amortization → cash payment for OPERATING; cash-basis for TAX_CASH_BASIS)
-  - RevenueContract + PerformanceObligation + book-aware recognition basis
-- ✅ Book-Tax-Difference report (`src/lib/accounting/reports/book-tax-difference.ts`)
-- ✅ Northwind seed: Pattern 2 multi-book + ASC 842 lease (GAAP/IFRS show ROU + liability on BS; TAX shows neither)
-- ✅ Property-based tests via fast-check (`tests/property-based.test.ts`)
-- ✅ **QBO mapper (v0.5)** — `src/lib/mappers/qbo/` ships end-to-end QBO import + reverse exporter with lineage roundtrip. See `docs/qbo-mapping.md`.
-- ✅ **Allowance method (v0.5)** — `estimateBadDebtAllowance` + `writeOffArItem({ method: "ALLOWANCE" })`.
-- ✅ **NetSuite mapper + dimension engine exercise (v0.6)** — `src/lib/mappers/netsuite/` ships end-to-end NS import (4 dimensions: CLASS/DEPARTMENT/LOCATION + custom segments), per-line dimension assignments deduplicated via stable hash, custom fields in `extensions JSONB`, lineage roundtrip. See `docs/netsuite-mapping.md`.
-- ✅ **Next.js UI (v0.7)** — read-only surface in `src/app/`. Sidebar nav + multi-book switcher (cookie-backed via `setScopeAction` Server Action), dashboard, chart of accounts, journal entries list + detail (with frozen lineage payload), all four reports including BTD. Deployment guide at `docs/deployment.md`.
-- ✅ **Interactive UI + demo reset (v0.8)** — `/journal-entries/new` with live debit/credit balance indicator, `/ar` and `/ap` with inline apply-payment forms, `POST /api/admin/reset` gated by `ADMIN_TOKEN`. Seed extracted to `src/lib/seed/northwind.ts` so the CLI and the reset endpoint share one code path.
-- ✅ **Cash Flow + AR Aging + CSV exports (v0.9)** — `getCashFlowStatement()` (indirect method) with classification heuristic + reconciliation tie-out + `uncategorized` self-audit panel. `/reports/cash-flow` and `/reports/ar-aging` pages. CSV route handlers under `/api/reports/.../csv` for all six reports, with Download buttons on each page.
-- ✅ **Multi-entity consolidation + AP aging + M-3 detail (v1.0)** — `getConsolidatedTrialBalance()` walks the `LegalEntity.parentEntityId` hierarchy + eliminates intercompany subtype accounts (DUE_FROM/DUE_TO_AFFILIATE, INTERCOMPANY_REV/EXP). `seedConsolidationDemo()` ships an Acme Group + 2 subs hierarchy so the page renders out of the box. `getM3Detail()` groups BTD deltas by Form 1120 Schedule M-3 line. `apAging()` mirrors `arAging()`. Three new report pages + CSVs.
-- ✅ **Internal HTTP endpoint for companion repos (v1.2)** — `POST /api/internal/journal-entries` is the boundary recon (v0.2-beta) and future revenue-rec use to write JEs through `postJournalEntry`. Gated by `INTERNAL_API_TOKEN`, returns structured `{code, message}` errors mirroring the postJournalEntry error types (UNBALANCED, PERIOD_CLOSED, etc.). NO companion repo touches ledger-core source directly — the wire format is the contract.
-- ✅ **Idempotent JE posts + transactional depreciation endpoint (v1.11)** — `POST /api/internal/journal-entries` now dedupes by the lineage triple `(sourceSystem, sourceRecordType, sourceRecordId)` via a partial unique index; a repeat post returns the existing entry with `wasDuplicate: true`. New endpoint `POST /api/internal/fixed-asset/record-depreciation` wraps N JE posts + the `FixedAssetBookAttributes` update in one transaction — closes fa-amort's v0.1 two-step drift window. `postJournalEntry` now accepts either a `PrismaClient` or a `TransactionClient` so it can be invoked from inside an outer transaction.
-- ✅ **Period close UI + month-end packet (v1.12–v1.13)** — `/periods` page with admin-gated close/reopen Server Actions. `/reports/month-end?period=YYYY-MM` is the composite view (cover + IS + BS + TB tie-out checks). `/api/reports/month-end/{csv,pdf}` downloads via `@react-pdf/renderer`. Closing a period writes a `PeriodClose` row that `postJournalEntry` honors.
-- ✅ **One-shot demo flow (v1.17)** — `pnpm demo` wipes a dedicated `DEMO_CO` entity, posts 28 JEs across one believable May 2026 (capital contribution, prepaid rent, equipment purchase, AR + AP cycles, multi-book depreciation, ASC 606 deferred revenue, month-end accruals), and closes May on US_GAAP. Opens to a tied-out month-end packet you can hand to a CPA cold. Doesn't touch Northwind. Entry point: `prisma/demo.ts` calling `seedDemoMonth()` in `src/lib/seed/demo-month.ts`.
+Full version history lives in `PROJECT_STATUS.md` — read that for the "when/why" of every arc. The capability map:
 
-## v1.0 is the portfolio milestone
+- **Substrate (Layers 1–6)** — `Account` / `JournalEntry` / `JournalLine` (three currency amounts, lineage, multi-book), entities/books/currencies/FX rates/calendars/periods/parties/items, dimension engine, posting-rules engine (`src/lib/accounting/posting-rules.ts`, minimal `$.path` DSL), `extensions Json` + custom-field registry, source-system lineage. Idempotent JE posts dedupe on `(sourceSystem, sourceRecordType, sourceRecordId)`.
+- **Native sub-ledgers** — AR/AP open items + applications (`src/lib/accounting/sub-ledgers/`), fixed assets + depreciation + disposal, ASC 842 leases, revenue contracts; allowance-method bad debt.
+- **ERP mappers** — QBO (`src/lib/mappers/qbo/`) and NetSuite incl. multi-subsidiary (`src/lib/mappers/netsuite/`), both with reverse exporters and frozen-`sourcePayload` roundtrip proofs.
+- **Reports** — TB, IS, BS, cash flow (indirect), AR/AP aging, book-tax difference, M-3 detail, multi-entity consolidation with intercompany eliminations, month-end packet (+PDF), CSV routes for all.
+- **UI** — full Next.js 14 App Router surface: dashboard, COA, JE list/detail/new/paste, AR/AP workbenches, periods + close/reopen, all report pages, import pages. Server Components by default; Server Actions for writes.
+- **Close management (BlackLine-style)** — Reconciliations (state machine + sign-off + sub-ledger auto-pull, `src/lib/recon/`), Close Task Calendar (dependency DAG + templates + append-only state history, `src/lib/close-tasks/` + `CloseTaskStateChange`), Flux/variance analysis (frozen snapshots, `src/lib/flux/`), cross-pillar dashboard + alerts + retrospective (`src/lib/close/`, `/close`, `/api/close/alerts`).
+- **Notifications** — Slack close-alert dispatcher (`src/lib/notifications/`): IMMEDIATE (15-min business-hours cron) and DIGEST_DAILY (09:00 UTC) cadences, webhook URLs AES-256-GCM-encrypted at rest (`WEBHOOK_ENCRYPTION_KEY`, rotation script in `scripts/`), dedupe via `notification_dispatch @@unique(channelId, alertFingerprint)`, admin UI at `/admin/notification-channels`.
+- **Recurring JEs** — templates + anchored monthly enumeration + daily cron auto-run (`src/lib/accounting/recurring.ts`), idempotent via lineage.
+- **FX revaluation (ASC 830 / IAS 21)** — `Account.isMonetary`, `resolveFxRate` (CLOSE/AVG curves, on-or-before, inverse fallback) in `src/lib/accounting/fx.ts`, pure `computeRevaluation` + posting `postRevaluation` (adjustment + auto-reversal next period) behind the human-approval gate. P&L accounts 8300/8310.
+- **Multi-tenancy** — every customer-data table carries `tenantId`; scope resolves from session via `getCurrentScope()` / `requireCurrentTenant()`, never client input. **RLS status: Phase 1 only** — `withTenantContext` (`src/lib/tenant-context.ts`) sets the `app.current_tenant_id` GUC but NO policies exist and queries use the raw singleton; enforcement is application-level WHERE clauses. Do not assume RLS is live (deficiency #12, open).
+- **SOC 2 stack** — append-only `audit_log` (DB RULE pair, silent no-op on UPDATE/DELETE; migration 0015 — tests clean audit rows via `withAuditLogMutable`, and `app_user` hard-deletes need the same window), `logAuditEvent`/`auditPrivilegedAction`, column-level encryption extension, DSR export/erasure, timing-safe cron auth (`src/lib/auth/cron.ts`), control matrix + deficiency log under `docs/policies/`.
 
-The roadmap from v0.2 (universal substrate scaffolding) to v1.0 (full multi-entity, multi-book, dual-mapper, three-statement, tax-provision-aware portfolio) is complete. Beyond v1.0 is polish (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) — not new architecture.
+Open items beyond v1.25: RLS Phases 2–4 (policies → query-path migration → FORCE; see `docs/multi-tenancy.md`), CTA for foreign consolidated entities, realized FX on settlement.
 
 ## Stack
 
-- Postgres + Prisma (`@@map` keeps SQL names aligned with universal-schema vocabulary)
+- Postgres + Prisma (`@@map` keeps SQL names aligned with universal-schema vocabulary); Neon in prod; tests run against a real Postgres
 - decimal.js for all money math
-- Vitest for tests against a real Postgres
-- pnpm as the package manager
-- Next.js 14 (App Router) — UI deferred until sub-ledgers land
+- Vitest; **npm** is the package manager (lockfile is `package-lock.json`; CI runs `npm ci`) — older docs that say `pnpm` are historical
+- Next.js 14 (App Router) — UI fully shipped; `zod` for input validation; `@react-pdf/renderer` for the month-end packet
 
 ## Rules for working in this codebase
 
 ### Money math
-- Always use `Decimal` from `decimal.js`. Never `Number`.
-- Compare with `.equals()`, not `===`.
-- When converting from Prisma's `Decimal` to `decimal.js`, use `new Decimal(value.toString())`.
+- Always use `Decimal` from `decimal.js`. Never `Number`. Compare with `.equals()` / `.comparedTo()`, not `===`.
+- When converting from Prisma's `Decimal`, use `new Decimal(value.toString())`.
 
 ### Database writes
-- All ledger writes flow through `postJournalEntry`. No exceptions.
-- Schema changes require a Prisma migration; never edit the DB directly.
-- New columns on `Account`, `JournalEntry`, `JournalLine` must respect the anti-patterns list in `docs/universal-schema.md` (no fixed dimension columns, no source-system PKs, no widening megatables).
+- All ledger writes flow through `postJournalEntry`. No exceptions. It accepts `PrismaClient | Prisma.TransactionClient` so it can nest inside outer transactions.
+- Schema changes require a Prisma migration; never edit the DB directly. NOTE: CI uses `prisma db push`, which skips migration SQL — triggers, rules, and other non-Prisma DDL added in a migration must ALSO be added (idempotently) to `prisma/sql/migration-mirror.sql`, which `npm run db:restore-ddl` applies (CI's "Apply migration-mirror DDL" step and `db:reset` both call it).
+- New columns on `Account` / `JournalEntry` / `JournalLine` must respect the anti-patterns list in `docs/universal-schema.md`.
+
+### Tenant scoping
+- Every query against a tenant-scoped table MUST filter by `tenantId`, derived from the session (`getCurrentScope()` / `requireCurrentTenant()`), never from client input. Server Actions authorize (admin checks) before mutating, and every privileged mutation writes an audit row.
+- Cron routes authenticate with `isAuthorizedCronRequest` (timing-safe `CRON_SECRET`); schedules live in `vercel.json`.
+- Never log webhook payloads or URLs; decrypt webhook URLs only at send time; scrub URLs from persisted error strings (see `src/lib/notifications/`).
 
 ### Multi-book discipline
-- Every `postJournalEntry` call targets ONE `(entity, book)`. To post to N books for a single source event, either call N times (still fine for one-off entries) or use the posting-rules engine via `postWithRules({ sourceEventType, payload, books })` — register a `PostingRule` per `(sourceEventType, bookId)` once, then any caller can fire the event without knowing about books.
-- Reports always scope to `(entity, book)`. There is no book-agnostic report; cross-book views are computed by diffing two scoped reports (see `getBookTaxDifference`).
-- `bookId="PRIMARY"` is NOT a thing in this schema. Real book codes are `US_GAAP`, `US_TAX`, `IFRS`, etc.
-- Sub-ledger records (AR/AP open items, FixedAssetBookAttributes, etc.) are per-book. One physical asset → one `FixedAsset` row + N `FixedAssetBookAttributes` rows. Same for leases and revenue contracts.
+- Every `postJournalEntry` call targets ONE `(entity, book)`. For N books per source event, call N times or use `postWithRules`. Real book codes are `US_GAAP`, `US_TAX`, `IFRS` — `bookId="PRIMARY"` is not a thing.
+- Reports always scope to `(entity, book)`; cross-book views diff two scoped reports. Sub-ledger records are per-book.
 
 ### Posting-rules engine
-- DSL is intentionally minimal: `$.path` lookups + `${$.path}` interpolation. No arithmetic, no conditionals. If a rule needs more, author it in TS via `postJournalEntry` directly. Don't grow the DSL.
-- Each rule is keyed by `(sourceEventType, bookId, ruleVersion)`. New version supersedes old via `isActive`. Treat ruleVersion as an audit trail of when the GL mapping changed.
-- Sub-ledger lifecycle (open AR/AP, mark fixed asset disposed) is NOT part of posting rules. Rules emit GL lines only. Sub-ledger updates happen in the caller around the `postWithRules` call.
+- DSL stays minimal: `$.path` lookups + `${$.path}` interpolation, no arithmetic/conditionals — author complex rules in TS via `postJournalEntry`. Rules emit GL lines only; sub-ledger lifecycle happens in the caller.
 
 ### ERP mappers (`src/lib/mappers/`)
-- One subdirectory per source system: `qbo/` (v0.5), `netsuite/` (v0.6). Future systems (SAP, Intacct, Dynamics) follow the same pattern.
-- Each mapper has these layers: `types.ts` (source-system shape), `mappers.ts` (pure transformations, no DB), `import.ts` (idempotent orchestrator with lineage), `export.ts` (reverse — reads frozen sourcePayload to reconstruct the source JSON), `dimensions.ts` (only when the source has dimensions — NS does; QBO doesn't).
-- Every imported row MUST populate `sourceSystem`, `sourceRecordType`, `sourceRecordId`, `sourcePayload` (the frozen raw original — verbatim, not a re-encoding), `mappingVersion`. The roundtrip proof depends on `sourcePayload` being preserved exactly.
-- Idempotency: before creating a row, query for an existing row with the same `(sourceSystem, sourceRecordType, sourceRecordId)`. If found, skip. The QBO and NS orchestrators are reference implementations.
-- Account codes from a source ERP get prefixed to avoid collisions: `Q<id>` for QBO, `NS<internalid>` for NetSuite. New mappers pick a short prefix and stay consistent. The original ID is preserved in `sourceRecordId`.
+- One subdirectory per source system, layered `types.ts` / `mappers.ts` (pure) / `import.ts` (idempotent orchestrator) / `export.ts` (reads frozen `sourcePayload`) / `dimensions.ts` (if the source has them).
+- Every imported row populates the full lineage set with `sourcePayload` preserved verbatim. Account codes get a short source prefix (`Q…`, `NS…`). Idempotency: skip when the lineage triple already exists.
 
 ### Dimension engine (Layer 3)
-- Three first-class tables: `Dimension` (the kind: CLASS, DEPARTMENT, LOCATION, etc.), `DimensionValue` (one row per value within a kind), `DimensionSet` (a deduplicated combination of `(dimension, value)` pairs), `DimensionSetValue` (the bridge).
-- Lines reference `DimensionSet` via `JournalLine.dimensionSetId`. Two lines with identical assignments share one `DimensionSet` row (dedup via stable hash on `DimensionSet.hash`).
-- The hash is plain string `dim1:val1|dim2:val2|...` sorted by dimensionCode. Not crypto — collision risk is essentially zero at our scale.
-- `getOrCreateDimensionSet` in `src/lib/mappers/netsuite/dimensions.ts` is the canonical entry point. New mappers that need dimensions should call it directly.
+- Lines reference deduplicated `DimensionSet` rows (stable `dim:val|…` hash). `getOrCreateDimensionSet` in `src/lib/mappers/netsuite/dimensions.ts` is the canonical entry point.
 
 ### Testing
-- Any new accounting logic gets an invariant test in `tests/invariants.test.ts`.
-- Tests run against a real Postgres (via `DATABASE_URL`). Don't mock the DB.
-- Run `pnpm test` after any change that touches `src/lib/accounting/` or `prisma/`.
+- New accounting logic gets an invariant test. Tests run against a real Postgres (`DATABASE_URL`); don't mock the DB. Run `npm test` after touching `src/lib/accounting/` or `prisma/`.
+- The test DB is shared and persistent: suites must be collision-safe — mint per-run fixtures (unique suffixes, dedicated calendars/tenants) instead of reusing shared rows with random ordinals, and DB-dependent suites must skip (not fail) when `DATABASE_URL` is absent if they live in a DB-free workflow.
 
 ### Lineage
-- Every ERP-import path must populate `sourceSystem`, `sourceRecordType`, `sourceRecordId`, `sourcePayload` (frozen raw JSON), and `mappingVersion`. Native seeds leave these null.
-- Never reuse a source-system primary key as our schema PK. Source IDs live in the lineage columns only.
+- Every ERP-import path populates `sourceSystem` / `sourceRecordType` / `sourceRecordId` / `sourcePayload` (frozen raw JSON) / `mappingVersion`. Never reuse a source-system PK as our PK.
 
-### UI work (v0.7)
-- App Router conventions in `src/app/`. Server Components by default; client components only when interactivity demands it.
-- UI primitives are inlined in `src/components/ui/` (no shadcn CLI dep). To add a new primitive, follow the existing pattern: `cn()` helper for class composition, `forwardRef` for inputs, simple variant maps for things like Button/Badge.
-- Forms: Server Actions (files marked `"use server"` in `src/app/actions/`). Don't add API routes unless an external caller needs them.
-- Money values run through `formatMoney()` in `src/lib/utils/format.ts` for consistent display (2 decimals, comma thousands, parens for negatives — accountant convention).
-- The scope cookie (`lc-scope`) is the canonical source for which `(entity, book)` the UI is viewing. Read with `getScope()` (Server Components); write via `setScopeAction` (Server Action). Never plumb scope through query params except for one-shot overrides (e.g. the BTD report's from/to book selectors).
-- Database access: import `prisma` from `@/lib/db` (the singleton). Never `new PrismaClient()` in a page or component — that exhausts the connection pool in dev under HMR.
+### UI work
+- App Router conventions; Server Components by default; Server Actions in `src/app/actions/` for forms. UI primitives are inlined in `src/components/ui/` (no shadcn CLI). Money displays through `formatMoney()`.
+- The scope cookie (`lc-scope`) is the canonical `(entity, book)` for the UI — read via `getCurrentScope()`, write via `setScopeAction`. Import `prisma` from `@/lib/db` (singleton); never `new PrismaClient()` in a page or component.
 
 ## How to start a session
 
 1. Read this file
 2. Read `docs/universal-schema.md` (the architecture canon)
-3. Read `PROJECT_STATUS.md` for the latest "where we are / what's next" (note: status doc is being rewritten in the next batch)
-4. Confirm understanding before suggesting work
+3. Read `PROJECT_STATUS.md` for current state + version history
+4. For security-touching work, check `docs/policies/control-deficiency-log.md` for open items
+5. Confirm understanding before suggesting work
 
 ## Style preferences
 
 - Be direct. The user is a CPA — they understand precision.
 - Comments explain *accounting* reasoning, not code mechanics. "This is the contra-account sign flip" is useful; "this loops through the array" is not.
-- When you finish a unit of work, suggest updating `PROJECT_STATUS.md`.
+- When you finish a unit of work, update `PROJECT_STATUS.md`.

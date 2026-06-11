@@ -47,6 +47,7 @@ import {
   auditPrivilegedAction,
   auditAccessDenied,
 } from "@/lib/audit/log";
+import { checkRequiredTasksComplete } from "@/lib/close-tasks/rollup";
 
 export interface ClosePeriodInput {
   entityCode: string;
@@ -63,6 +64,13 @@ export interface ClosePeriodState {
   closedBy?: string;
   /** Diagnostic — how many JEs are in this period (entity, book scope). */
   journalEntryCount?: number;
+  /**
+   * BlackLine arc Phase 2 PR 6: when the close-gate refuses the close
+   * because requiredForClose tasks aren't terminal, the blocker names
+   * land here so the UI can render "Cannot close: 3 tasks still open
+   * (Reconcile cash, Reconcile AR, Run depreciation)".
+   */
+  taskBlockers?: { id: string; name: string; status: string }[];
 }
 
 export async function closePeriodAction(
@@ -133,6 +141,49 @@ export async function closePeriodAction(
     const jeCount = await prisma.journalEntry.count({
       where: { entityId: entity.id, bookId: book.id, periodId: period.id },
     });
+
+    // BlackLine arc Phase 2 PR 6 — close-task gate. Every
+    // requiredForClose=true CloseTask for (tenant, period) must be in
+    // a terminal state (DONE or WAIVED) before the period can close.
+    // Tasks are PERIOD-scoped (no entity/book), so the same gate
+    // applies to every (entity, book) close for that period — the
+    // org-wide "close GL" and "send packet to leadership" tasks block
+    // the close regardless of which entity/book combination is being
+    // closed. The recon-completion gate from Phase 1 PR 8 layers per-
+    // (entity, book) on top of this when a controller wires it in.
+    const taskBlockers = await checkRequiredTasksComplete(prisma, {
+      tenantId: entity.tenantId,
+      periodId: period.id,
+    });
+    if (taskBlockers.length > 0) {
+      // Audit-log the refusal — close-attempts are SOC 2 CC5/CC6
+      // evidence; we want the attempt visible in the audit trail
+      // even when it's blocked at the gate.
+      await auditPrivilegedAction({
+        actor: admin,
+        action: "close-period.refused",
+        resource: "Period",
+        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
+        tenantId: entity.tenantId,
+        metadata: {
+          reason: "close-task-blockers",
+          blockerCount: taskBlockers.length,
+          blockerTaskIds: taskBlockers.map((b) => b.id),
+        },
+      });
+      return {
+        ok: false,
+        message: `Cannot close: ${taskBlockers.length} required task${taskBlockers.length === 1 ? "" : "s"} still open (${taskBlockers
+          .slice(0, 3)
+          .map((b) => b.name)
+          .join(", ")}${taskBlockers.length > 3 ? ", ..." : ""})`,
+        taskBlockers: taskBlockers.map((b) => ({
+          id: b.id,
+          name: b.name,
+          status: b.status,
+        })),
+      };
+    }
 
     const created = await prisma.periodClose.create({
       data: {

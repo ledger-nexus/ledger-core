@@ -167,10 +167,15 @@ describe("NS multi-sub roundtrip (import → export)", () => {
     // 2. Export back in multi mode. Reconstructs the Subsidiary array
     //    from LegalEntity.extensions.nsSourcePayload + routes JEs from
     //    every discovered sub entity.
+    // _meta is optional on NsExport; the fixture always carries it.
+    // Assert-and-narrow (the portfolio's expectResponse pattern) rather
+    // than a non-null assertion.
+    const meta = original._meta;
+    if (!meta?.exportedAt) throw new Error("fixture missing _meta.exportedAt");
     const exported = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta?.exportedAt ?? "2026-04-30T00:00:00Z"),
+      exportedAt: new Date(meta.exportedAt),
     });
 
     // 3. Subsidiary count + currency tie out before the full diff so a
@@ -192,15 +197,17 @@ describe("NS multi-sub roundtrip (import → export)", () => {
     // implicit ordering by row creation time, etc.). Important for
     // operators diffing exports across deploys.
     const original: NsExport = JSON.parse(readFileSync(FIXTURE_PATH, "utf-8"));
+    const meta = original._meta;
+    if (!meta?.exportedAt) throw new Error("fixture missing _meta.exportedAt");
     const first = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta?.exportedAt ?? "2026-04-30T00:00:00Z"),
+      exportedAt: new Date(meta.exportedAt),
     });
     const second = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta?.exportedAt ?? "2026-04-30T00:00:00Z"),
+      exportedAt: new Date(meta.exportedAt),
     });
     expect(diffNsExports(first, second)).toBeNull();
   });
