@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session 2026-06-11-consolidation-tenant-scope · started 2026-06-11 · heartbeat (start)
+- **Scope**: Tenant-scope the consolidation report's account-metadata + root-entity lookups (cross-tenant subtype/isContra bleed into IC elimination) + regression tests
+- **Files / globs**: `src/lib/accounting/reports/consolidation.ts`, `src/app/reports/consolidation/page.tsx`, `src/app/api/reports/consolidation/csv/route.ts`, `tests/consolidation.test.ts`, `tests/tenant-isolation.test.ts`, `PROJECT_STATUS.md`, `STATUS.md`
+- **Branch**: `fix/consolidation-tenant-scoped-lookups`
+- **Working dir**: /Users/hosungson/Code/ledger-core
 
 ---
 
