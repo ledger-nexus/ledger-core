@@ -216,6 +216,33 @@ describe("tenant isolation: consolidation hierarchy walk", () => {
       tenantA.entityCode,
     ]);
   });
+
+  it("with tenantId pinned, naming another tenant's entity code finds nothing", async () => {
+    // The UI passes ?root= straight from the client. With the session
+    // tenant pinned, tenant A asking for tenant B's entity code must
+    // fail closed (not consolidate B's books).
+    await expect(
+      getConsolidatedTrialBalance(prisma, {
+        rootEntityCode: tenantB.entityCode,
+        bookCode: "US_GAAP",
+        asOf: new Date("2026-12-31"),
+        tenantId: tenantA.tenantId,
+      })
+    ).rejects.toThrow(/not found/);
+  });
+
+  it("with tenantId pinned, the caller's own entity still resolves", async () => {
+    const report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: tenantA.entityCode,
+      bookCode: "US_GAAP",
+      asOf: new Date("2026-12-31"),
+      tenantId: tenantA.tenantId,
+    });
+    expect(report.rootEntityCode).toBe(tenantA.entityCode);
+    expect(report.entitiesIncluded.map((e) => e.code)).toEqual([
+      tenantA.entityCode,
+    ]);
+  });
 });
 
 describe("tenant isolation: cross-tenant write attempt", () => {

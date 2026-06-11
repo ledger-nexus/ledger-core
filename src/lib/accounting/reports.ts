@@ -29,11 +29,11 @@ async function resolveEntityBook(
   entityCode: string,
   bookCode: string,
   tenantId?: string
-): Promise<{ entityId: string; bookId: string }> {
+): Promise<{ entityId: string; bookId: string; entityTenantId: string }> {
   const [entity, book] = await Promise.all([
     prisma.legalEntity.findFirst({
       where: tenantId ? { tenantId, code: entityCode } : { code: entityCode },
-      select: { id: true },
+      select: { id: true, tenantId: true },
     }),
     prisma.book.findUnique({
       where: { code: bookCode },
@@ -42,7 +42,10 @@ async function resolveEntityBook(
   ]);
   if (!entity) throw new Error(`Unknown entity: ${entityCode}`);
   if (!book) throw new Error(`Unknown book: ${bookCode}`);
-  return { entityId: entity.id, bookId: book.id };
+  // The entity's own tenant — callers use it to scope account scans.
+  // Shared accounts (entityId=null) exist per tenant, so "all shared
+  // accounts" without a tenant filter would mix in other tenants' charts.
+  return { entityId: entity.id, bookId: book.id, entityTenantId: entity.tenantId };
 }
 
 export interface ReportScope {
@@ -77,7 +80,7 @@ export async function getTrialBalance(
   scope: ReportScope,
   asOf: Date
 ): Promise<{ rows: TrialBalanceRow[]; totalDebit: Decimal; totalCredit: Decimal }> {
-  const { entityId, bookId } = await resolveEntityBook(
+  const { entityId, bookId, entityTenantId } = await resolveEntityBook(
     prisma,
     scope.entityCode,
     scope.bookCode ?? DEFAULT_BOOK,
@@ -93,9 +96,15 @@ export async function getTrialBalance(
   // has to happen in JS regardless, decimal.js summation is exact and
   // auditable, and row volumes here are small. Don't "optimize" this into
   // an aggregate without re-validating both points.
+  //
+  // tenantId pin: shared accounts (entityId=null) exist PER TENANT, so
+  // without the filter every tenant's shared chart lands in this scan —
+  // zero-balance rows from other tenants leak their codes/names, and the
+  // same-code dedup below can shadow this tenant's real account.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
+      tenantId: entityTenantId,
       OR: [{ entityId: null }, { entityId }],
     },
     include: {
