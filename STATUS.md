@@ -26,15 +26,16 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session 2026-06-11-consolidation-tenant-scope · started 2026-06-11 · heartbeat (start)
-- **Scope**: Tenant-scope the consolidation report's account-metadata + root-entity lookups (cross-tenant subtype/isContra bleed into IC elimination) + regression tests
-- **Files / globs**: `src/lib/accounting/reports/consolidation.ts`, `src/app/reports/consolidation/page.tsx`, `src/app/api/reports/consolidation/csv/route.ts`, `tests/consolidation.test.ts`, `tests/tenant-isolation.test.ts`, `PROJECT_STATUS.md`, `STATUS.md`
-- **Branch**: `fix/consolidation-tenant-scoped-lookups`
-- **Working dir**: /Users/hosungson/Code/ledger-core
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session 2026-06-11-consolidation-tenant-scope · 2026-06-11
+- **Scope**: Tenant-scoped three unscoped lookups in the consolidation report path (account-metadata subtype/isContra bleed into IC elimination, client-controlled `?root=` cross-tenant read, `getTrialBalance` shared-account scan) + adversarial regression tests + deficiency log #15 (Closed) / #16 (Open: same pattern in IS/BS/cash-flow/M-3)
+- **Branch**: `fix/consolidation-tenant-scoped-lookups` (pushed; PR open against main)
+- **Outcome**: consolidation + tenant-isolation suites green (17/17), tsc clean; regression tests verified to fail pre-fix. Follow-up for the remaining report scans tracked as deficiency #16.
 
 <!--
 When a session finishes work, move its block here with a final timestamp.
