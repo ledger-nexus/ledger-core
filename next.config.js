@@ -14,11 +14,11 @@
 //   - Permissions-Policy: disables browser features we don't use (camera,
 //     microphone, geolocation, etc.). Reduces attack surface.
 //
-// Content-Security-Policy is INTENTIONALLY OMITTED here — getting CSP
-// right with Next.js's inline scripts requires nonces or strict-dynamic,
-// which is a larger surgery than these flat headers. Track as a v0.2
-// follow-up; meanwhile the other headers cover the most-asked
-// SOC 2-readiness items.
+// Content-Security-Policy is set per-request in src/middleware.ts
+// with `strict-dynamic` and a fresh nonce on every response. The flat
+// headers below are static; CSP needs the per-request nonce so it
+// lives in middleware. Tests at tests/csp-nonce.test.ts cover the
+// nonce generator and the policy shape (CC6.6 — anti-XSS).
 
 const securityHeaders = [
   {
