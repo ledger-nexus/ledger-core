@@ -26,7 +26,7 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session 2026-06-11-report-tenant-scope · started 2026-06-11 14:26 · heartbeat 14:26
+### Session 2026-06-11-report-tenant-scope · started 2026-06-11 14:26 · heartbeat 14:52
 - **Scope**: Deficiency #16 — tenant-scope the remaining unscoped account scans in report modules (IS, BS, cash-flow, M-3, book-tax review) + per-report poisoned-shared-account regression tests + deficiency log #16 → Closed
 - **Files / globs**: `src/lib/accounting/reports.ts`, `src/lib/accounting/reports/cash-flow.ts`, `src/lib/accounting/reports/m3-detail.ts`, `src/lib/accounting/reports/book-tax-difference.ts`, `tests/report-tenant-scoping.test.ts` (new), `docs/policies/control-deficiency-log.md`, `PROJECT_STATUS.md`
 - **Branch**: `fix/report-tenant-scoped-account-scans`
