@@ -171,7 +171,7 @@ describe("NS multi-sub roundtrip (import → export)", () => {
     // Assert-and-narrow (the portfolio's expectResponse pattern) rather
     // than a non-null assertion.
     const meta = original._meta;
-    if (!meta) throw new Error("fixture missing _meta");
+    if (!meta?.exportedAt) throw new Error("fixture missing _meta.exportedAt");
     const exported = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
@@ -197,15 +197,17 @@ describe("NS multi-sub roundtrip (import → export)", () => {
     // implicit ordering by row creation time, etc.). Important for
     // operators diffing exports across deploys.
     const original: NsExport = JSON.parse(readFileSync(FIXTURE_PATH, "utf-8"));
+    const meta = original._meta;
+    if (!meta?.exportedAt) throw new Error("fixture missing _meta.exportedAt");
     const first = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta.exportedAt),
+      exportedAt: new Date(meta.exportedAt),
     });
     const second = await exportToNs(prisma, {
       entityResolution: { mode: "multi", entityCodePrefix: PREFIX },
       bookCode: "US_GAAP",
-      exportedAt: new Date(original._meta.exportedAt),
+      exportedAt: new Date(meta.exportedAt),
     });
     expect(diffNsExports(first, second)).toBeNull();
   });
