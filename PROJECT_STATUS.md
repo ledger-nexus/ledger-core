@@ -335,7 +335,17 @@ Built 2026-06-08 as a stacked chain, landed car-by-car through the merge train w
 
 **Accounting position:** main implements the ASC 830 **remeasurement (temporal) method** — transaction-date measurement plus v1.25 period-end revaluation of monetary items to P&L 8300. Current-rate-method translation with a CTA in equity is deferred until a per-line `functionalAmount` schema arc exists to translate from (roadmap decision; #149/#150 are its landed groundwork).
 
-### v1.28+ — beyond
+### v1.28 — NS Accounting Books arc, Phases 1–3 (landed 2026-06-11; Phases 4–5 in flight)
+
+The third NS architectural axis after multi-sub (v1.26) and the FX lifecycle (v1.27). Real OneWorld tenants carry multiple books per company (US_GAAP / US_TAX / IFRS / MGMT); the Pattern 2 multi-book substrate already supported parallel posting — this arc drives it from NS data. Built 2026-06-08 as a stacked chain, landed car-by-car with per-car review.
+
+- **Phase 1 (#154) — types + mapper + `setupBooks`.** `BookResolution` discriminator (`single` | `multi` with an NS-internalid → ledger-core-book mapping; a faithful mirror of v1.26's `EntityResolution`), `resolveBookCodes` with dedupe and operator-actionable `BookNotMappedError`, `setupBooks` validating every mapping target exists (it never creates Book rows — Book metadata is operator-configurable), and `resolveBookResolution` folding the legacy `bookCode` input. 19 unit tests. Note: `Book` is a tenant-global reference table (code globally unique), so its lookups are correctly unscoped.
+- **Phase 2 (#155) — lineage scope, tests only.** The chain designed a migration scoping `gl_entry_header_lineage_uniq` to `(tenantId, bookId, source-triple)` — but main already had exactly that index, byte-equivalent, via migration 0015's production PITR capture (the chain independently identified the same two defects: cross-tenant source-id collision and the multi-book second-post blocker). The redundant migration was dropped in port; what landed is the previously-missing integration coverage — same source record posting to two books, the per-`(tenant, book)` duplicate still rejected.
+- **Phase 3 (#156) — per-transaction routing.** The JournalEntry path posts one JE per mapped book (2 NS JEs × 2 books = 4 ledger-core JEs verified); sub-ledger paths (Invoice/VendorBill/CustomerPayment/VendorPayment) post to `primaryBookCode` until Phase 3.5 wires per-book sub-ledgers. **Three defects fixed in transit:** (1) the importer's `alreadyImported` dedupe was unscoped by tenant (one tenant's import blocked another importing the same NS internalid — CC6.1) and unscoped by book (a crashed multi-book import could never complete; the chain had deferred this); now a tenant-scoped per-book lookup posts exactly the missing books on re-run. (2) `setupBooks` warnings were never wired into the import result. (3) The FX measurement currency was anchored to the legacy `bookCode` default, which in multi mode may not be a mapped book; now `primaryBookCode`.
+
+Still open in this arc: Phase 3.5 (sub-ledger multi-book + per-tx `bookspecific[]` exchangerate), Phase 4 (reverse exporter reconstructs `bookspecific[]` for the roundtrip proof), Phase 5 (UI book-mapping editor on /import/netsuite).
+
+### v1.29+ — beyond
 The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) is fully shipped, and v1.27 completed realized FX on settlement. Remaining FX depth — current-rate-method consolidation translation + CTA (`POST_CTA` close-task stub) — is gated on per-line functional-currency amounts (see the v1.27 disposition) and waits for a multi-entity foreign-currency engagement to ask for it.
 
 ---
