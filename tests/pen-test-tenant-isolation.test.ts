@@ -54,6 +54,7 @@ import { reassignApItemAction } from "@/app/actions/reassign-ap-item";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";
 import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const SUFFIX = ("PEN" + Date.now().toString(36)).toUpperCase();
@@ -226,7 +227,9 @@ afterAll(async () => {
     await prisma.period.deleteMany({ where: { calendar: { tenantId: tid } } });
     await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tid } });
     await prisma.recordEvent.deleteMany({ where: { tenantId: tid } });
-    await prisma.auditLog.deleteMany({ where: { tenantId: tid } });
+    await withAuditLogMutable(prisma, async () => {
+      await prisma.auditLog.deleteMany({ where: { tenantId: tid } });
+    });
     await prisma.legalEntity.deleteMany({ where: { tenantId: tid } });
     await prisma.tenantMembership.deleteMany({ where: { tenantId: tid } });
     await prisma.tenant.delete({ where: { id: tid } });

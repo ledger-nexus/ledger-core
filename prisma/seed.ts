@@ -4,6 +4,7 @@
 // Run with: pnpm db:seed
 
 import { PrismaClient } from "@prisma/client";
+import { ensureDefaultTenant } from "../src/lib/seed/default-tenant";
 import { seedNorthwind, ENTITY_CODE } from "../src/lib/seed/northwind";
 import {
   seedConsolidationDemo,
@@ -13,6 +14,9 @@ import {
 const prisma = new PrismaClient();
 
 async function main() {
+  console.log("Ensuring default tenant exists (fresh-database bootstrap)...");
+  await ensureDefaultTenant(prisma);
+
   console.log("Seeding Northwind Cloud (multi-book, sub-ledgers, ASC 842, BTD)...");
   await seedNorthwind(prisma);
 
