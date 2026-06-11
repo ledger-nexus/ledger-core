@@ -151,6 +151,17 @@ export interface NsInvoice {
   total: number;
   amountremaining: number;
   currency: string;
+  /**
+   * NS-supplied transaction-time FX rate (transaction currency →
+   * subsidiary's base currency, which in our model = the book's
+   * reporting currency in the typical single-book case).
+   *
+   * When present, the v0.8 importer prefers this rate over the seeded
+   * FxRate row — NS's posting-time rate is the authoritative one for
+   * each transaction. NS-supplied rates may be a number or a
+   * pre-formatted string ("1.27000"); the importer normalizes both.
+   */
+  exchangerate?: number | string;
   lines: NsTransactionLine[];
   [key: string]: unknown;        // custbody_* custom fields
 }
@@ -165,6 +176,8 @@ export interface NsVendorBill {
   total: number;
   amountremaining: number;
   currency: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   lines: NsTransactionLine[];
   [key: string]: unknown;
 }
@@ -176,6 +189,8 @@ export interface NsCustomerPayment {
   entity: string;
   total: number;
   currency: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   depositaccount: string;
   apply: { doc: string; amount: number }[];
 }
@@ -187,6 +202,8 @@ export interface NsVendorPayment {
   entity: string;
   total: number;
   currency: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   account: string;
   apply: { doc: string; amount: number }[];
 }
@@ -196,6 +213,8 @@ export interface NsJournalEntry {
   tranid: string;
   trandate: string;
   subsidiary: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   memo?: string;
   lines: NsTransactionLine[];
 }

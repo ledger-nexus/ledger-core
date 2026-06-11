@@ -22,6 +22,7 @@ import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../../accounting/post-journal";
 import { resolveFxRate } from "../../accounting/fx";
+import { getDefaultTenantId } from "../../seed/default-tenant";
 import { openArItem, applyArPayment } from "../../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../../accounting/sub-ledgers/ap";
 import {
@@ -159,8 +160,20 @@ export async function importFromNs(
     transactionCurrencyId: string;
     documentDate: Date;
     lines: L[];
+    /**
+     * v0.8 FX Phase 2 — NS-supplied transaction-time exchangerate.
+     * When present (a number or a string like "1.27000"), this rate is
+     * used directly. The seeded FxRate is the fallback for older NS
+     * exports that omit the field. The fallback path is also what the
+     * test fixtures (which don't carry exchangerate) exercise — this
+     * keeps the FX wiring usable end-to-end without operators having to
+     * load synthetic rates into NS first.
+     */
+    nsExchangeRate?: number | string;
   }): Promise<{
     fxRate: Decimal;
+    /** Where the rate came from — useful for tests + audit-log telemetry. */
+    fxRateSource: "ns_exchangerate" | "seeded_fx_rate" | "same_currency";
     lines: Array<L & {
       debit: Decimal;
       credit: Decimal;
@@ -168,17 +181,44 @@ export async function importFromNs(
       reportingAmount: Decimal;
     }>;
   }> {
-    // CLOSE on-or-before the document date — the daily-close proxy for
-    // the transaction-date spot rate (ASC 830 initial measurement).
-    // resolveFxRate throws FxRateNotFoundError when unseeded (fail loud,
-    // never silently 1) and inverts the opposite-direction row if needed.
-    const { rate: fxRate } = await resolveFxRate(prisma, {
-      fromCurrency: input.transactionCurrencyId,
-      toCurrency: bookReportingCurrencyId,
-      asOf: input.documentDate,
-    });
+    let fxRate: Decimal;
+    let fxRateSource: "ns_exchangerate" | "seeded_fx_rate" | "same_currency";
+    if (input.transactionCurrencyId === bookReportingCurrencyId) {
+      fxRate = new Decimal(1);
+      fxRateSource = "same_currency";
+    } else if (
+      input.nsExchangeRate !== undefined &&
+      input.nsExchangeRate !== null &&
+      String(input.nsExchangeRate).trim() !== ""
+    ) {
+      // Trust NS's posting-time rate. ASC 830 requires recording at
+      // the rate in effect at the transaction date; that's what NS
+      // recorded. The seeded FxRate is a fallback, not a check.
+      fxRate = new Decimal(String(input.nsExchangeRate));
+      if (fxRate.lte(0)) {
+        // A zero/negative NS rate would zero out (or flip) every line
+        // amount — malformed export data fails loud, never posts.
+        throw new Error(
+          `NS exchangerate "${String(input.nsExchangeRate)}" is not a positive rate`
+        );
+      }
+      fxRateSource = "ns_exchangerate";
+    } else {
+      // CLOSE on-or-before the document date — the daily-close proxy
+      // for the transaction-date spot rate. resolveFxRate throws
+      // FxRateNotFoundError when unseeded (fail loud, never silently 1)
+      // and inverts the opposite-direction row if needed.
+      const resolved = await resolveFxRate(prisma, {
+        fromCurrency: input.transactionCurrencyId,
+        toCurrency: bookReportingCurrencyId,
+        asOf: input.documentDate,
+      });
+      fxRate = resolved.rate;
+      fxRateSource = "seeded_fx_rate";
+    }
     return {
       fxRate,
+      fxRateSource,
       lines: input.lines.map((l) => {
         // Coerce mapper-output (string | Decimal | undefined) to Decimal.
         // Mapper layer produces strings; we need Decimal for arithmetic.
@@ -205,6 +245,187 @@ export async function importFromNs(
         };
       }),
     };
+  }
+
+  // FX Phase 3 — ensure account 8310 (Realized FX Gain/Loss) exists
+  // in the scope the importer will post to. In multi-sub mode, it
+  // lives on the global chart (entityId: null) where all NS-imported
+  // accounts live. In single mode, it lives on the resolved entity.
+  // Idempotent: re-running is safe; the [tenantId, entityId, code]
+  // unique constraint catches existing rows.
+  // 8310 per main's v1.25 convention: 8300 = UNREALIZED (period-end
+  // remeasurement, reversed next period), 8310 = REALIZED (settlement).
+  let fxGainLossAccountCode = "8310";
+  async function ensureFxGainLossAccount(
+    entityIdForCreate: string | null
+  ): Promise<void> {
+    // Tenant-scoped lookup (CC6.1): [entityId, code] unique treats
+    // NULL entityId as distinct per row, so an unscoped findFirst could
+    // match another tenant's global 8310 and skip creating ours.
+    const tenantId = await getDefaultTenantId(prisma);
+    const existing = await prisma.account.findFirst({
+      where: {
+        tenantId,
+        code: fxGainLossAccountCode,
+        entityId: entityIdForCreate,
+      },
+      select: { id: true },
+    });
+    if (existing) return;
+    await prisma.account.create({
+      data: {
+        tenantId,
+        entityId: entityIdForCreate,
+        code: fxGainLossAccountCode,
+        name: "Realized FX Gain/Loss",
+        type: "EXPENSE",
+        normalBalance: "DEBIT",
+        subtype: "FX_GAIN_LOSS_REALIZED",
+        // Native account; lineage stays null even when imported NS
+        // transactions reference it. FX_GAIN_LOSS is a ledger-core
+        // ASC 830 mechanic, not an NS-sourced concept.
+      },
+    });
+  }
+
+  // v0.8 FX Phase 3 — realized FX gain/loss on AR/AP application.
+  //
+  // When a foreign-currency invoice is collected at a rate different
+  // from the rate at which it was originally booked, ASC 830 requires
+  // recognizing the rate-delta as a realized FX gain or loss. Example:
+  //
+  //   Invoice posts at 1.27:  AR Cr 1,270 USD (= 1,000 GBP × 1.27)
+  //   Payment posts at 1.30:  Cash Dr 1,300 USD (= 1,000 GBP × 1.30)
+  //
+  // The Phase 1.5 wiring would post Cash Dr 1300 / AR Cr 1300 — but
+  // that overstates the AR clearing because the AR balance was
+  // originally only 1270. The correct entry is:
+  //
+  //   Cash       Dr 1,300
+  //     AR       Cr 1,270 (= invoice rate × txn amount, matching booking)
+  //     FX Gain  Cr    30 (= the realized FX gain)
+  //
+  // This helper computes the cumulative delta across all applied
+  // invoices and returns adjusted lines.
+  //
+  // Same-currency case (no foreign-currency invoices applied) returns
+  // the input lines unchanged. Single-currency callers see zero
+  // behavior change.
+  async function injectFxGainLossAdjustment(input: {
+    /** Lines after convertLinesForFx (already in reporting currency). */
+    lines: Array<{
+      accountCode: string;
+      debit: Decimal;
+      credit: Decimal;
+      transactionAmount: Decimal;
+      reportingAmount: Decimal;
+      description?: string;
+      partyCode?: string;
+    }>;
+    /** Payment-time FX rate. */
+    paymentFxRate: Decimal;
+    /** Side: "AR" for customer payments, "AP" for vendor payments. */
+    side: "AR" | "AP";
+    /** Applications resolved to LOCAL ids. */
+    applications: { openItemId: string; appliedAmount: Decimal | string }[];
+  }): Promise<{
+    lines: typeof input.lines;
+    fxGainLossUsd: Decimal;
+  }> {
+    if (input.applications.length === 0) {
+      return { lines: input.lines, fxGainLossUsd: new Decimal(0) };
+    }
+    // Look up each open item's original-invoice JE fxRate.
+    const openItems =
+      input.side === "AR"
+        ? await prisma.arOpenItem.findMany({
+            where: { id: { in: input.applications.map((a) => a.openItemId) } },
+            select: {
+              id: true,
+              controlAccountCode: true,
+              openedByEntry: { select: { fxRate: true } },
+            },
+          })
+        : await prisma.apOpenItem.findMany({
+            where: { id: { in: input.applications.map((a) => a.openItemId) } },
+            select: {
+              id: true,
+              controlAccountCode: true,
+              openedByEntry: { select: { fxRate: true } },
+            },
+          });
+    if (openItems.length === 0) {
+      return { lines: input.lines, fxGainLossUsd: new Decimal(0) };
+    }
+    const controlCode = openItems[0].controlAccountCode;
+    const rateByOpenItem = new Map(
+      openItems.map((o) => [o.id, new Decimal(o.openedByEntry.fxRate.toString())])
+    );
+
+    // Cumulative delta = Σ (payment rate − invoice rate) × applied txn amount
+    let cumulativeDeltaUsd = new Decimal(0);
+    for (const app of input.applications) {
+      const invoiceRate = rateByOpenItem.get(app.openItemId);
+      if (!invoiceRate) continue;
+      const appliedTxn = new Decimal(app.appliedAmount.toString());
+      const rateDelta = input.paymentFxRate.minus(invoiceRate);
+      cumulativeDeltaUsd = cumulativeDeltaUsd.plus(rateDelta.times(appliedTxn));
+    }
+
+    if (cumulativeDeltaUsd.isZero()) {
+      return { lines: input.lines, fxGainLossUsd: cumulativeDeltaUsd };
+    }
+
+    // Find the AR/AP control-account line in the JE.
+    // For AR: it's the credit-side line.
+    // For AP: it's the debit-side line.
+    const adjustedLines = input.lines.map((l) => {
+      if (l.accountCode !== controlCode) return l;
+      if (input.side === "AR") {
+        // Reduce AR Cr by cumulativeDeltaUsd. New AR Cr = invoice-rate × txn.
+        return {
+          ...l,
+          credit: l.credit.minus(cumulativeDeltaUsd),
+          reportingAmount: l.reportingAmount.plus(cumulativeDeltaUsd),
+        };
+      } else {
+        // For AP, the control line is a Dr. New AP Dr = invoice-rate × txn.
+        // delta = (pmt_rate - inv_rate) × txn; if delta > 0, payment rate
+        // is higher (we pay MORE USD than booked); we owe more USD =
+        // realized FX LOSS.
+        // AP Dr was at pmt_rate; reduce by delta to get inv_rate × txn.
+        return {
+          ...l,
+          debit: l.debit.minus(cumulativeDeltaUsd),
+          reportingAmount: l.reportingAmount.minus(cumulativeDeltaUsd),
+        };
+      }
+    });
+
+    // Add the FX_GAIN_LOSS plug line.
+    // AR + delta > 0 = gain → credit FX Gain/Loss (reduces expense, =
+    //   posting against a debit-normal expense account credit-side)
+    // AR + delta < 0 = loss → debit FX Gain/Loss
+    // AP mirrors: AP + delta > 0 = loss → debit; AP + delta < 0 = gain → credit
+    const isGainForUs =
+      input.side === "AR" ? cumulativeDeltaUsd.gt(0) : cumulativeDeltaUsd.lt(0);
+    const absDelta = cumulativeDeltaUsd.abs();
+    adjustedLines.push({
+      accountCode: fxGainLossAccountCode,
+      debit: isGainForUs ? new Decimal(0) : absDelta,
+      credit: isGainForUs ? absDelta : new Decimal(0),
+      // Transaction-amount on the FX line is zero — this is a
+      // reporting-currency-only adjustment with no transaction-currency
+      // counterpart. The XOR constraint on debit/credit is still
+      // satisfied (one side is the delta, the other 0).
+      transactionAmount: new Decimal(0),
+      // reportingAmount uses the same sign convention as transactionAmount
+      // (positive = debit, negative = credit).
+      reportingAmount: isGainForUs ? absDelta.negated() : absDelta,
+      description: `Realized FX ${isGainForUs ? "gain" : "loss"} on ${input.side} settlement`,
+    });
+
+    return { lines: adjustedLines, fxGainLossUsd: cumulativeDeltaUsd };
   }
 
   // v0.7 — resolve entity strategy. Single mode keeps the v0.6 behavior;
@@ -328,6 +549,12 @@ export async function importFromNs(
   // In single mode, accounts stay on the named entity (legacy).
   const accountEntityIdForCreate: string | null =
     resolution.mode === "multi" ? null : entity.id;
+
+  // FX Phase 3 — ensure account 8310 exists in the scope the
+  // importer posts to. Idempotent. Called even when no foreign-currency
+  // payments are imported (cheap; an extra row on first import is OK,
+  // and it means the FX gain/loss line can ALWAYS post if needed).
+  await ensureFxGainLossAccount(accountEntityIdForCreate);
 
   // ---- 1. Custom field definitions ---------------------------------
 
@@ -628,6 +855,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: nsJe.exchangerate,
     });
 
     await postJournalEntry(prisma, {
@@ -697,6 +925,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: inv.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
@@ -775,6 +1004,7 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: resolvedLines,
+      nsExchangeRate: bill.exchangerate,
     });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
@@ -835,7 +1065,38 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: m.lines,
+      nsExchangeRate: pmt.exchangerate,
     });
+
+    // v0.8 FX Phase 3 — compute realized FX gain/loss BEFORE posting.
+    // Each application targets an AR open item; that item's
+    // openedByEntry has the fxRate the invoice was booked at. If the
+    // payment rate differs, the delta is a realized FX gain or loss
+    // and we adjust the AR Cr line + inject a balancing FX line.
+    const resolvedApplications = application.applications
+      .map((app) => ({
+        openItemId: arOpenByNsInvoiceId.get(app.linkedInvoiceId),
+        appliedAmount: app.amount,
+      }))
+      .filter(
+        (a): a is { openItemId: string; appliedAmount: typeof a.appliedAmount } =>
+          a.openItemId !== undefined
+      );
+    const { lines: pmtAdjustedLines, fxGainLossUsd: pmtFxGainLossUsd } =
+      await injectFxGainLossAdjustment({
+        lines: pmtFxLines,
+        paymentFxRate: pmtFxRate,
+        side: "AR",
+        applications: resolvedApplications,
+      });
+    if (!pmtFxGainLossUsd.isZero()) {
+      result.warnings.push(
+        `CustomerPayment ${pmt.internalid}: realized FX ${
+          pmtFxGainLossUsd.gt(0) ? "gain" : "loss"
+        } of ${pmtFxGainLossUsd.abs().toFixed(4)} USD posted to account ${fxGainLossAccountCode}.`
+      );
+    }
+
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "CustomerPayment", pmt.internalid),
       bookCode,
@@ -849,7 +1110,7 @@ export async function importFromNs(
       sourceRecordId: pmt.internalid,
       sourcePayload: m.sourcePayload as any,
       mappingVersion,
-      lines: pmtFxLines.map((l) => ({
+      lines: pmtAdjustedLines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.debit,
         credit: l.credit,
@@ -888,7 +1149,37 @@ export async function importFromNs(
       transactionCurrencyId: m.currencyCode,
       documentDate: m.documentDate,
       lines: m.lines,
+      nsExchangeRate: pmt.exchangerate,
     });
+
+    // v0.8 FX Phase 3 — same realized FX gain/loss handling for the
+    // AP side. Mirror of the customer-payment path; "side: AP" tells
+    // the helper to adjust the DEBIT side (the AP control line) instead
+    // of the credit side.
+    const vpResolvedApplications = application.applications
+      .map((app) => ({
+        openItemId: apOpenByNsBillId.get(app.linkedBillId),
+        appliedAmount: app.amount,
+      }))
+      .filter(
+        (a): a is { openItemId: string; appliedAmount: typeof a.appliedAmount } =>
+          a.openItemId !== undefined
+      );
+    const { lines: vpAdjustedLines, fxGainLossUsd: vpFxGainLossUsd } =
+      await injectFxGainLossAdjustment({
+        lines: vpFxLines,
+        paymentFxRate: vpFxRate,
+        side: "AP",
+        applications: vpResolvedApplications,
+      });
+    if (!vpFxGainLossUsd.isZero()) {
+      result.warnings.push(
+        `VendorPayment ${pmt.internalid}: realized FX ${
+          vpFxGainLossUsd.lt(0) ? "gain" : "loss"
+        } of ${vpFxGainLossUsd.abs().toFixed(4)} USD posted to account ${fxGainLossAccountCode}.`
+      );
+    }
+
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "VendorPayment", pmt.internalid),
       bookCode,
@@ -902,7 +1193,7 @@ export async function importFromNs(
       sourceRecordId: pmt.internalid,
       sourcePayload: m.sourcePayload as any,
       mappingVersion,
-      lines: vpFxLines.map((l) => ({
+      lines: vpAdjustedLines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.debit,
         credit: l.credit,
