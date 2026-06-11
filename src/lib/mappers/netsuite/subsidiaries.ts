@@ -168,14 +168,18 @@ export async function setupSubsidiaries(
         code: m.code,
         name: m.name,
         functionalCurrencyId: m.functionalCurrencyCode,
-        // v0.9 NS Books — populate the promoted column AND keep the
-        // JSON flag during transition. Future migration drops the
-        // JSON side after all callers have migrated to the column.
+        // v0.9 NS Books — column promoted in migration 0010 with
+        // backfill from the old `extensions.nsIsElimination` JSON
+        // flag. The JSON-side write was dropped in this PR after
+        // confirming no production code path reads it (the consolidation
+        // report uses intercompany SUBTYPE accounts for elimination
+        // detection, not entity-level flags). The original NS source-
+        // system view of "is this an elimination sub" is still preserved
+        // for reverse-export roundtrip via `nsSourcePayload.iselimination`.
         isEliminationEntity: m.isElimination,
         extensions: {
           nsIsImported: true,
           nsInternalid: m.internalid,
-          nsIsElimination: m.isElimination,
           // Preserve the frozen original NsSubsidiary object so the
           // reverse exporter can reconstruct the Subsidiary array
           // byte-for-byte — matches the lineage-replay pattern that
@@ -192,7 +196,6 @@ export async function setupSubsidiaries(
         extensions: {
           nsIsImported: true,
           nsInternalid: m.internalid,
-          nsIsElimination: m.isElimination,
           // Preserve the frozen original NsSubsidiary object so the
           // reverse exporter can reconstruct the Subsidiary array
           // byte-for-byte — matches the lineage-replay pattern that
