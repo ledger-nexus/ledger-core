@@ -32,6 +32,59 @@ export interface NsSubsidiary {
   parent?: NsRef;             // for OneWorld hierarchies; null for top-level
 }
 
+// v0.8 NS Accounting Books — multi-book parallel posting.
+//
+// Real OneWorld NS tenants carry multiple books per company
+// (US_GAAP, US_TAX, IFRS, MGMT). Each book is an independent GL
+// view, optionally with different exchange rates, depreciation
+// methods, or revenue recognition treatments. ledger-core's
+// Pattern 2 multi-book substrate handles this natively — one JE
+// per (entity, book) — but the importer needs to read the NS
+// AccountingBook array + per-transaction bookspecific[] to drive
+// the per-book posts.
+//
+// Design: docs/netsuite-accounting-books-design.md
+export interface NsAccountingBook {
+  internalid: string;
+  name: string;                 // "US GAAP" / "US TAX" / "IFRS" / etc.
+  /**
+   * Adjustment-only books only carry deltas vs a base book (e.g.
+   * a US_TAX_ADJ book carries TAX-specific differences from
+   * US_GAAP). Phase 1 treats this as metadata only — no special
+   * posting logic. Future polish (phase 4+) may add filtering.
+   */
+  isadjustment?: boolean;
+  /**
+   * The book's basis. NS doesn't always populate this, but when
+   * present it informs the ledger-core Book.basis mapping. Common
+   * values: "GAAP", "IFRS", "TAX".
+   */
+  basis?: string;
+  /**
+   * The book's functional currency. Phase 1 assumes this equals
+   * the subsidiary's functional currency (the typical case).
+   * Per-book currency divergence is deferred to a future phase.
+   */
+  currency?: string;
+}
+
+/**
+ * Per-book values attached to a transaction. NS exports these
+ * inside each transaction's `bookspecific[]` when the books
+ * diverge. When absent, all books use the transaction's header
+ * values (currency, exchangerate, amounts).
+ *
+ * Phase 1 reads only the exchangerate (the most common
+ * divergence point). Per-book amount overrides arrive in
+ * Phase 3+ when the importer wires them through.
+ */
+export interface NsBookSpecific {
+  /** The NS AccountingBook this entry applies to. */
+  accountingbook: string;
+  /** Per-book transaction rate. Falls back to the txn header. */
+  exchangerate?: number | string;
+}
+
 export type NsAccountType =
   | "Bank"
   | "AcctRec"
@@ -151,6 +204,17 @@ export interface NsInvoice {
   total: number;
   amountremaining: number;
   currency: string;
+  /**
+   * NS-supplied transaction-time FX rate (transaction currency →
+   * subsidiary's base currency, which in our model = the book's
+   * reporting currency in the typical single-book case).
+   *
+   * When present, the v0.8 importer prefers this rate over the seeded
+   * FxRate row — NS's posting-time rate is the authoritative one for
+   * each transaction. NS-supplied rates may be a number or a
+   * pre-formatted string ("1.27000"); the importer normalizes both.
+   */
+  exchangerate?: number | string;
   lines: NsTransactionLine[];
   [key: string]: unknown;        // custbody_* custom fields
 }
@@ -165,6 +229,8 @@ export interface NsVendorBill {
   total: number;
   amountremaining: number;
   currency: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   lines: NsTransactionLine[];
   [key: string]: unknown;
 }
@@ -176,6 +242,8 @@ export interface NsCustomerPayment {
   entity: string;
   total: number;
   currency: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   depositaccount: string;
   apply: { doc: string; amount: number }[];
 }
@@ -187,6 +255,8 @@ export interface NsVendorPayment {
   entity: string;
   total: number;
   currency: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   account: string;
   apply: { doc: string; amount: number }[];
 }
@@ -196,6 +266,8 @@ export interface NsJournalEntry {
   tranid: string;
   trandate: string;
   subsidiary: string;
+  /** See NsInvoice.exchangerate. */
+  exchangerate?: number | string;
   memo?: string;
   lines: NsTransactionLine[];
 }
@@ -223,6 +295,14 @@ export interface NsExport {
     comment?: string;
   };
   Subsidiary?: NsSubsidiary[];
+  /**
+   * v0.8 NS Accounting Books — declared books in the export. When
+   * present and the importer runs in `bookResolution.mode: "multi"`,
+   * each transaction posts to N books in parallel per the mapping.
+   * When absent or in single-book mode, the importer uses the
+   * legacy `bookCode` parameter.
+   */
+  AccountingBook?: NsAccountingBook[];
   Account?: NsAccount[];
   Class?: NsClassification[];
   Department?: NsDepartment[];

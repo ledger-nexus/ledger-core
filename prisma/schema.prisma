@@ -528,6 +528,13 @@ model Account {
   // The revaluation engine walks accounts where isMonetary = true.
   isMonetary       Boolean       @default(false)
 
+  // FX Phase 4 — ASC 830 translation method for CONSOLIDATION (distinct
+  // from isMonetary, which drives period-end remeasurement). Nullable so
+  // existing single-currency installations don't need a backfill; the
+  // consolidation translator defaults to CURRENT_RATE when null. New
+  // chart-of-accounts rows + seed paths set this explicitly per category.
+  translationCategory TranslationCategory?
+
   parentAccountId String?   @db.Uuid
   parent          Account?  @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
   children        Account[] @relation("AccountHierarchy")
@@ -579,6 +586,40 @@ enum AccountType {
 enum NormalBalance {
   DEBIT
   CREDIT
+}
+
+// v0.8 FX Phase 4 — ASC 830 period-end translation method per account.
+//
+// When consolidating a foreign-functional-currency subsidiary into a
+// parent's reporting currency, each account's balance is translated
+// at a rate chosen per its category:
+//
+//   CURRENT_RATE  — Balance Sheet items (assets, liabilities). The
+//                   period-end ("current") rate. Default for asset +
+//                   liability account types.
+//
+//   HISTORICAL    — Equity items, recorded at the rate when each
+//                   contribution / dividend was originally posted.
+//                   Default for equity account types. The translator
+//                   uses the original transaction-date rate.
+//
+//   WEIGHTED_AVG  — Income Statement items (revenue, expense). The
+//                   period-average rate. Default for revenue + expense
+//                   account types.
+//
+//   EXCLUDED      — Accounts that are themselves the translation
+//                   result and must NOT be re-translated (e.g. 8300
+//                   Realized FX Gain/Loss is already in reporting
+//                   currency at posting time). Treated as already-
+//                   translated, no rate applied.
+//
+// Phase 4a (this commit) only adds the column + defaults. Phase 4b
+// adds the translator. Phase 4c wires it into the consolidation report.
+enum TranslationCategory {
+  CURRENT_RATE
+  HISTORICAL
+  WEIGHTED_AVG
+  EXCLUDED
 }
 
 // One row per posted document. Posts to exactly ONE (entity, book).

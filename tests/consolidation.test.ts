@@ -10,7 +10,7 @@ import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getConsolidatedTrialBalance } from "../src/lib/accounting/reports/consolidation";
-import { CHART_OF_ACCOUNTS } from "../src/lib/db/chart-of-accounts";
+import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../src/lib/db/chart-of-accounts";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
@@ -94,6 +94,12 @@ async function seedHierarchy() {
         isBank: a.isBank ?? false,
         isMonetary: a.isMonetary ?? false,
         subtype: a.subtype,
+        // v0.8 FX Phase 4a — populate so the migration-backfill
+        // invariant (every account has a category) holds even when
+        // tests create accounts directly outside the seedNorthwind path.
+        translationCategory:
+          a.translationCategory ??
+          defaultTranslationCategory({ type: a.type, subtype: a.subtype }),
       },
     });
   }
@@ -350,6 +356,7 @@ describe("Consolidation: account metadata is tenant-scoped", () => {
         type: "ASSET",
         normalBalance: "DEBIT",
         subtype: "CASH",
+        translationCategory: defaultTranslationCategory({ type: "ASSET", subtype: "CASH" }),
       },
     });
 
@@ -382,6 +389,10 @@ describe("Consolidation: account metadata is tenant-scoped", () => {
         normalBalance: "DEBIT",
         subtype: "DUE_FROM_AFFILIATE",
         isContra: true,
+        translationCategory: defaultTranslationCategory({
+          type: "ASSET",
+          subtype: "DUE_FROM_AFFILIATE",
+        }),
       },
     });
   });
