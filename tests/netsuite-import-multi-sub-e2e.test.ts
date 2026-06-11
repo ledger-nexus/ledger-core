@@ -54,7 +54,16 @@ async function cleanup() {
 
   // Delete JEs sourced from NetSuite for entities we created (covers
   // all our test transactions, including the cross-currency UK one).
+  // AR/AP open items do NOT cascade with the JE delete (FK restricts on
+  // openedByEntryId) — a partially-failed prior run leaves them behind
+  // and bricks this cleanup. Delete them first.
   if (entityIds.length > 0) {
+    await prisma.arOpenItem.deleteMany({
+      where: { entityId: { in: entityIds } },
+    });
+    await prisma.apOpenItem.deleteMany({
+      where: { entityId: { in: entityIds } },
+    });
     await prisma.journalEntry.deleteMany({
       where: {
         sourceSystem: "NETSUITE",
