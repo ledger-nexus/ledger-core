@@ -72,8 +72,33 @@ async function cleanup() {
   await prisma.item.deleteMany({
     where: { sourceSystem: "NETSUITE", entityId: null, tenantId },
   });
+
+  // Same residue story as accounts below: the single-mode NS suite
+  // leaves entity-scoped NETSUITE-sourced parties/items behind whose
+  // lineage ids collide with this fixture's — the importer dedupes
+  // against them and our entity-null rows never get created.
+  await prisma.party.deleteMany({
+    where: { sourceSystem: "NETSUITE", tenantId },
+  });
+  await prisma.item.deleteMany({
+    where: { sourceSystem: "NETSUITE", tenantId },
+  });
   await prisma.account.deleteMany({
     where: { sourceSystem: "NETSUITE", entityId: null, tenantId },
+  });
+
+  // The single-mode NS import suite leaves entity-SCOPED NS-coded
+  // accounts behind on the shared DB (same NS#### codes + lineage ids
+  // this fixture uses). The importer's lineage dedupe then skips our
+  // creates and per-tx routing can't resolve another entity's account.
+  // Remove that residue too — verified test-only rows (sourceSystem =
+  // NETSUITE, never referenced by seed JE lines).
+  await prisma.account.deleteMany({
+    where: {
+      sourceSystem: "NETSUITE",
+      tenantId,
+      code: { startsWith: "NS" },
+    },
   });
 
   await prisma.legalEntity.deleteMany({
