@@ -13,6 +13,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "demo": "tsx prisma/demo.ts",
+    "demo:ns-multi-sub": "tsx prisma/demo-ns-multi-sub.ts",
     "db:restore-ddl": "prisma db execute --file prisma/sql/migration-mirror.sql && prisma db execute --file prisma/sql/audit-log-append-only.sql",
     "db:reset": "prisma db push --force-reset --skip-generate && npm run db:restore-ddl && npm run db:seed",
     "test": "vitest run",
