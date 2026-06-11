@@ -28,6 +28,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { GET } from "@/app/api/journal-entries/[id]/csv/route";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -120,7 +121,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+  });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });

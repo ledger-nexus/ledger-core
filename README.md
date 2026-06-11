@@ -61,14 +61,14 @@ Every accounting system — QuickBooks, NetSuite, Sage, the new wave (Rillet, Nu
 ```bash
 git clone https://github.com/ledger-nexus/ledger-core.git
 cd ledger-core
-pnpm install
+npm install
 cp .env.example .env
 # Edit .env: point DATABASE_URL at any Postgres (Neon free tier is easiest)
 
-pnpm db:push      # create schema
-pnpm db:seed      # load Northwind Cloud — 6 months across 3 books
-pnpm test         # run the invariant suite
-pnpm dev          # http://localhost:3000 — the v0.7 UI
+npm run db:push      # create schema
+npm run db:seed      # load Northwind Cloud — 6 months across 3 books
+npm test         # run the invariant suite
+npm run dev          # http://localhost:3000 — the v0.7 UI
 ```
 
 For deploying the public live demo (Vercel + Neon, ~10 minutes end-to-end) see [`docs/deployment.md`](docs/deployment.md).

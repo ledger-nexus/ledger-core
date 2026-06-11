@@ -29,12 +29,12 @@ From your local machine:
 ```bash
 git clone https://github.com/ledger-nexus/ledger-core.git
 cd ledger-core
-pnpm install
+npm install
 cp .env.example .env
 # Paste the Neon connection string into DATABASE_URL in .env
-pnpm db:push       # creates all the ledger-core tables
-pnpm db:seed       # loads the Northwind multi-book demo
-pnpm test          # confirms invariants hold against the live DB
+npm run db:push       # creates all the ledger-core tables
+npm run db:seed       # loads the Northwind multi-book demo
+npm test          # confirms invariants hold against the live DB
 ```
 
 The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS) with all sub-ledgers populated. The headline assertions (multi-book divergence, AR/AP reconciliation, book-tax difference) verify in under 30 seconds.
@@ -47,7 +47,7 @@ The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS
    - `DATABASE_URL` — paste the same Neon **pooled** connection string.
 4. Build settings (defaults are correct):
    - Build command: `prisma generate && next build`
-   - Install command: `pnpm install` (or `npm install`)
+   - Install command: `npm install`
 5. Click **Deploy**.
 
 First deploy takes ~2 minutes. Subsequent pushes auto-deploy on the `main` branch.
@@ -125,15 +125,158 @@ Live since v0.8. Authenticated by an `ADMIN_TOKEN` env var.
    a GET handler with bearer-token check. For the v0.8 demo, manual
    triggers are sufficient.
 
-### Option 2 — `pnpm db:reset` (local with prod DATABASE_URL)
+### Option 2 — `npm run db:reset` (local with prod DATABASE_URL)
 
-For a truly clean slate (drops every table, re-runs migrations, re-seeds):
+For a truly clean slate:
 
 ```bash
-DATABASE_URL=<neon-pooled-url> pnpm db:reset
+DATABASE_URL=<neon-pooled-url> npm run db:reset
 ```
 
-This is destructive — it also drops QBO/NS-imported entities. Use Option 1 unless you want a from-scratch wipe.
+This runs three steps in order:
+
+1. `prisma db push --force-reset` — drops everything, re-creates the schema
+   from `schema.prisma`;
+2. `npm run db:restore-ddl` — applies `prisma/sql/migration-mirror.sql` and
+   `prisma/sql/audit-log-append-only.sql`, the migration-only DDL that
+   `db push` cannot create (the silent append-only RULE pair on `audit_log`,
+   the append-only triggers on `close_task_state_change`, the ledger CHECK
+   constraints, GIN indexes, and the lineage partial unique index). Skipping
+   this step silently strips the SOC 2 append-only enforcement — exactly
+   what the 2026-06-10 incident did to production;
+3. `npm run db:seed` — self-bootstraps the default tenant (the
+   `ensureDefaultTenant` helper creates `app_user`
+   `ci-bootstrap@northwind.test` + tenant `slug='default'` when missing —
+   the rows migration `0002_multi_tenancy`'s DO block would create in a
+   migrate-deploy world) and loads Northwind + the consolidation demo.
+
+This is destructive — it also drops QBO/NS-imported entities. Use Option 1
+unless you want a from-scratch wipe.
+
+**Why `db push --force-reset`, not `prisma migrate reset`:** this repo has no
+baseline `0000_init` migration — the schema has always been managed via
+`prisma db push`, and `prisma/migrations/` holds only incremental add-ons.
+`migrate reset` drops the schema and then replays only those incrementals, so
+the very first statement (`0001_constraints`' `ALTER TABLE "gl_entry_line"`)
+fails with P3018 "relation gl_entry_line does not exist" — nothing ever
+created the base tables — and the database is left EMPTY. This happened on
+2026-06-10 and required a full manual recovery.
+
+#### db:reset caveats — read BEFORE running
+
+1. **The Postgres database is SHARED with the companion repos.** `recon`,
+   `revenue-rec`, `fa-amort`, and `integrations` own tables in the same
+   database, and `db push --force-reset` drops those too. After a reset,
+   re-create each companion's tables from that companion repo — each one
+   applies its DDL via `prisma db execute` raw SQL (additive-only). NEVER run
+   `prisma db push` from a companion repo: a companion's schema doesn't
+   include ledger-core's tables, so its push would drop them.
+
+2. **Adding migration-only DDL in a future migration?** Add it to
+   `prisma/sql/migration-mirror.sql` too (idempotently), or fresh and reset
+   databases won't have it. CI applies the same file (the "Apply
+   migration-mirror DDL" step), so a forgotten mirror entry shows up as a
+   red build the moment a test probes the enforcement. The two objects that
+   historically had no in-repo source at all — the `audit_log` append-only
+   RULE pair and the `gl_entry_header_lineage_uniq` partial unique index —
+   now have one: `prisma/migrations/0015_audit_log_rules_and_lineage_uniq/`
+   carries byte-exact captures of pre-incident production (recovered via a
+   Neon point-in-time branch); the applied forms live in
+   `prisma/sql/audit-log-append-only.sql` and mirror section 5.
+
+---
+
+## Slack notifier (optional)
+
+The close-management surface ships with a Slack notifier that pings configured webhooks when high-severity close alerts appear (recon `EXCEPTION`, required blocked task, flux statement with stale `NEEDS_COMMENT`). Setup takes ~5 minutes.
+
+### Environment variables
+
+Two env vars need to be set in **Vercel → Settings → Environment Variables** for the notifier to function. Both should be **encrypted (sensitive)** and scoped to **Production + Preview**:
+
+| Name | Purpose | Generate |
+|---|---|---|
+| `WEBHOOK_ENCRYPTION_KEY` | AES-256-GCM key that encrypts every channel's webhook URL at rest. Stored in the `notification_channel.webhookUrl` column as ciphertext; never logged. | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` (32 bytes, base64) |
+| `CRON_SECRET` | Shared secret that gates `POST /api/cron/close-alerts-dispatch`. The cron worker passes it as `Authorization: Bearer <CRON_SECRET>`. | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (32 bytes hex; min 16 chars required by `isAuthorizedCronRequest`) |
+
+**Key rotation.** `WEBHOOK_ENCRYPTION_KEY` is single-version in v1 — rotating it means re-encrypting every channel under the new key (no automated path). For portfolio scale (~10 channels per tenant) one-shot manual rotation is acceptable; larger deployments would want a versioned KMS scheme.
+
+### Configure the cron schedule
+
+`vercel.json` ships with two cron entries — one for each cadence:
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/close-alerts-dispatch",
+      "schedule": "*/15 9-18 * * 1-5"
+    },
+    {
+      "path": "/api/cron/close-alerts-digest",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}
+```
+
+Vercel cron times are **UTC**. Adjust the hours window if your team isn't on EU/UK time. The dedupe table (`notification_dispatch` with `@@unique([channelId, alertFingerprint])`) makes any cadence safe — every (channel, alert) tuple pings at most once regardless of how often the cron fires. Aggressive cadences waste compute but never double-page.
+
+**Two cadences, one channel chooses one.** A channel is either `IMMEDIATE` (per-alert ping, every 15m business hours) or `DIGEST_DAILY` (one batched message at 09:00 UTC summarizing every fresh alert since the last successful digest). Pick the mode when you create the channel; flip it later from the channel's edit panel. Same dedupe table backs both modes — flipping a channel mid-day moves it to the new cadence on the next cron tick.
+
+### Wire a Slack channel
+
+1. Sign into Vercel + redeploy (env vars require a new deploy to take effect).
+2. Open the app. Sign in as a **tenant admin**.
+3. Sidebar → **Admin** → **Slack channels · alerts** (visible to admins only).
+4. **Add a Slack channel** form:
+   - **Channel name** — operator-facing label, e.g. `#finance close alerts`
+   - **Slack webhook URL** — create at https://api.slack.com/messaging/webhooks; copy the full URL (starts with `https://hooks.slack.com/services/T.../B.../...`). The form masks the value as you type.
+   - **Severity filter** — pick `high` only, or leave blank for all severities.
+   - **Cadence** — `Immediate` (pings every 15m business hours, one Slack message per alert) or `Daily digest` (one batched message at 09:00 UTC summarizing all fresh alerts). Defaults to Immediate.
+5. Click **Add channel**. The URL is encrypted under `WEBHOOK_ENCRYPTION_KEY` before the row lands in the DB.
+6. Click **Test** on the new row. A diagnostic message lands in the Slack channel ("Test message from ledger-core notification channel ..."). If you see `SLACK_REJECTED` or `DECRYPT_FAILED`, the audit log under **Admin → Audit log** carries the diagnostic — filter by `resource=NotificationChannel`.
+
+### Audit trail
+
+Every dispatch — successful or failed — writes a row to `notification_dispatch` with status code + error. Every admin action on a channel (create / update / delete / test / setEnabled) writes a `PRIVILEGED_ACTION` row to `audit_log` with the masked URL only — the plaintext webhook URL never appears in any audit-visible payload. The cron tick itself writes one aggregate `PRIVILEGED_ACTION` row per invocation summarizing tenants scanned + alerts dispatched + errors.
+
+### Rotating WEBHOOK_ENCRYPTION_KEY
+
+The encryption key should rotate periodically (SOC 2 CC6.7 — annual minimum; sooner if a deploy team-member leaves with prior access to the secret). The repo ships a one-shot rotation script:
+
+1. Generate a new key:
+   ```bash
+   NEW_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
+   ```
+
+2. Set the OLD + NEW keys as separate env vars locally (do NOT touch the live `WEBHOOK_ENCRYPTION_KEY` yet — it must stay set to OLD until the script finishes):
+   ```bash
+   export WEBHOOK_ENCRYPTION_KEY_OLD=<the current Vercel value>
+   export WEBHOOK_ENCRYPTION_KEY_NEW="$NEW_KEY"
+   export DATABASE_URL=<your production connection string>
+   ```
+
+3. Run the rotation:
+   ```bash
+   npx tsx scripts/rotate-webhook-encryption-key.ts
+   ```
+
+   Output is JSON with `{ok, total, rotated, alreadyOnNew, errors, durationMs}`. The script is idempotent — re-runs after a partial failure re-do only what's still on the OLD key.
+
+4. **Confirm `ok: true` and `errors: []` before proceeding.** Investigate any errors first (the channel's webhook URL was encrypted under neither OLD nor NEW; likely the row predates this key OR a previous rotation left it in a different state).
+
+5. In Vercel → Settings → Env Vars, update `WEBHOOK_ENCRYPTION_KEY` to the NEW value. Redeploy.
+
+6. Smoke-test: open the admin UI, click **Test** on every channel; each should still deliver. If any fail with `DECRYPT_FAILED`, restore the OLD env value, investigate, retry.
+
+7. Once production is verified, wipe the OLD key from your secret store.
+
+The rotation does NOT re-encrypt other column-level encrypted fields (those are managed by the PrismaExtension stack with its own key). For a portfolio-wide rotation, run the equivalent script in each repo.
+
+### Disabling the notifier
+
+To pause without removing config: in the admin UI, click **Disable** on every channel (or toggle individual ones). The cron continues to run but emits no dispatches. To remove entirely: delete `vercel.json`'s `crons` block and unset the env vars.
 
 ---
 
@@ -143,10 +286,10 @@ This is destructive — it also drops QBO/NS-imported entities. Use Option 1 unl
 The Neon free tier suspends inactive databases after ~5 minutes of idle. The first request after suspension takes ~3 seconds to wake up — subsequent requests are fast. For a demo this is fine; for production-style usage, upgrade to a paid Neon tier or use the autoscaling pooler.
 
 **`PrismaClientInitializationError: gen_random_uuid() does not exist`**
-Make sure your Postgres version is 13+ AND `pgcrypto` is available. Neon has it enabled by default. Self-hosted Postgres: run `CREATE EXTENSION IF NOT EXISTS pgcrypto;` before `pnpm db:push`.
+Make sure your Postgres version is 13+ AND `pgcrypto` is available. Neon has it enabled by default. Self-hosted Postgres: run `CREATE EXTENSION IF NOT EXISTS pgcrypto;` before `npm run db:push`.
 
 **Build fails with `Type error: Cannot find module 'next/headers'`**
-The repo targets Next.js 14. Make sure `next` is installed via `pnpm install` before running `next build`.
+The repo targets Next.js 14. Make sure `next` is installed via `npm install` before running `next build`.
 
 ---
 
