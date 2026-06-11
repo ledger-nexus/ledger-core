@@ -271,22 +271,24 @@
    "entity": "5000",
    "trandate": "2026-04-15",
    "duedate": "2026-05-15",
+   "total": 1000.0,
+   "amountremaining": 1000.0,
    "currency": "GBP",
    "memo": "UK consulting services",
+   "custbody_priority": "STANDARD",
    "lines": [
     {
-     "linenum": "1",
-     "account": "5000",
-     "amount": 1000,
-     "rate": 1000,
-     "quantity": 1,
+     "linesequencenumber": 1,
+     "item": "7000",
+     "account": "4000",
+     "amount": 1000.0,
+     "memo": "Vandelay UK \u2014 consulting services",
      "class": "10",
      "department": "20",
      "location": "30",
-     "custcol_region": "100"
+     "custcol_region": "101"
     }
-   ],
-   "total": 1000
+   ]
   }
  ],
  "VendorBill": [
