@@ -86,6 +86,24 @@ async function cleanup() {
       sourceRecordId: { in: ["98001", "98002"] },
     },
   });
+  // NS account lineage triples are tenant-global; another suite's
+  // entity-scoped NS1200 etc. would make the importer's dedupe skip
+  // creating ours, and posting can't see another entity's account.
+  // Clear the shared-lineage accounts so this suite recreates them in
+  // its own scope. Sequential vitest (singleFork) makes this safe.
+  // NEUTRALIZE (not delete) the residue lineage: other suites' JE lines
+  // may reference these accounts (FK), so deletion can throw. Nulling
+  // the lineage triple makes the importer's dedupe miss — this suite
+  // then creates fresh accounts in its own scope — while the residue
+  // rows keep their FK integrity and stop appearing in NS exports.
+  await prisma.account.updateMany({
+    where: {
+      sourceSystem: "NETSUITE",
+      tenantId,
+      sourceRecordId: { in: ["1000", "1200", "2000", "4000", "7200"] },
+    },
+    data: { sourceSystem: null, sourceRecordType: null, sourceRecordId: null },
+  });
   await prisma.legalEntity.deleteMany({
     where: { tenantId, code: { in: [`${PREFIX}_NS1`] } },
   });

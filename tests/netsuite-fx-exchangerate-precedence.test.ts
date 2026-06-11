@@ -104,6 +104,21 @@ async function cleanup() {
   // their JEs would block the delete via the gl_entry_line FK. The
   // accounts persist across tests; that's fine, the importer's
   // lineage-triple upsert makes re-creation idempotent.
+  // Same shared-lineage clearing as the realized-G/L suite — see its
+  // cleanup comment. Account ids this suite imports: 1200, 4000.
+  // NEUTRALIZE (not delete) the residue lineage: other suites' JE lines
+  // may reference these accounts (FK), so deletion can throw. Nulling
+  // the lineage triple makes the importer's dedupe miss — this suite
+  // then creates fresh accounts in its own scope — while the residue
+  // rows keep their FK integrity and stop appearing in NS exports.
+  await prisma.account.updateMany({
+    where: {
+      sourceSystem: "NETSUITE",
+      tenantId,
+      sourceRecordId: { in: ["1200", "4000"] },
+    },
+    data: { sourceSystem: null, sourceRecordType: null, sourceRecordId: null },
+  });
   await prisma.legalEntity.deleteMany({
     where: { tenantId, code: { in: [`${PREFIX}_NS1`] } },
   });
