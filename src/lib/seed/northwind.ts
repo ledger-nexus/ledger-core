@@ -76,6 +76,7 @@ async function seedFxRates(prisma: PrismaClient) {
     ["EUR", "USD", "2026-06-30", "CLOSE", "1.1150"],
     ["EUR", "USD", "2026-06-30", "AVG", "1.1015"],
     // GBP->USD.
+    ["GBP", "USD", "2026-01-01", "CLOSE", "1.2700"],
     ["GBP", "USD", "2026-03-31", "CLOSE", "1.2680"],
     ["GBP", "USD", "2026-06-30", "CLOSE", "1.2810"],
     ["GBP", "USD", "2026-06-30", "AVG", "1.2745"],

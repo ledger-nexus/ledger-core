@@ -19,7 +19,9 @@
 // sourceRecordId) before creating. Re-runs produce zero new rows.
 
 import { PrismaClient } from "@prisma/client";
+import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../../accounting/post-journal";
+import { resolveFxRate } from "../../accounting/fx";
 import { openArItem, applyArPayment } from "../../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../../accounting/sub-ledgers/ap";
 import {
@@ -124,6 +126,87 @@ export async function importFromNs(
   const mappingVersion = input.mappingVersion ?? "ns-v1";
   const source = input.source ?? "IMPORT";
 
+  // FX Phase 1.5 — look up the book's reporting currency ONCE so
+  // every per-tx FX rate lookup knows the target currency. Without
+  // this, the importer was passing GBP-denominated debit/credit pairs
+  // and they got stored as if they were USD — the v1.26 disclosure
+  // banner's root cause.
+  const bookForFx = await prisma.book.findUniqueOrThrow({
+    where: { code: bookCode },
+    select: { reportingCurrencyId: true },
+  });
+  const bookReportingCurrencyId = bookForFx.reportingCurrencyId;
+
+  // Per-tx helper: look up the rate for (txCurrency → bookReporting)
+  // on the transaction's documentDate, multiply line debit/credit by
+  // it, and add transactionAmount = original signed (= debit - credit
+  // in transaction currency) per line. Same-currency case short-
+  // circuits to {fxRate: 1, lines unchanged}.
+  //
+  // The mapper layer already populates each transaction's
+  // `currencyCode` (NS transaction.currency). When that equals the
+  // book's reporting currency, the helper returns the input lines
+  // unchanged — no rate lookup, no overhead, no behavior change for
+  // single-currency callers (the v0.6 backward-compat path).
+  async function convertLinesForFx<L extends {
+    accountCode: string;
+    debit?: Decimal | string;
+    credit?: Decimal | string;
+    description?: string;
+    partyCode?: string;
+    itemCode?: string;
+  }>(input: {
+    transactionCurrencyId: string;
+    documentDate: Date;
+    lines: L[];
+  }): Promise<{
+    fxRate: Decimal;
+    lines: Array<L & {
+      debit: Decimal;
+      credit: Decimal;
+      transactionAmount: Decimal;
+      reportingAmount: Decimal;
+    }>;
+  }> {
+    // CLOSE on-or-before the document date — the daily-close proxy for
+    // the transaction-date spot rate (ASC 830 initial measurement).
+    // resolveFxRate throws FxRateNotFoundError when unseeded (fail loud,
+    // never silently 1) and inverts the opposite-direction row if needed.
+    const { rate: fxRate } = await resolveFxRate(prisma, {
+      fromCurrency: input.transactionCurrencyId,
+      toCurrency: bookReportingCurrencyId,
+      asOf: input.documentDate,
+    });
+    return {
+      fxRate,
+      lines: input.lines.map((l) => {
+        // Coerce mapper-output (string | Decimal | undefined) to Decimal.
+        // Mapper layer produces strings; we need Decimal for arithmetic.
+        const d = l.debit instanceof Decimal
+          ? l.debit
+          : new Decimal(l.debit ?? "0");
+        const c = l.credit instanceof Decimal
+          ? l.credit
+          : new Decimal(l.credit ?? "0");
+        // transactionAmount = signed original (debit positive, credit
+        // negative) IN TRANSACTION CURRENCY. The original line debit/
+        // credit are NS-native; we preserve them in transactionAmount.
+        const signedTxn = d.minus(c);
+        // Scale debit/credit + reportingAmount to BOOK REPORTING currency
+        // by multiplying by fxRate. debit and credit can't both be
+        // non-zero on the same line (XOR enforced at DB level), so
+        // multiplying both is safe — one side is always zero.
+        return {
+          ...l,
+          debit: d.times(fxRate),
+          credit: c.times(fxRate),
+          transactionAmount: signedTxn,
+          reportingAmount: signedTxn.times(fxRate),
+        };
+      }),
+    };
+  }
+
   // v0.7 — resolve entity strategy. Single mode keeps the v0.6 behavior;
   // multi mode runs setupSubsidiaries first and routes each transaction
   // to its NS-declared subsidiary.
@@ -131,6 +214,14 @@ export async function importFromNs(
     entityCode: input.entityCode,
     entityResolution: input.entityResolution,
   });
+
+  // The "primary entity" for things that aren't transaction-scoped:
+  //   - In single mode → the one entity the caller named.
+  //   - In multi mode → the entity that owns CustomFieldDefinitions +
+  //     Dimensions + DimensionValues (these are tenant-wide via the
+  //     existing schema, but we still need an entityCode for the
+  //     legacy lookup paths that haven't been rewritten yet).
+  // We resolve it after subsidiary upserts in multi mode.
 
   // The "primary entity" for things that aren't transaction-scoped:
   //   - In single mode → the one entity the caller named.
@@ -533,10 +624,17 @@ export async function importFromNs(
       })
     );
 
+    const { fxRate, lines: fxLines } = await convertLinesForFx({
+      transactionCurrencyId: m.currencyCode,
+      documentDate: m.documentDate,
+      lines: resolvedLines,
+    });
+
     await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(nsJe.subsidiary, "JournalEntry", nsJe.internalid),
       bookCode,
       currencyCode: m.currencyCode,
+      fxRate,
       documentDate: m.documentDate,
       memo: m.memo,
       source,
@@ -545,14 +643,18 @@ export async function importFromNs(
       sourceRecordId: nsJe.internalid,
       sourcePayload: m.sourcePayload as any,
       mappingVersion,
-      lines: resolvedLines.map((l) => ({
+      lines: fxLines.map((l, idx) => ({
         accountCode: l.accountCode,
         debit: l.debit,
         credit: l.credit,
+        transactionAmount: l.transactionAmount,
+        reportingAmount: l.reportingAmount,
         description: l.description,
         partyCode: l.partyCode,
         itemCode: l.itemCode,
-        extensions: l.dimensionSetId ? ({ dimensionSetId: l.dimensionSetId } as any) : undefined,
+        extensions: resolvedLines[idx].dimensionSetId
+          ? ({ dimensionSetId: resolvedLines[idx].dimensionSetId } as any)
+          : undefined,
       })),
     });
     result.journalEntriesImported += 1;
@@ -591,10 +693,16 @@ export async function importFromNs(
       })
     );
 
+    const { fxRate: invFxRate, lines: invFxLines } = await convertLinesForFx({
+      transactionCurrencyId: m.currencyCode,
+      documentDate: m.documentDate,
+      lines: resolvedLines,
+    });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
       bookCode,
       currencyCode: m.currencyCode,
+      fxRate: invFxRate,
       documentDate: m.documentDate,
       memo: m.memo,
       source,
@@ -605,10 +713,12 @@ export async function importFromNs(
       mappingVersion,
       extensions:
         Object.keys(m.customFields).length > 0 ? (m.customFields as any) : undefined,
-      lines: resolvedLines.map((l) => ({
+      lines: invFxLines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.debit,
         credit: l.credit,
+        transactionAmount: l.transactionAmount,
+        reportingAmount: l.reportingAmount,
         description: l.description,
         partyCode: l.partyCode,
         itemCode: l.itemCode,
@@ -661,10 +771,16 @@ export async function importFromNs(
         return { ...l, dimensionSetId };
       })
     );
+    const { fxRate: billFxRate, lines: billFxLines } = await convertLinesForFx({
+      transactionCurrencyId: m.currencyCode,
+      documentDate: m.documentDate,
+      lines: resolvedLines,
+    });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
       bookCode,
       currencyCode: m.currencyCode,
+      fxRate: billFxRate,
       documentDate: m.documentDate,
       memo: m.memo,
       source,
@@ -673,10 +789,12 @@ export async function importFromNs(
       sourceRecordId: bill.internalid,
       sourcePayload: m.sourcePayload as any,
       mappingVersion,
-      lines: resolvedLines.map((l) => ({
+      lines: billFxLines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.debit,
         credit: l.credit,
+        transactionAmount: l.transactionAmount,
+        reportingAmount: l.reportingAmount,
         description: l.description,
         partyCode: l.partyCode,
         itemCode: l.itemCode,
@@ -713,10 +831,16 @@ export async function importFromNs(
       continue;
     }
     const { entry: m, application } = mapNsCustomerPayment(pmt, mappingVersion);
+    const { fxRate: pmtFxRate, lines: pmtFxLines } = await convertLinesForFx({
+      transactionCurrencyId: m.currencyCode,
+      documentDate: m.documentDate,
+      lines: m.lines,
+    });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "CustomerPayment", pmt.internalid),
       bookCode,
       currencyCode: m.currencyCode,
+      fxRate: pmtFxRate,
       documentDate: m.documentDate,
       memo: m.memo,
       source,
@@ -725,10 +849,12 @@ export async function importFromNs(
       sourceRecordId: pmt.internalid,
       sourcePayload: m.sourcePayload as any,
       mappingVersion,
-      lines: m.lines.map((l) => ({
+      lines: pmtFxLines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.debit,
         credit: l.credit,
+        transactionAmount: l.transactionAmount,
+        reportingAmount: l.reportingAmount,
         description: l.description,
         partyCode: l.partyCode,
       })),
@@ -758,10 +884,16 @@ export async function importFromNs(
       continue;
     }
     const { entry: m, application } = mapNsVendorPayment(pmt, mappingVersion);
+    const { fxRate: vpFxRate, lines: vpFxLines } = await convertLinesForFx({
+      transactionCurrencyId: m.currencyCode,
+      documentDate: m.documentDate,
+      lines: m.lines,
+    });
     const je = await postJournalEntry(prisma, {
       entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "VendorPayment", pmt.internalid),
       bookCode,
       currencyCode: m.currencyCode,
+      fxRate: vpFxRate,
       documentDate: m.documentDate,
       memo: m.memo,
       source,
@@ -770,10 +902,12 @@ export async function importFromNs(
       sourceRecordId: pmt.internalid,
       sourcePayload: m.sourcePayload as any,
       mappingVersion,
-      lines: m.lines.map((l) => ({
+      lines: vpFxLines.map((l) => ({
         accountCode: l.accountCode,
         debit: l.debit,
         credit: l.credit,
+        transactionAmount: l.transactionAmount,
+        reportingAmount: l.reportingAmount,
         description: l.description,
         partyCode: l.partyCode,
       })),
