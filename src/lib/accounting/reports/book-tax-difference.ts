@@ -81,37 +81,64 @@ export async function getBookTaxDifference(
     toBookCode: string;   // e.g. "US_TAX"
     periodStart: Date;
     periodEnd: Date;
+    /**
+     * Tenant the entity must belong to. UI/API callers MUST pass this
+     * (from getCurrentScope) — entity codes are only unique per tenant.
+     * Omitting it falls back to the legacy global entity lookup
+     * (substrate seeds + single-tenant scripts).
+     */
+    tenantId?: string;
   }
 ): Promise<BookTaxDifferenceReport> {
+  // Resolve the entity FIRST so the subtype scan below can pin to its
+  // tenant — the permanent/temporary heuristic keys off subtype, and a
+  // same-code account in another tenant must not drive the call.
+  const entity = await prisma.legalEntity.findFirst({
+    where: input.tenantId
+      ? { tenantId: input.tenantId, code: input.entityCode }
+      : { code: input.entityCode },
+    select: { id: true, tenantId: true },
+  });
+  if (!entity) throw new Error(`Unknown entity: ${input.entityCode}`);
+
   const [bookPnl, taxPnl, bookBs, taxBs] = await Promise.all([
     getIncomeStatement(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.fromBookCode },
+      { entityCode: input.entityCode, bookCode: input.fromBookCode, tenantId: input.tenantId },
       input.periodStart,
       input.periodEnd
     ),
     getIncomeStatement(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.toBookCode },
+      { entityCode: input.entityCode, bookCode: input.toBookCode, tenantId: input.tenantId },
       input.periodStart,
       input.periodEnd
     ),
     getBalanceSheet(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.fromBookCode },
+      { entityCode: input.entityCode, bookCode: input.fromBookCode, tenantId: input.tenantId },
       input.periodEnd
     ),
     getBalanceSheet(
       prisma,
-      { entityCode: input.entityCode, bookCode: input.toBookCode },
+      { entityCode: input.entityCode, bookCode: input.toBookCode, tenantId: input.tenantId },
       input.periodEnd
     ),
   ]);
 
   // Build a map of account → (bookAmount, taxAmount) for P&L accounts.
   // Pull subtypes for classification.
+  //
+  // tenantId pin: this used to scan the ENTIRE account table — every
+  // tenant's chart. The map is last-write-wins by code, so another
+  // tenant's same-code account could flip a delta's permanent/temporary
+  // classification. Codes are only unique per tenant; scan ours only.
   const accountSubtypeMap = new Map<string, string | null>();
   const accounts = await prisma.account.findMany({
+    where: {
+      tenantId: entity.tenantId,
+      OR: [{ entityId: null }, { entityId: entity.id }],
+    },
     select: { code: true, subtype: true },
   });
   for (const a of accounts) accountSubtypeMap.set(a.code, a.subtype);

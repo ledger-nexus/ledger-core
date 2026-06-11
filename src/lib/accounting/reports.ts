@@ -199,13 +199,19 @@ export async function getIncomeStatement(
   periodEnd: Date
 ): Promise<IncomeStatement> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, entityTenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the IS page renderer can
   // build a tree via buildHierarchy() without a second query.
+  //
+  // tenantId pin: shared accounts (entityId=null) exist PER TENANT, so
+  // without the filter every tenant's shared chart lands in this scan —
+  // zero-balance rows from other tenants leak their codes/names, and the
+  // same-code dedup below can shadow this tenant's real account.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
+      tenantId: entityTenantId,
       type: { in: ["REVENUE", "EXPENSE"] },
       OR: [{ entityId: null }, { entityId }],
     },
@@ -298,13 +304,19 @@ export async function getBalanceSheet(
   asOf: Date
 ): Promise<BalanceSheet> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, entityTenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the BS page renderer can
   // build a tree via buildHierarchy() without a second query.
+  //
+  // tenantId pin: shared accounts (entityId=null) exist PER TENANT, so
+  // without the filter every tenant's shared chart lands in this scan —
+  // zero-balance rows from other tenants leak their codes/names, and the
+  // same-code dedup below can shadow this tenant's real account.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
+      tenantId: entityTenantId,
       type: { in: ["ASSET", "LIABILITY", "EQUITY"] },
       OR: [{ entityId: null }, { entityId }],
     },

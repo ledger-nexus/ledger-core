@@ -46,6 +46,7 @@ export default async function BookTaxDifferencePage({
     toBookCode: bookTo,
     periodStart: new Date(from),
     periodEnd: new Date(to),
+    tenantId: scope.tenantId,
   });
 
   return (
