@@ -117,6 +117,49 @@ export default async function ConsolidationPage({
         </div>
       </div>
 
+      {/* Multi-currency disclosure (CPA credibility). When the included
+          entities span more than one functional currency, the
+          consolidated totals are NOT FX-translated — they're naïve sums
+          of debit/credit values in each entity's own currency. Show the
+          limitation rather than hide it. The proper ASC 830 translation
+          (current rate / temporal / CTA accounting) is a follow-up arc. */}
+      {report.hasMultiCurrency && (
+        <Card>
+          <CardContent className="border-l-4 border-warning bg-warning/5 px-5 py-4">
+            <div className="flex items-start gap-3">
+              <Badge tone="warning">FX translation not active</Badge>
+              <div className="text-sm text-ink-900">
+                <div>
+                  Included entities use{" "}
+                  {report.distinctCurrencies.length} distinct functional
+                  currencies:{" "}
+                  {report.distinctCurrencies.map((c, i) => (
+                    <span key={c}>
+                      <code className="rounded bg-white px-1.5 py-0.5 text-xs ring-1 ring-ink-200">
+                        {c}
+                      </code>
+                      {i < report.distinctCurrencies.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                  . The consolidated totals below are{" "}
+                  <strong>naïve sums of debit/credit values in each
+                    entity's own currency</strong>{" "}
+                  — they are NOT FX-translated to a single reporting
+                  currency.
+                </div>
+                <div className="mt-1.5 text-xs text-ink-500">
+                  Proper ASC 830 translation (current rate / temporal /
+                  CTA accounting) is on the roadmap. Until then, treat
+                  cross-currency consolidated balances as indicative
+                  only. Per-entity TBs (in their own currency) are
+                  accurate.
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Summary */}
       <Card>
         <CardContent className="flex items-center justify-between px-5 py-4">

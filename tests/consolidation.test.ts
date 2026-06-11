@@ -315,3 +315,71 @@ describe("Consolidation: intercompany elimination", () => {
     expect(ar?.consolidatedDebit.toNumber()).toBe(800);
   });
 });
+
+describe("Consolidation: multi-currency disclosure", () => {
+  // When the included entities all share the same functional currency,
+  // hasMultiCurrency must be false — no banner shown, no false alarm.
+  // When at least one sub uses a different currency, the report flags
+  // it so the page can surface the limitation.
+
+  beforeAll(async () => {
+    await clearAll();
+    await seedHierarchy(); // PARENT/SUB_A/SUB_B all USD
+  });
+
+  afterAll(async () => {
+    await clearAll();
+    await prisma.$disconnect();
+  });
+
+  it("hasMultiCurrency is false when every entity uses the same functional currency", async () => {
+    const report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: PARENT,
+      bookCode: BOOK,
+      asOf: new Date("2026-12-31"),
+    });
+    expect(report.hasMultiCurrency).toBe(false);
+    expect(report.distinctCurrencies).toEqual(["USD"]);
+    expect(
+      report.entitiesIncluded.every((e) => e.functionalCurrencyId === "USD")
+    ).toBe(true);
+  });
+
+  it("hasMultiCurrency is true when a sub uses a different currency", async () => {
+    // Add GBP currency + flip SUB_B to GBP. We don't post any GBP
+    // transactions — the disclosure logic is structural, based on
+    // entity functional currency only.
+    await prisma.currency.upsert({
+      where: { code: "GBP" },
+      create: { code: "GBP", name: "Pound Sterling", decimals: 2, symbol: "£" },
+      update: {},
+    });
+    const subB = await prisma.legalEntity.findFirstOrThrow({
+      where: { code: SUB_B },
+      select: { id: true },
+    });
+    await prisma.legalEntity.update({
+      where: { id: subB.id },
+      data: { functionalCurrencyId: "GBP" },
+    });
+
+    const report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: PARENT,
+      bookCode: BOOK,
+      asOf: new Date("2026-12-31"),
+    });
+    expect(report.hasMultiCurrency).toBe(true);
+    expect(report.distinctCurrencies.sort()).toEqual(["GBP", "USD"]);
+
+    // The entitiesIncluded field surfaces each entity's currency so
+    // the page can show "SUB_A (USD), SUB_B (GBP)" in the banner.
+    const subBEntity = report.entitiesIncluded.find((e) => e.code === SUB_B);
+    expect(subBEntity?.functionalCurrencyId).toBe("GBP");
+
+    // Critical invariant: the disclosure flag does NOT alter the
+    // numeric totals — they're still the naïve sum we always computed.
+    // The banner just tells the operator that those numbers mix
+    // currencies. Once FX translation lands, this assertion changes.
+    expect(report.balances).toBe(true);
+  });
+});
