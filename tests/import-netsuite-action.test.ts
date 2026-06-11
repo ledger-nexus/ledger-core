@@ -170,3 +170,105 @@ describe("importNsAction server-side prefix/code validation (defense-in-depth)",
     expect(r.ok).toBe(false);
   });
 });
+
+describe("importNsAction multi-book validation (v0.9 Phase 5)", () => {
+  // A NS export with an AccountingBook array — required for multi-book
+  // mode. The Subsidiary array is present too so multi-sub callers can
+  // also opt into multi-book without re-exporting.
+  const multiBookExport = JSON.stringify({
+    _meta: {},
+    Account: [{ internalid: "1" }],
+    Subsidiary: [{ internalid: "1", name: "X", currency: "USD" }],
+    AccountingBook: [
+      { internalid: "1", name: "US GAAP" },
+      { internalid: "2", name: "US TAX" },
+    ],
+  });
+
+  it("rejects multi book mode without a bookMapping", async () => {
+    const r = await importNsAction({
+      exportJson: multiBookExport,
+      mode: "multi",
+      entityCodePrefix: "ACME",
+      bookMode: "multi",
+      // Missing bookMapping entirely.
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects multi book mode with an empty bookMapping", async () => {
+    const r = await importNsAction({
+      exportJson: multiBookExport,
+      mode: "multi",
+      entityCodePrefix: "ACME",
+      bookMode: "multi",
+      bookMapping: {},
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects multi book mode when the export has no AccountingBook array", async () => {
+    const exportWithoutBooks = JSON.stringify({
+      _meta: {},
+      Account: [{ internalid: "1" }],
+      Subsidiary: [{ internalid: "1", name: "X", currency: "USD" }],
+      // No AccountingBook
+    });
+    const r = await importNsAction({
+      exportJson: exportWithoutBooks,
+      mode: "multi",
+      entityCodePrefix: "ACME",
+      bookMode: "multi",
+      bookMapping: { "1": "US_GAAP" },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects bookMapping with an invalid NS internalid (SQL-ish key)", async () => {
+    const r = await importNsAction({
+      exportJson: multiBookExport,
+      mode: "multi",
+      entityCodePrefix: "ACME",
+      bookMode: "multi",
+      bookMapping: { "1'; DROP TABLE": "US_GAAP" },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects bookMapping with an invalid ledger-core book code value", async () => {
+    const r = await importNsAction({
+      exportJson: multiBookExport,
+      mode: "multi",
+      entityCodePrefix: "ACME",
+      bookMode: "multi",
+      bookMapping: { "1": "US_GAAP; rm -rf /" },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects bookMapping with too many entries (memory DoS guard)", async () => {
+    const huge: Record<string, string> = {};
+    for (let i = 0; i < 50; i++) huge[String(i)] = "US_GAAP";
+    const r = await importNsAction({
+      exportJson: multiBookExport,
+      mode: "multi",
+      entityCodePrefix: "ACME",
+      bookMode: "multi",
+      bookMapping: huge,
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects bookMapping with non-string values", async () => {
+    const r = await importNsAction({
+      exportJson: multiBookExport,
+      mode: "multi",
+      entityCodePrefix: "ACME",
+      bookMode: "multi",
+      // Cast through unknown to simulate a malicious POST with a
+      // non-string value slipping past TypeScript at the wire.
+      bookMapping: { "1": 42 as unknown as string },
+    });
+    expect(r.ok).toBe(false);
+  });
+});
