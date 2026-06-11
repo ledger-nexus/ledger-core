@@ -308,7 +308,22 @@ Both remaining FX items closed as one 4-PR arc. Period-end remeasurement of fore
 
 "AI suggests; humans approve; the system posts": `computeRevaluation` + `postRevaluation` are machine logic; nothing posts until a tenant admin clicks "Post revaluation", which posts `source=AI_APPROVED`. Money math is decimal.js throughout; the offset = −Σ(rounded gains) so entries balance to the cent.
 
-### v1.26+ — beyond
+### v1.26 — NS multi-subsidiary import arc (landed 2026-06-11)
+
+Built 2026-06-06 as a stacked 6-PR chain (#138, #140–#144), landed 2026-06-11 via the bottom-up merge train after the backlog triage. A real OneWorld NS export (3-sub Vandelay group: USD parent + USD USA + GBP UK) imports end-to-end and renders a consolidated trial balance with intercompany eliminations.
+
+- **EntityResolution discriminator** — `{mode: "single", entityCode} | {mode: "multi", entityCodePrefix}`; single mode preserves v0.6 behavior byte-for-byte (13/13 legacy tests).
+- **`subsidiaries.ts`** — `setupSubsidiaries` two-pass upsert builds the LegalEntity hierarchy (parent wiring, per-sub functional currency) before any transaction lands; frozen `NsSubsidiary` preserved in `LegalEntity.extensions.nsSourcePayload` for lineage replay.
+- **Chart-of-accounts Option A** — NS accounts go on the tenant-global chart (`Account.entityId: null`), matching NS's one-chart-many-subs reality; `postJournalEntry`'s resolver already unions global + entity-scoped accounts.
+- **Per-tx routing** — 7 call sites route by the NS `subsidiary` field; missing/unknown subsidiary throws with a named error.
+- **Reverse exporter + roundtrip proof** — `exportToNs` multi mode reconstructs the Subsidiary array byte-exact from `nsSourcePayload`; import→export→diff is empty and idempotent.
+- **`npm run demo:ns-multi-sub`** — the 30-second clip: wipes prior demo state, imports the fixture, prints the consolidated-TB URL. Verified live against the shared dev DB.
+- **`/import/netsuite` UI** — single + multi modes, hardened Server Action, sidebar link.
+- **Multi-currency disclosure banner** on `/reports/consolidation` (CPA credibility: states translation basis when subs differ in functional currency).
+- **Three defects fixed in transit** (the arc predated current main): e2e cleanup deleted JEs before AR open items (FK restricts — partial runs bricked later runs); `INV-UK-001` fixture lacked `total` (mapNsInvoice now rejects missing totals with a named error instead of a cryptic DecimalError); fixture lacked account 5000. e2e 5/5 + roundtrip 2/2 green vs the live shared DB.
+- PR #145 (the original status doc for this arc) closed as overtaken; this entry is its corrected graft.
+
+### v1.27+ — beyond
 The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) is fully shipped. Remaining FX depth — CTA for consolidated foreign entities (`POST_CTA` close-task stub), realized FX gain/loss on settlement (8310 account exists) — is open for when a multi-entity foreign-currency engagement asks for it.
 
 ---
