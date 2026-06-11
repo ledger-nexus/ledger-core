@@ -13,6 +13,7 @@ import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { tenantScopeOrNone } from "@/lib/db-sentinels";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +44,7 @@ export default async function JournalEntriesPage({
   // query plan AND closes the leak when Phase 4b makes entityCode no
   // longer globally unique.
   const tenant = await getCurrentTenant();
-  const tenantFilter = tenant ? { tenantId: tenant.id } : { tenantId: "__none__" };
+  const tenantFilter = tenantScopeOrNone(tenant?.id);
 
   // Search predicate. Postgres' `mode: "insensitive"` does an ILIKE
   // under the hood; for v1 we accept the full-table scan (the date

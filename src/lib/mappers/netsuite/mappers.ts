@@ -309,6 +309,14 @@ export function mapNsInvoice(
   customSegmentCodes: string[],
   mappingVersion = "ns-v1"
 ): MappedNsInvoiceResult {
+  // NS invoice exports always carry a header total; a missing one means
+  // a malformed export. Reject with a named error rather than letting
+  // decimal.js throw "[DecimalError] Invalid argument: undefined".
+  if (ns.total === undefined || ns.total === null) {
+    throw new Error(
+      `Invoice ${ns.tranid} (${ns.internalid}): missing required 'total' field`
+    );
+  }
   const total = new Decimal(ns.total);
   const arCode = findArAccountCode(ns);
   const customerCode = nsCustomerCode(ns.entity);
