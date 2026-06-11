@@ -10,7 +10,7 @@ import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getConsolidatedTrialBalance } from "../src/lib/accounting/reports/consolidation";
-import { CHART_OF_ACCOUNTS } from "../src/lib/db/chart-of-accounts";
+import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../src/lib/db/chart-of-accounts";
 
 const prisma = new PrismaClient();
 const PARENT = "CONS_TEST_PARENT";
@@ -93,6 +93,12 @@ async function seedHierarchy() {
         isBank: a.isBank ?? false,
         isMonetary: a.isMonetary ?? false,
         subtype: a.subtype,
+        // v0.8 FX Phase 4a — populate so the migration-backfill
+        // invariant (every account has a category) holds even when
+        // tests create accounts directly outside the seedNorthwind path.
+        translationCategory:
+          a.translationCategory ??
+          defaultTranslationCategory({ type: a.type, subtype: a.subtype }),
       },
     });
   }
