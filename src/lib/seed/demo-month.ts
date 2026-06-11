@@ -533,13 +533,17 @@ const DEMO_ACCOUNTS: Array<{
   normalBalance: "DEBIT" | "CREDIT";
   isContra?: boolean;
   isBank?: boolean;
+  isMonetary?: boolean;
 }> = [
-  { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT", isBank: true },
-  { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT" },
+  // DEMO_CO is single-currency USD, so isMonetary never drives a revaluation
+  // here — but the flag is set accurately (cash / AR / AP) so the demo chart
+  // matches the production chart's classification.
+  { code: "1000", name: "Cash — Operating", type: "ASSET", normalBalance: "DEBIT", isBank: true, isMonetary: true },
+  { code: "1200", name: "Accounts Receivable", type: "ASSET", normalBalance: "DEBIT", isMonetary: true },
   { code: "1400", name: "Prepaid Expenses", type: "ASSET", normalBalance: "DEBIT" },
   { code: "1500", name: "Computer Equipment", type: "ASSET", normalBalance: "DEBIT" },
   { code: "1510", name: "Accumulated Depreciation — Equipment", type: "ASSET", normalBalance: "CREDIT", isContra: true },
-  { code: "2000", name: "Accounts Payable", type: "LIABILITY", normalBalance: "CREDIT" },
+  { code: "2000", name: "Accounts Payable", type: "LIABILITY", normalBalance: "CREDIT", isMonetary: true },
   { code: "2100", name: "Accrued Expenses", type: "LIABILITY", normalBalance: "CREDIT" },
   { code: "2200", name: "Deferred Revenue", type: "LIABILITY", normalBalance: "CREDIT" },
   { code: "3000", name: "Common Stock", type: "EQUITY", normalBalance: "CREDIT" },
@@ -570,6 +574,7 @@ async function seedAccounts(prisma: PrismaClient): Promise<void> {
         normalBalance: a.normalBalance,
         isContra: a.isContra ?? false,
         isBank: a.isBank ?? false,
+        isMonetary: a.isMonetary ?? false,
         bookScope: ["US_GAAP", "US_TAX"],
       },
       update: { tenantId: entity.tenantId },

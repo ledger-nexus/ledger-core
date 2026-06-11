@@ -175,7 +175,8 @@ export async function getM3Detail(
   }
 
   // Display order: largest absolute delta first so material items lead.
-  groups.sort((a, b) => Math.abs(b.totalDelta.toNumber()) - Math.abs(a.totalDelta.toNumber()));
+  // Decimal-native compare — toNumber() would lose precision past 2^53.
+  groups.sort((a, b) => b.totalDelta.abs().comparedTo(a.totalDelta.abs()));
 
   return {
     entityCode: input.entityCode,

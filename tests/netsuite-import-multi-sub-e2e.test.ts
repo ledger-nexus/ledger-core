@@ -110,7 +110,7 @@ async function cleanup() {
   //   - stale rows from a prior (broken) run where entityId pointed at
   //     a now-deleted entity. Those orphans block re-imports because
   //     the lineage triple unique skips creating fresh ones.
-  const accountIds = ["1000", "1200", "2000", "3100", "4000", "6000", "7200"];
+  const accountIds = ["1000", "1200", "2000", "3100", "4000", "5000", "6000", "7200"];
   const partyIds = ["5000", "5001", "6000"];
   const itemIds = ["7000"];
 

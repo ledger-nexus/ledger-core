@@ -87,6 +87,12 @@ export async function getTrialBalance(
   // Pull lines for the (entity, book) on/before asOf, grouped by account.
   // Include the parent's code (Phase 7 hierarchy) so reports can render
   // sub-totals without a second query.
+  //
+  // DELIBERATE: the per-account sums run in JS over decimal.js, not via
+  // Prisma groupBy/_sum. The entity-specific-overrides-shared dedup below
+  // has to happen in JS regardless, decimal.js summation is exact and
+  // auditable, and row volumes here are small. Don't "optimize" this into
+  // an aggregate without re-validating both points.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,

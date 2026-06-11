@@ -31,7 +31,13 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
   {
     label: "Close",
     items: [
+      { href: "/close", label: "Close dashboard", hint: "all pillars" },
+      { href: "/close/alerts", label: "Alerts", hint: "cross-pillar" },
+      { href: "/close/retrospective", label: "Retrospective", hint: "trend" },
       { href: "/periods", label: "Periods", hint: "open / closed" },
+      { href: "/close/reconciliations", label: "Reconciliations", hint: "BS tie-out" },
+      { href: "/close/tasks", label: "Close tasks", hint: "checklist" },
+      { href: "/close/flux", label: "Flux analysis", hint: "variance" },
       { href: "/reports/month-end", label: "Month-end review", hint: "TB + IS + BS" },
     ],
   },
@@ -46,6 +52,7 @@ const sections: { label: string; items: { href: string; label: string; hint?: st
       { href: "/reports/m3-detail", label: "M-3 detail", hint: "Form 1120" },
       { href: "/reports/ar-aging", label: "AR aging" },
       { href: "/reports/ap-aging", label: "AP aging" },
+      { href: "/reports/fx-revaluation", label: "FX revaluation", hint: "ASC 830" },
       { href: "/reports/consolidation", label: "Consolidation", hint: "multi-entity" },
     ],
   },
@@ -56,6 +63,7 @@ const ADMIN_SECTION = {
   items: [
     { href: "/admin/users", label: "Users", hint: "lifecycle" },
     { href: "/admin/orphans", label: "Orphan records", hint: "ownership" },
+    { href: "/admin/notification-channels", label: "Slack channels", hint: "alerts" },
     { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
   ],
 } as const;
