@@ -323,8 +323,20 @@ Built 2026-06-06 as a stacked 6-PR chain (#138, #140–#144), landed 2026-06-11 
 - **Three defects fixed in transit** (the arc predated current main): e2e cleanup deleted JEs before AR open items (FK restricts — partial runs bricked later runs); `INV-UK-001` fixture lacked `total` (mapNsInvoice now rejects missing totals with a named error instead of a cryptic DecimalError); fixture lacked account 5000. e2e 5/5 + roundtrip 2/2 green vs the live shared DB.
 - PR #145 (the original status doc for this arc) closed as overtaken; this entry is its corrected graft.
 
-### v1.27+ — beyond
-The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) is fully shipped. Remaining FX depth — CTA for consolidated foreign entities (`POST_CTA` close-task stub), realized FX gain/loss on settlement (8310 account exists) — is open for when a multi-entity foreign-currency engagement asks for it.
+### v1.27 — v0.8 FX lifecycle arc (landed 2026-06-11, translation phases dispositioned)
+
+Built 2026-06-08 as a stacked chain, landed car-by-car through the merge train with per-car math review. The FX lifecycle from document to settlement is now complete on main; the consolidation-translation tail was closed after review rather than merged.
+
+- **#146 — transaction-date measurement.** Foreign-currency documents measure into the book's reporting currency at the transaction-date rate via `resolveFxRate`; Northwind seeds the rate curves; the NS importer wires per-entry `fxRate`.
+- **#148 — NS rate precedence + realized FX on settlement.** Three-tier rate precedence (same-currency → NS posting-time `exchangerate`, rejected if ≤ 0 → seeded CLOSE curve). AR/AP application books the realized difference to **8310 Realized FX G/L**: cash at the payment-date rate, the open item relieved at its invoice-date rate, delta realized. Importer ensure-account is tenant-scoped.
+- **#149 — `Account.translationCategory` (migration 0016).** ASC 830 classification enum (`CURRENT_RATE` / `HISTORICAL` / `WEIGHTED_AVG` / `EXCLUDED`) with type-based backfills; FX G/L accounts stamped `EXCLUDED` at creation; importer gained adopt-before-create (re-attaches lineage to a lineage-less row occupying the same `(entityId, code)` slot).
+- **#150 — `getTranslationRate`.** Maps each category to its ASC 830 rate on top of `resolveFxRate` (CLOSE curve): current-rate at period end, weighted-average of period endpoints, historical as an explicit per-line caller contract, excluded/same-currency as identity.
+- **#151/#152 — CLOSED after math review (not merged).** The translation layer would have **double-applied rates**: `JournalLine` stores debit/credit already converted to the book's reporting currency at transaction-date (there is no per-line functional-currency amount), and #151 multiplied those stored values by the period-end rate again — its own test asserted 1200 stored USD × 1.30 = 1560 where ASC 830 current-rate translation is 1000 GBP × 1.30 = 1300. Full analysis on the PRs; branches retained.
+
+**Accounting position:** main implements the ASC 830 **remeasurement (temporal) method** — transaction-date measurement plus v1.25 period-end revaluation of monetary items to P&L 8300. Current-rate-method translation with a CTA in equity is deferred until a per-line `functionalAmount` schema arc exists to translate from (roadmap decision; #149/#150 are its landed groundwork).
+
+### v1.28+ — beyond
+The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) is fully shipped, and v1.27 completed realized FX on settlement. Remaining FX depth — current-rate-method consolidation translation + CTA (`POST_CTA` close-task stub) — is gated on per-line functional-currency amounts (see the v1.27 disposition) and waits for a multi-entity foreign-currency engagement to ask for it.
 
 ---
 
