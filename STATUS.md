@@ -26,15 +26,16 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session 2026-06-11-report-tenant-scope · started 2026-06-11 14:26 · heartbeat 14:52
-- **Scope**: Deficiency #16 — tenant-scope the remaining unscoped account scans in report modules (IS, BS, cash-flow, M-3, book-tax review) + per-report poisoned-shared-account regression tests + deficiency log #16 → Closed
-- **Files / globs**: `src/lib/accounting/reports.ts`, `src/lib/accounting/reports/cash-flow.ts`, `src/lib/accounting/reports/m3-detail.ts`, `src/lib/accounting/reports/book-tax-difference.ts`, `tests/report-tenant-scoping.test.ts` (new), `docs/policies/control-deficiency-log.md`, `PROJECT_STATUS.md`
-- **Branch**: `fix/report-tenant-scoped-account-scans`
-- **Working dir**: /Users/hosungson/Code/ledger-core
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session 2026-06-11-report-tenant-scope · 2026-06-11
+- **Scope**: Deficiency #16 — tenant-scoped the remaining unscoped account scans in report modules (IS, BS via `entityTenantId`; cash-flow, BTD, M-3 via resolve-entity-first) + 5 poisoned-shared-account regression tests (`tests/report-tenant-scoping.test.ts`, verified to fail pre-fix) + deficiency #16 → Closed. BTD finding: its subtype scan read the ENTIRE account table across all tenants.
+- **Branch**: `fix/report-tenant-scoped-account-scans` (pushed; PR open against main)
+- **Outcome**: tsc clean; 10/11 affected suites green (111 tests) — `netsuite-mapping.test.ts` FK failures verified pre-existing on main (state-dependent, unrelated; `ar_open_item_partyId_fkey`).
 
 ### Session 2026-06-11-consolidation-tenant-scope · 2026-06-11
 - **Scope**: Tenant-scoped three unscoped lookups in the consolidation report path (account-metadata subtype/isContra bleed into IC elimination, client-controlled `?root=` cross-tenant read, `getTrialBalance` shared-account scan) + adversarial regression tests + deficiency log #15 (Closed) / #16 (Open: same pattern in IS/BS/cash-flow/M-3)
