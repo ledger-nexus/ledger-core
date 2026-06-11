@@ -55,6 +55,55 @@ function postToBooksFactory(prisma: PrismaClient) {
   };
 }
 
+// ---- FX rates -------------------------------------------------------
+
+// Illustrative H1 2026 month-end CLOSE rates + period AVG rates, stored
+// foreign->USD (EUR->USD, GBP->USD). resolveFxRate inverts on demand for
+// the reverse direction, so we only seed one leg. CLOSE drives balance-
+// sheet revaluation; AVG translates the P&L. Idempotent: keyed on the
+// FxRate @@unique([from, to, asOf, rateType]) composite.
+async function seedFxRates(prisma: PrismaClient) {
+  // [from, to, YYYY-MM-DD, rateType, rate]
+  const rates: Array<
+    [string, string, string, "SPOT" | "AVG" | "CLOSE" | "HISTORICAL", string]
+  > = [
+    // EUR->USD — euro strengthens through H1.
+    ["EUR", "USD", "2026-01-31", "CLOSE", "1.0850"],
+    ["EUR", "USD", "2026-02-28", "CLOSE", "1.0910"],
+    ["EUR", "USD", "2026-03-31", "CLOSE", "1.0975"],
+    ["EUR", "USD", "2026-04-30", "CLOSE", "1.1020"],
+    ["EUR", "USD", "2026-05-31", "CLOSE", "1.1080"],
+    ["EUR", "USD", "2026-06-30", "CLOSE", "1.1150"],
+    ["EUR", "USD", "2026-06-30", "AVG", "1.1015"],
+    // GBP->USD.
+    ["GBP", "USD", "2026-01-01", "CLOSE", "1.2700"],
+    ["GBP", "USD", "2026-03-31", "CLOSE", "1.2680"],
+    ["GBP", "USD", "2026-06-30", "CLOSE", "1.2810"],
+    ["GBP", "USD", "2026-06-30", "AVG", "1.2745"],
+  ];
+
+  for (const [from, to, asOf, rateType, rate] of rates) {
+    await prisma.fxRate.upsert({
+      where: {
+        fromCurrencyId_toCurrencyId_asOf_rateType: {
+          fromCurrencyId: from,
+          toCurrencyId: to,
+          asOf: new Date(asOf),
+          rateType,
+        },
+      },
+      create: {
+        fromCurrencyId: from,
+        toCurrencyId: to,
+        asOf: new Date(asOf),
+        rateType,
+        rate,
+      },
+      update: { rate },
+    });
+  }
+}
+
 // ---- Master data ----------------------------------------------------
 
 async function seedMasterData(prisma: PrismaClient) {
@@ -74,43 +123,12 @@ async function seedMasterData(prisma: PrismaClient) {
     update: {},
   });
 
-  // FX rate baseline for the v0.8 FX translation arc (Phase 1.5).
-  // One asOf date covering all of 2026 demo activity — operators with
-  // real daily rates would seed many more rows. Rates picked to
-  // approximate 2026 market conditions:
-  //   1 GBP = 1.27 USD  (UK pound to dollar)
-  //   1 EUR = 1.05 USD  (euro to dollar)
-  // BOTH DIRECTIONS seeded so the importer's straight lookup (no
-  // auto-inversion per the design) succeeds whichever way the
-  // transaction flows. See docs/fx-translation-design.md.
-  const fxRates = [
-    { from: "GBP", to: "USD", rate: "1.2700" },
-    { from: "USD", to: "GBP", rate: "0.7874" }, // = 1/1.27 to 4 dp
-    { from: "EUR", to: "USD", rate: "1.0500" },
-    { from: "USD", to: "EUR", rate: "0.9524" }, // = 1/1.05 to 4 dp
-  ];
-  const fxAsOf = new Date("2026-01-01");
-  for (const r of fxRates) {
-    // Composite unique on (from, to, asOf, rateType) — upsert idempotent.
-    await prisma.fxRate.upsert({
-      where: {
-        fromCurrencyId_toCurrencyId_asOf_rateType: {
-          fromCurrencyId: r.from,
-          toCurrencyId: r.to,
-          asOf: fxAsOf,
-          rateType: "SPOT",
-        },
-      },
-      create: {
-        fromCurrencyId: r.from,
-        toCurrencyId: r.to,
-        asOf: fxAsOf,
-        rate: r.rate,
-        rateType: "SPOT",
-      },
-      update: { rate: r.rate },
-    });
-  }
+  // FX rates — the first rates seeded into the dormant FxRate table.
+  // CLOSE rates at H1 2026 month-ends drive period-end revaluation; the
+  // AVG rates translate P&L. Stored EUR->USD / GBP->USD (foreign->
+  // functional); resolveFxRate inverts for the reverse direction. Rates
+  // are illustrative, not a live feed.
+  await seedFxRates(prisma);
 
   // Multi-tenancy: every entity belongs to a Tenant. Seeds belong to
   // the migration-created "default" tenant (the single-tenant fallback
@@ -194,6 +212,7 @@ async function seedAccounts(prisma: PrismaClient) {
         isContra: acct.isContra ?? false,
         isControlAccount: acct.isControlAccount ?? false,
         isBank: acct.isBank ?? false,
+        isMonetary: acct.isMonetary ?? false,
         subtype: acct.subtype,
       },
     });

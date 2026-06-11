@@ -21,7 +21,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../../accounting/post-journal";
-import { getFxRateOrDefault } from "../../accounting/fx";
+import { resolveFxRate } from "../../accounting/fx";
 import { openArItem, applyArPayment } from "../../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../../accounting/sub-ledgers/ap";
 import {
@@ -126,10 +126,10 @@ export async function importFromNs(
   const mappingVersion = input.mappingVersion ?? "ns-v1";
   const source = input.source ?? "IMPORT";
 
-  // v0.8 FX Phase 1.5 — look up the book's reporting currency ONCE so
+  // FX Phase 1.5 — look up the book's reporting currency ONCE so
   // every per-tx FX rate lookup knows the target currency. Without
   // this, the importer was passing GBP-denominated debit/credit pairs
-  // and they got stored as if they were USD — the v0.7 disclosure
+  // and they got stored as if they were USD — the v1.26 disclosure
   // banner's root cause.
   const bookForFx = await prisma.book.findUniqueOrThrow({
     where: { code: bookCode },
@@ -168,9 +168,13 @@ export async function importFromNs(
       reportingAmount: Decimal;
     }>;
   }> {
-    const fxRate = await getFxRateOrDefault(prisma, {
-      fromCurrencyId: input.transactionCurrencyId,
-      toCurrencyId: bookReportingCurrencyId,
+    // CLOSE on-or-before the document date — the daily-close proxy for
+    // the transaction-date spot rate (ASC 830 initial measurement).
+    // resolveFxRate throws FxRateNotFoundError when unseeded (fail loud,
+    // never silently 1) and inverts the opposite-direction row if needed.
+    const { rate: fxRate } = await resolveFxRate(prisma, {
+      fromCurrency: input.transactionCurrencyId,
+      toCurrency: bookReportingCurrencyId,
       asOf: input.documentDate,
     });
     return {
@@ -210,6 +214,14 @@ export async function importFromNs(
     entityCode: input.entityCode,
     entityResolution: input.entityResolution,
   });
+
+  // The "primary entity" for things that aren't transaction-scoped:
+  //   - In single mode → the one entity the caller named.
+  //   - In multi mode → the entity that owns CustomFieldDefinitions +
+  //     Dimensions + DimensionValues (these are tenant-wide via the
+  //     existing schema, but we still need an entityCode for the
+  //     legacy lookup paths that haven't been rewritten yet).
+  // We resolve it after subsidiary upserts in multi mode.
 
   // The "primary entity" for things that aren't transaction-scoped:
   //   - In single mode → the one entity the caller named.

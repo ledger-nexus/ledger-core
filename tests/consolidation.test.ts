@@ -91,6 +91,7 @@ async function seedHierarchy() {
         isContra: a.isContra ?? false,
         isControlAccount: a.isControlAccount ?? false,
         isBank: a.isBank ?? false,
+        isMonetary: a.isMonetary ?? false,
         subtype: a.subtype,
       },
     });
