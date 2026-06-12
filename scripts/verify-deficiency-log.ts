@@ -86,11 +86,14 @@ function parseLog(): DeficiencyRow[] {
     if (cells.length < 8) continue;
     // Status is always 2nd-to-last cell, regardless of v1.0 (10-column,
     // includes Owner) vs v2.x (9-column, no Owner). Title is always
-    // cells[3]; Remediation is always 3rd-to-last cell.
+    // cells[3]. Remediation is cells[6] in BOTH layouts — counting from
+    // the END is wrong for v1.0, where Owner sits between Remediation
+    // and Status (3rd-to-last would read the Owner cell and skip every
+    // row as "no PR URLs").
     const num = m[1];
     const status = cells[cells.length - 2].trim().replace(/\*\*/g, "");
     const title = cells[3].trim();
-    const remediation = cells[cells.length - 3];
+    const remediation = cells[6];
 
     rows.push({
       num,

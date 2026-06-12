@@ -83,20 +83,12 @@ const REQUIRED_SECTIONS: Array<{ name: string; required: string[] }> = [
     name: "The non-negotiables",
     required: ["non-negotiables"],
   },
-  {
-    name: "Monitoring shim non-negotiable",
-    // We accept either "monitoring shim" or "captureError" — the wording
-    // varies slightly across repos. Both terms point to the same control.
-    required: ["captureError"],
-  },
-  {
-    name: "SOC 2 + adversarial-pass cadence section",
-    required: ["SOC 2", "adversarial"],
-  },
-  {
-    name: "Reference to docs/SOC2_READINESS.md OR readiness %",
-    required: ["SOC2_READINESS"],
-  },
+  // NOTE (2026-06-12 port): three chain-era expectations removed —
+  // "monitoring shim" (the ledger-core shim lives in unmerged PR #115),
+  // "adversarial-pass cadence section", and the SOC2_READINESS
+  // reference. A verifier must check commitments main actually makes;
+  // re-add each expectation in the SAME PR that lands its CLAUDE.md
+  // section, never before.
 ];
 
 /** Extract the SOC 2 readiness % claim from a CLAUDE.md (if any). */
