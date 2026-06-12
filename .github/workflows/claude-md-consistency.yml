@@ -1,0 +1,112 @@
+# CC4 Monitoring Activities — verify CLAUDE.md consistency across the
+# 5-repo portfolio.
+#
+# Parallel to .github/workflows/deficiency-log-verify.yml (the
+# verification automation for deficiency-log claims). This one catches
+# CLAUDE.md drift between repos: required sections present, monitoring-
+# shim non-negotiable present, SOC 2 + adversarial-pass cadence present,
+# readiness % matches the canonical SOC2_READINESS.md.
+#
+# Schedule: nightly at 04:30 UTC (30 min after the deficiency-log-verify
+# workflow so the artifact uploads don't collide) + on every push that
+# touches CLAUDE.md across the portfolio.
+#
+# Failure mode: workflow FAILS LOUDLY if any drift is detected. Auditors
+# love loud failure modes — see the SOC 2 framing in
+# docs/runbooks/deficiency-log-verify.md.
+#
+# Cross-repo limitation: this workflow only sees ledger-core's checkout
+# by default. To check all 5 repos, the workflow checks them out
+# explicitly in the same job — each into a subdirectory matching the
+# script's expected layout ($HOME/Code/<repo>/CLAUDE.md).
+
+name: CLAUDE.md consistency verify
+
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  push:
+    paths:
+      - "CLAUDE.md"
+      - "scripts/verify-claude-md-consistency.ts"
+      - ".github/workflows/claude-md-consistency.yml"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out ledger-core
+        uses: actions/checkout@v4
+        with:
+          path: Code/ledger-core
+
+      - name: Check out recon
+        uses: actions/checkout@v4
+        with:
+          repository: ledger-nexus/recon
+          path: Code/recon
+          # No token needed — script reads CLAUDE.md only, which is
+          # public-readable on public repos. Private repos would need
+          # a PAT here; the script reports MISSING and the workflow
+          # continues.
+
+      - name: Check out revenue-rec
+        uses: actions/checkout@v4
+        with:
+          repository: ledger-nexus/revenue-rec
+          path: Code/revenue-rec
+
+      - name: Check out fa-amort
+        uses: actions/checkout@v4
+        with:
+          repository: ledger-nexus/fa-amort
+          path: Code/fa-amort
+
+      - name: Check out integrations
+        uses: actions/checkout@v4
+        with:
+          repository: ledger-nexus/integrations
+          path: Code/integrations
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install tsx (no full install needed)
+        run: npm install --no-save tsx
+
+      - name: Symlink Code/ into $HOME so the script's path resolution works
+        # The script joins(homedir(), "Code", repo, "CLAUDE.md").
+        # GitHub Actions runs as user `runner` whose home is /home/runner.
+        # We move the checked-out tree into the expected layout.
+        run: |
+          mkdir -p $HOME/Code
+          for repo in ledger-core recon revenue-rec fa-amort integrations; do
+            if [ -d "$GITHUB_WORKSPACE/Code/$repo" ]; then
+              ln -snf "$GITHUB_WORKSPACE/Code/$repo" "$HOME/Code/$repo"
+            fi
+          done
+
+      - name: Run verifier
+        run: npx tsx Code/ledger-core/scripts/verify-claude-md-consistency.ts
+
+      - name: Generate evidence artifact (JSON)
+        if: always()
+        run: |
+          mkdir -p Code/ledger-core/docs/operational-evidence/claude-md-consistency
+          STAMP=$(date -u +%Y-%m-%d)
+          npx tsx Code/ledger-core/scripts/verify-claude-md-consistency.ts --json \
+            > "Code/ledger-core/docs/operational-evidence/claude-md-consistency/${STAMP}.json" \
+            || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-md-consistency-evidence
+          path: Code/ledger-core/docs/operational-evidence/claude-md-consistency/
+          retention-days: 90
