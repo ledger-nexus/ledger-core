@@ -616,7 +616,9 @@ async function seedFixedAsset(
   prisma: PrismaClient
 ): Promise<{ assetCode: string }> {
   const code = "DEMO-LAPTOPS-2026";
+  const tenantId = await getDefaultTenantId(prisma);
   await createFixedAsset(prisma, {
+    tenantId,
     entityCode: ENTITY_CODE,
     code,
     description: "8 MacBooks — engineering team",

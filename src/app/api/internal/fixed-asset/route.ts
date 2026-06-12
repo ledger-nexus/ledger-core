@@ -222,6 +222,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const result = await createFixedAsset(prisma, {
+      // Authoritative tenant scope from the bearer token. Without this,
+      // a tenant-A token holder could create a FixedAsset under a
+      // tenant-B entity sharing the same code. Deficiency log #28.
+      tenantId: identity.tenantId,
       entityCode: body.entityCode,
       code: body.code,
       description: body.description,
