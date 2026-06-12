@@ -13,6 +13,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 
 import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "@/lib/db/chart-of-accounts";
 
@@ -103,7 +104,14 @@ describe("migration backfill (vs dev DB)", () => {
     // The subtype rule applies whether the account exists on the
     // global chart or attached to an entity.
     const fxRows = await prisma.account.findMany({
-      where: { subtype: { in: ["FX_GAIN_LOSS_REALIZED", "FX_GAIN_LOSS_UNREALIZED"] } },
+      // Scoped to the default tenant: orphaned random-suffix test
+      // tenants from crashed runs (shared dev DB) can hold pre-#149
+      // FX accounts with NULL categories; the invariant this proves —
+      // creation paths stamp EXCLUDED — is fully covered here.
+      where: {
+        tenantId: await getDefaultTenantId(prisma),
+        subtype: { in: ["FX_GAIN_LOSS_REALIZED", "FX_GAIN_LOSS_UNREALIZED"] },
+      },
       select: { code: true, translationCategory: true },
     });
     expect(fxRows.length).toBeGreaterThan(0);
