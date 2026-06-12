@@ -917,15 +917,6 @@ export async function importFromNs(
     return new Set(existing.map((e) => e.book.code));
   }
 
-  // Sub-ledger docs post to primaryBookCode only (Phase 3 scope), so
-  // their dedupe check mirrors exactly that book.
-  async function alreadyImported(
-    sourceRecordType: string,
-    sourceRecordId: string
-  ): Promise<boolean> {
-    const books = await importedBookCodes(sourceRecordType, sourceRecordId);
-    return books.has(primaryBookCode);
-  }
 
   // Track set creation count by trying to find before each
   // getOrCreateDimensionSet call. We're not in a hot loop so the extra
@@ -1027,20 +1018,48 @@ export async function importFromNs(
   }
 
   // ---- 7. Invoices → JE + AR open item ---------------------------
+  //
+  // v0.9 Phase 3.5.B — per-book sub-ledger loop. One JE + one AR open
+  // item per mapped book (mirrors the JE-only loop from Phase 3, and
+  // depends on the ar_open_item_lineage_uniq index added in Phase
+  // 3.5.A). The shared lineage triple with distinct (entity, book)
+  // scope makes per-book rows unique under the index.
+  //
+  // arOpenByNsInvoiceId becomes a nested map: NS Invoice ID → bookCode
+  // → AR OpenItem ID. The payment path below looks up per-book.
 
-  const arOpenByNsInvoiceId = new Map<string, string>();
+  const arOpenByNsInvoiceId = new Map<string, Map<string, string>>();
   for (const inv of input.export.Invoice ?? []) {
-    if (await alreadyImported("Invoice", inv.internalid)) {
-      result.journalEntriesSkipped += 1;
-      const existing = await prisma.arOpenItem.findFirst({
+    // Per-book resume (same treatment the JE path got in Phase 3):
+    // post only to books missing this lineage, so a partially-failed
+    // prior import completes on re-run instead of skipping or
+    // colliding with the 3.5.A lineage uniq.
+    const existingInvBooks = await importedBookCodes(
+      "Invoice",
+      inv.internalid
+    );
+    const missingInvBooks = journalEntryBookCodes.filter(
+      (b) => !existingInvBooks.has(b)
+    );
+    // Rebuild the per-book OpenItem map from existing rows in either
+    // case — the payment path's per-book lookup needs ALL books.
+    const seededArMap = new Map<string, string>();
+    if (existingInvBooks.size > 0) {
+      const existing = await prisma.arOpenItem.findMany({
         where: {
           sourceSystem: "NETSUITE",
           sourceRecordType: "Invoice",
           sourceRecordId: inv.internalid,
         },
-        select: { id: true },
+        select: { id: true, book: { select: { code: true } } },
       });
-      if (existing) arOpenByNsInvoiceId.set(inv.internalid, existing.id);
+      for (const e of existing) seededArMap.set(e.book.code, e.id);
+    }
+    if (missingInvBooks.length === 0) {
+      result.journalEntriesSkipped += 1;
+      if (seededArMap.size > 0) {
+        arOpenByNsInvoiceId.set(inv.internalid, seededArMap);
+      }
       continue;
     }
     const { entry: m, arOpening } = mapNsInvoice(inv, segCodes, mappingVersion);
@@ -1057,70 +1076,99 @@ export async function importFromNs(
       lines: resolvedLines,
       nsExchangeRate: inv.exchangerate,
     });
-    const je = await postJournalEntry(prisma, {
-      entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
-      bookCode: primaryBookCode,
-      currencyCode: m.currencyCode,
-      fxRate: invFxRate,
-      documentDate: m.documentDate,
-      memo: m.memo,
-      source,
-      sourceSystem: "NETSUITE",
-      sourceRecordType: "Invoice",
-      sourceRecordId: inv.internalid,
-      sourcePayload: m.sourcePayload as any,
-      mappingVersion,
-      extensions:
-        Object.keys(m.customFields).length > 0 ? (m.customFields as any) : undefined,
-      lines: invFxLines.map((l) => ({
-        accountCode: l.accountCode,
-        debit: l.debit,
-        credit: l.credit,
-        transactionAmount: l.transactionAmount,
-        reportingAmount: l.reportingAmount,
-        description: l.description,
-        partyCode: l.partyCode,
-        itemCode: l.itemCode,
-      })),
-    });
-    await attachDimensionSets(prisma, inv.internalid, resolvedLines);
 
-    const openItem = await openArItem(prisma, {
-      entityCode: resolveEntityCodeForTransaction(inv.subsidiary, "Invoice", inv.internalid),
-      bookCode: primaryBookCode,
-      partyCode: arOpening.customerCode,
-      openedByEntryId: je.id,
-      referenceNumber: arOpening.referenceNumber,
-      openedDate: arOpening.openedDate,
-      dueDate: arOpening.dueDate ?? undefined,
-      amount: arOpening.amount,
-      currencyCode: arOpening.currencyCode,
-      controlAccountCode: arOpening.controlAccountCode,
-      sourceSystem: "NETSUITE",
-      sourceRecordType: arOpening.sourceRecordType,
-      sourceRecordId: arOpening.sourceRecordId,
-      sourcePayload: arOpening.sourcePayload as any,
-    });
-    arOpenByNsInvoiceId.set(inv.internalid, openItem.id);
-    result.journalEntriesImported += 1;
-    result.arOpenItemsOpened += 1;
+    const invEntityCode = resolveEntityCodeForTransaction(
+      inv.subsidiary,
+      "Invoice",
+      inv.internalid
+    );
+    const bookMap = seededArMap;
+    for (const perBookCode of missingInvBooks) {
+      const je = await postJournalEntry(prisma, {
+        entityCode: invEntityCode,
+        bookCode: perBookCode,
+        currencyCode: m.currencyCode,
+        fxRate: invFxRate,
+        documentDate: m.documentDate,
+        memo: m.memo,
+        source,
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "Invoice",
+        sourceRecordId: inv.internalid,
+        sourcePayload: m.sourcePayload as any,
+        mappingVersion,
+        extensions:
+          Object.keys(m.customFields).length > 0 ? (m.customFields as any) : undefined,
+        lines: invFxLines.map((l) => ({
+          accountCode: l.accountCode,
+          debit: l.debit,
+          credit: l.credit,
+          transactionAmount: l.transactionAmount,
+          reportingAmount: l.reportingAmount,
+          description: l.description,
+          partyCode: l.partyCode,
+          itemCode: l.itemCode,
+        })),
+      });
+
+      const openItem = await openArItem(prisma, {
+        entityCode: invEntityCode,
+        bookCode: perBookCode,
+        partyCode: arOpening.customerCode,
+        openedByEntryId: je.id,
+        referenceNumber: arOpening.referenceNumber,
+        openedDate: arOpening.openedDate,
+        dueDate: arOpening.dueDate ?? undefined,
+        amount: arOpening.amount,
+        currencyCode: arOpening.currencyCode,
+        controlAccountCode: arOpening.controlAccountCode,
+        sourceSystem: "NETSUITE",
+        sourceRecordType: arOpening.sourceRecordType,
+        sourceRecordId: arOpening.sourceRecordId,
+        sourcePayload: arOpening.sourcePayload as any,
+      });
+      bookMap.set(perBookCode, openItem.id);
+      result.journalEntriesImported += 1;
+      result.arOpenItemsOpened += 1;
+    }
+    arOpenByNsInvoiceId.set(inv.internalid, bookMap);
+    // attachDimensionSets is called once outside the loop — it attaches
+    // dimensions to a single JE matched by source ID. Under multi-book
+    // this finds one of N (a pre-existing Phase 3 limitation; not
+    // addressed here).
+    await attachDimensionSets(prisma, inv.internalid, resolvedLines);
   }
 
   // ---- 8. Vendor Bills → JE + AP open item ----------------------
 
-  const apOpenByNsBillId = new Map<string, string>();
+  // v0.9 Phase 3.5.B — VendorBill per-book sub-ledger loop. Mirror of
+  // the Invoice path. AP OpenItem ID lookup is per (NS Bill ID, book).
+  const apOpenByNsBillId = new Map<string, Map<string, string>>();
   for (const bill of input.export.VendorBill ?? []) {
-    if (await alreadyImported("VendorBill", bill.internalid)) {
-      result.journalEntriesSkipped += 1;
-      const existing = await prisma.apOpenItem.findFirst({
+    const existingBillBooks = await importedBookCodes(
+      "VendorBill",
+      bill.internalid
+    );
+    const missingBillBooks = journalEntryBookCodes.filter(
+      (b) => !existingBillBooks.has(b)
+    );
+    const seededApMap = new Map<string, string>();
+    if (existingBillBooks.size > 0) {
+      const existing = await prisma.apOpenItem.findMany({
         where: {
           sourceSystem: "NETSUITE",
           sourceRecordType: "VendorBill",
           sourceRecordId: bill.internalid,
         },
-        select: { id: true },
+        select: { id: true, book: { select: { code: true } } },
       });
-      if (existing) apOpenByNsBillId.set(bill.internalid, existing.id);
+      for (const e of existing) seededApMap.set(e.book.code, e.id);
+    }
+    if (missingBillBooks.length === 0) {
+      result.journalEntriesSkipped += 1;
+      if (seededApMap.size > 0) {
+        apOpenByNsBillId.set(bill.internalid, seededApMap);
+      }
       continue;
     }
     const { entry: m, apOpening } = mapNsVendorBill(bill, segCodes, mappingVersion);
@@ -1136,57 +1184,79 @@ export async function importFromNs(
       lines: resolvedLines,
       nsExchangeRate: bill.exchangerate,
     });
-    const je = await postJournalEntry(prisma, {
-      entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
-      bookCode: primaryBookCode,
-      currencyCode: m.currencyCode,
-      fxRate: billFxRate,
-      documentDate: m.documentDate,
-      memo: m.memo,
-      source,
-      sourceSystem: "NETSUITE",
-      sourceRecordType: "VendorBill",
-      sourceRecordId: bill.internalid,
-      sourcePayload: m.sourcePayload as any,
-      mappingVersion,
-      lines: billFxLines.map((l) => ({
-        accountCode: l.accountCode,
-        debit: l.debit,
-        credit: l.credit,
-        transactionAmount: l.transactionAmount,
-        reportingAmount: l.reportingAmount,
-        description: l.description,
-        partyCode: l.partyCode,
-        itemCode: l.itemCode,
-      })),
-    });
-    await attachDimensionSets(prisma, bill.internalid, resolvedLines);
 
-    const openItem = await openApItem(prisma, {
-      entityCode: resolveEntityCodeForTransaction(bill.subsidiary, "VendorBill", bill.internalid),
-      bookCode: primaryBookCode,
-      partyCode: apOpening.vendorCode,
-      openedByEntryId: je.id,
-      referenceNumber: apOpening.referenceNumber,
-      openedDate: apOpening.openedDate,
-      dueDate: apOpening.dueDate ?? undefined,
-      amount: apOpening.amount,
-      currencyCode: apOpening.currencyCode,
-      controlAccountCode: apOpening.controlAccountCode,
-      sourceSystem: "NETSUITE",
-      sourceRecordType: apOpening.sourceRecordType,
-      sourceRecordId: apOpening.sourceRecordId,
-      sourcePayload: apOpening.sourcePayload as any,
-    });
-    apOpenByNsBillId.set(bill.internalid, openItem.id);
-    result.journalEntriesImported += 1;
-    result.apOpenItemsOpened += 1;
+    const billEntityCode = resolveEntityCodeForTransaction(
+      bill.subsidiary,
+      "VendorBill",
+      bill.internalid
+    );
+    const bookMap = seededApMap;
+    for (const perBookCode of missingBillBooks) {
+      const je = await postJournalEntry(prisma, {
+        entityCode: billEntityCode,
+        bookCode: perBookCode,
+        currencyCode: m.currencyCode,
+        fxRate: billFxRate,
+        documentDate: m.documentDate,
+        memo: m.memo,
+        source,
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "VendorBill",
+        sourceRecordId: bill.internalid,
+        sourcePayload: m.sourcePayload as any,
+        mappingVersion,
+        lines: billFxLines.map((l) => ({
+          accountCode: l.accountCode,
+          debit: l.debit,
+          credit: l.credit,
+          transactionAmount: l.transactionAmount,
+          reportingAmount: l.reportingAmount,
+          description: l.description,
+          partyCode: l.partyCode,
+          itemCode: l.itemCode,
+        })),
+      });
+
+      const openItem = await openApItem(prisma, {
+        entityCode: billEntityCode,
+        bookCode: perBookCode,
+        partyCode: apOpening.vendorCode,
+        openedByEntryId: je.id,
+        referenceNumber: apOpening.referenceNumber,
+        openedDate: apOpening.openedDate,
+        dueDate: apOpening.dueDate ?? undefined,
+        amount: apOpening.amount,
+        currencyCode: apOpening.currencyCode,
+        controlAccountCode: apOpening.controlAccountCode,
+        sourceSystem: "NETSUITE",
+        sourceRecordType: apOpening.sourceRecordType,
+        sourceRecordId: apOpening.sourceRecordId,
+        sourcePayload: apOpening.sourcePayload as any,
+      });
+      bookMap.set(perBookCode, openItem.id);
+      result.journalEntriesImported += 1;
+      result.apOpenItemsOpened += 1;
+    }
+    apOpenByNsBillId.set(bill.internalid, bookMap);
+    await attachDimensionSets(prisma, bill.internalid, resolvedLines);
   }
 
   // ---- 9. Customer Payments + Vendor Payments → applications ----
 
+  // v0.9 Phase 3.5.B — CustomerPayment per-book sub-ledger loop. Each
+  // iteration: resolve THIS book's invoice open items, run per-book FX
+  // gain/loss adjustment, post a payment JE, apply to this book's
+  // open items. Per-book FX is correct: each book's invoice JE has its
+  // own fxRate, so the helper picks up the right historical rate.
   for (const pmt of input.export.CustomerPayment ?? []) {
-    if (await alreadyImported("CustomerPayment", pmt.internalid)) {
+    const existingCpBooks = await importedBookCodes(
+      "CustomerPayment",
+      pmt.internalid
+    );
+    const missingCpBooks = journalEntryBookCodes.filter(
+      (b) => !existingCpBooks.has(b)
+    );
+    if (missingCpBooks.length === 0) {
       result.journalEntriesSkipped += 1;
       continue;
     }
@@ -1198,79 +1268,95 @@ export async function importFromNs(
       nsExchangeRate: pmt.exchangerate,
     });
 
-    // v0.8 FX Phase 3 — compute realized FX gain/loss BEFORE posting.
-    // Each application targets an AR open item; that item's
-    // openedByEntry has the fxRate the invoice was booked at. If the
-    // payment rate differs, the delta is a realized FX gain or loss
-    // and we adjust the AR Cr line + inject a balancing FX line.
-    const resolvedApplications = application.applications
-      .map((app) => ({
-        openItemId: arOpenByNsInvoiceId.get(app.linkedInvoiceId),
-        appliedAmount: app.amount,
-      }))
-      .filter(
-        (a): a is { openItemId: string; appliedAmount: typeof a.appliedAmount } =>
-          a.openItemId !== undefined
-      );
-    const { lines: pmtAdjustedLines, fxGainLossUsd: pmtFxGainLossUsd } =
-      await injectFxGainLossAdjustment({
-        lines: pmtFxLines,
-        paymentFxRate: pmtFxRate,
-        side: "AR",
-        applications: resolvedApplications,
-      });
-    if (!pmtFxGainLossUsd.isZero()) {
-      result.warnings.push(
-        `CustomerPayment ${pmt.internalid}: realized FX ${
-          pmtFxGainLossUsd.gt(0) ? "gain" : "loss"
-        } of ${pmtFxGainLossUsd.abs().toFixed(4)} USD posted to account ${fxGainLossAccountCode}.`
-      );
-    }
-
-    const je = await postJournalEntry(prisma, {
-      entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "CustomerPayment", pmt.internalid),
-      bookCode: primaryBookCode,
-      currencyCode: m.currencyCode,
-      fxRate: pmtFxRate,
-      documentDate: m.documentDate,
-      memo: m.memo,
-      source,
-      sourceSystem: "NETSUITE",
-      sourceRecordType: "CustomerPayment",
-      sourceRecordId: pmt.internalid,
-      sourcePayload: m.sourcePayload as any,
-      mappingVersion,
-      lines: pmtAdjustedLines.map((l) => ({
-        accountCode: l.accountCode,
-        debit: l.debit,
-        credit: l.credit,
-        transactionAmount: l.transactionAmount,
-        reportingAmount: l.reportingAmount,
-        description: l.description,
-        partyCode: l.partyCode,
-      })),
-    });
-    for (const app of application.applications) {
-      const openItemId = arOpenByNsInvoiceId.get(app.linkedInvoiceId);
-      if (!openItemId) {
-        result.errors.push(
-          `CustomerPayment ${pmt.internalid} references unknown invoice ${app.linkedInvoiceId}`
+    const pmtEntityCode = resolveEntityCodeForTransaction(
+      pmt.subsidiary,
+      "CustomerPayment",
+      pmt.internalid
+    );
+    for (const perBookCode of missingCpBooks) {
+      // Per-book resolved applications: look up THIS book's open
+      // items. Under multi-book, the same NS Invoice has N AR
+      // OpenItem rows; each book's payment applies to its own row.
+      const resolvedApplications = application.applications
+        .map((app) => ({
+          openItemId: arOpenByNsInvoiceId.get(app.linkedInvoiceId)?.get(perBookCode),
+          appliedAmount: app.amount,
+        }))
+        .filter(
+          (a): a is { openItemId: string; appliedAmount: typeof a.appliedAmount } =>
+            a.openItemId !== undefined
         );
-        continue;
+      const { lines: pmtAdjustedLines, fxGainLossUsd: pmtFxGainLossUsd } =
+        await injectFxGainLossAdjustment({
+          lines: pmtFxLines,
+          paymentFxRate: pmtFxRate,
+          side: "AR",
+          applications: resolvedApplications,
+        });
+      if (!pmtFxGainLossUsd.isZero()) {
+        result.warnings.push(
+          `CustomerPayment ${pmt.internalid} [${perBookCode}]: realized FX ${
+            pmtFxGainLossUsd.gt(0) ? "gain" : "loss"
+          } of ${pmtFxGainLossUsd.abs().toFixed(4)} USD posted to account ${fxGainLossAccountCode}.`
+        );
       }
-      await applyArPayment(prisma, {
-        openItemId,
-        appliedByEntryId: je.id,
-        appliedAmount: app.amount,
-        appliedDate: application.appliedDate,
+
+      const je = await postJournalEntry(prisma, {
+        entityCode: pmtEntityCode,
+        bookCode: perBookCode,
+        currencyCode: m.currencyCode,
+        fxRate: pmtFxRate,
+        documentDate: m.documentDate,
+        memo: m.memo,
+        source,
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "CustomerPayment",
+        sourceRecordId: pmt.internalid,
+        sourcePayload: m.sourcePayload as any,
+        mappingVersion,
+        lines: pmtAdjustedLines.map((l) => ({
+          accountCode: l.accountCode,
+          debit: l.debit,
+          credit: l.credit,
+          transactionAmount: l.transactionAmount,
+          reportingAmount: l.reportingAmount,
+          description: l.description,
+          partyCode: l.partyCode,
+        })),
       });
-      result.paymentsApplied += 1;
+      for (const app of application.applications) {
+        const openItemId = arOpenByNsInvoiceId.get(app.linkedInvoiceId)?.get(perBookCode);
+        if (!openItemId) {
+          result.errors.push(
+            `CustomerPayment ${pmt.internalid} [${perBookCode}] references unknown invoice ${app.linkedInvoiceId}`
+          );
+          continue;
+        }
+        await applyArPayment(prisma, {
+          openItemId,
+          appliedByEntryId: je.id,
+          appliedAmount: app.amount,
+          appliedDate: application.appliedDate,
+        });
+        result.paymentsApplied += 1;
+      }
+      result.journalEntriesImported += 1;
     }
-    result.journalEntriesImported += 1;
   }
 
+  // v0.9 Phase 3.5.B — VendorPayment per-book sub-ledger loop. Mirror
+  // of the CustomerPayment path. side: "AP" tells injectFxGainLossAdjustment
+  // to adjust the DEBIT side (the AP control line) instead of the credit
+  // side, since AP open items get DEBITED when bills are paid.
   for (const pmt of input.export.VendorPayment ?? []) {
-    if (await alreadyImported("VendorPayment", pmt.internalid)) {
+    const existingVpBooks = await importedBookCodes(
+      "VendorPayment",
+      pmt.internalid
+    );
+    const missingVpBooks = journalEntryBookCodes.filter(
+      (b) => !existingVpBooks.has(b)
+    );
+    if (missingVpBooks.length === 0) {
       result.journalEntriesSkipped += 1;
       continue;
     }
@@ -1282,74 +1368,77 @@ export async function importFromNs(
       nsExchangeRate: pmt.exchangerate,
     });
 
-    // v0.8 FX Phase 3 — same realized FX gain/loss handling for the
-    // AP side. Mirror of the customer-payment path; "side: AP" tells
-    // the helper to adjust the DEBIT side (the AP control line) instead
-    // of the credit side.
-    const vpResolvedApplications = application.applications
-      .map((app) => ({
-        openItemId: apOpenByNsBillId.get(app.linkedBillId),
-        appliedAmount: app.amount,
-      }))
-      .filter(
-        (a): a is { openItemId: string; appliedAmount: typeof a.appliedAmount } =>
-          a.openItemId !== undefined
-      );
-    const { lines: vpAdjustedLines, fxGainLossUsd: vpFxGainLossUsd } =
-      await injectFxGainLossAdjustment({
-        lines: vpFxLines,
-        paymentFxRate: vpFxRate,
-        side: "AP",
-        applications: vpResolvedApplications,
-      });
-    if (!vpFxGainLossUsd.isZero()) {
-      result.warnings.push(
-        `VendorPayment ${pmt.internalid}: realized FX ${
-          vpFxGainLossUsd.lt(0) ? "gain" : "loss"
-        } of ${vpFxGainLossUsd.abs().toFixed(4)} USD posted to account ${fxGainLossAccountCode}.`
-      );
-    }
-
-    const je = await postJournalEntry(prisma, {
-      entityCode: resolveEntityCodeForTransaction(pmt.subsidiary, "VendorPayment", pmt.internalid),
-      bookCode: primaryBookCode,
-      currencyCode: m.currencyCode,
-      fxRate: vpFxRate,
-      documentDate: m.documentDate,
-      memo: m.memo,
-      source,
-      sourceSystem: "NETSUITE",
-      sourceRecordType: "VendorPayment",
-      sourceRecordId: pmt.internalid,
-      sourcePayload: m.sourcePayload as any,
-      mappingVersion,
-      lines: vpAdjustedLines.map((l) => ({
-        accountCode: l.accountCode,
-        debit: l.debit,
-        credit: l.credit,
-        transactionAmount: l.transactionAmount,
-        reportingAmount: l.reportingAmount,
-        description: l.description,
-        partyCode: l.partyCode,
-      })),
-    });
-    for (const app of application.applications) {
-      const openItemId = apOpenByNsBillId.get(app.linkedBillId);
-      if (!openItemId) {
-        result.errors.push(
-          `VendorPayment ${pmt.internalid} references unknown bill ${app.linkedBillId}`
+    const vpEntityCode = resolveEntityCodeForTransaction(
+      pmt.subsidiary,
+      "VendorPayment",
+      pmt.internalid
+    );
+    for (const perBookCode of missingVpBooks) {
+      const vpResolvedApplications = application.applications
+        .map((app) => ({
+          openItemId: apOpenByNsBillId.get(app.linkedBillId)?.get(perBookCode),
+          appliedAmount: app.amount,
+        }))
+        .filter(
+          (a): a is { openItemId: string; appliedAmount: typeof a.appliedAmount } =>
+            a.openItemId !== undefined
         );
-        continue;
+      const { lines: vpAdjustedLines, fxGainLossUsd: vpFxGainLossUsd } =
+        await injectFxGainLossAdjustment({
+          lines: vpFxLines,
+          paymentFxRate: vpFxRate,
+          side: "AP",
+          applications: vpResolvedApplications,
+        });
+      if (!vpFxGainLossUsd.isZero()) {
+        result.warnings.push(
+          `VendorPayment ${pmt.internalid} [${perBookCode}]: realized FX ${
+            vpFxGainLossUsd.lt(0) ? "gain" : "loss"
+          } of ${vpFxGainLossUsd.abs().toFixed(4)} USD posted to account ${fxGainLossAccountCode}.`
+        );
       }
-      await applyApPayment(prisma, {
-        openItemId,
-        appliedByEntryId: je.id,
-        appliedAmount: app.amount,
-        appliedDate: application.appliedDate,
+
+      const je = await postJournalEntry(prisma, {
+        entityCode: vpEntityCode,
+        bookCode: perBookCode,
+        currencyCode: m.currencyCode,
+        fxRate: vpFxRate,
+        documentDate: m.documentDate,
+        memo: m.memo,
+        source,
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "VendorPayment",
+        sourceRecordId: pmt.internalid,
+        sourcePayload: m.sourcePayload as any,
+        mappingVersion,
+        lines: vpAdjustedLines.map((l) => ({
+          accountCode: l.accountCode,
+          debit: l.debit,
+          credit: l.credit,
+          transactionAmount: l.transactionAmount,
+          reportingAmount: l.reportingAmount,
+          description: l.description,
+          partyCode: l.partyCode,
+        })),
       });
-      result.paymentsApplied += 1;
+      for (const app of application.applications) {
+        const openItemId = apOpenByNsBillId.get(app.linkedBillId)?.get(perBookCode);
+        if (!openItemId) {
+          result.errors.push(
+            `VendorPayment ${pmt.internalid} [${perBookCode}] references unknown bill ${app.linkedBillId}`
+          );
+          continue;
+        }
+        await applyApPayment(prisma, {
+          openItemId,
+          appliedByEntryId: je.id,
+          appliedAmount: app.amount,
+          appliedDate: application.appliedDate,
+        });
+        result.paymentsApplied += 1;
+      }
+      result.journalEntriesImported += 1;
     }
-    result.journalEntriesImported += 1;
   }
 
   return result;
