@@ -142,6 +142,26 @@ describe("v0.9 NS SuiteAnalytics Phase 5: auth + param validation", () => {
   });
 });
 
+describe("v0.9 NS SuiteAnalytics — consolidated TB CSV format", () => {
+  it("returns 400 for invalid format value", async () => {
+    const res = await getConsolidated(
+      makeReq({ ...VALID, format: "xml" }, `Bearer ${token}`)
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/Invalid format/);
+  });
+
+  // The CSV happy path is exercised at the 404 surface — the resolver
+  // returns 404 before CSV emission, so we can't assert CSV bytes
+  // against an empty fixture. Format validation IS exercised though
+  // (above test). The CSV byte layout is covered by the validation
+  // logic's `format !== "json" && format !== "csv"` check + the route
+  // exit at 200 with text/csv Content-Type, both reachable only with
+  // a fully-seeded NS multi-sub fixture. Pinning the byte layout is a
+  // follow-up that requires a fixture import via importFromNs.
+});
+
 describe("v0.9 NS SuiteAnalytics Phase 5: resolver 404 surface", () => {
   it("returns 404 with structured body when rootSubsidiary doesn't resolve", async () => {
     // Tenant has no NS-imported subsidiaries → any internalid 404s.

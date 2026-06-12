@@ -54,6 +54,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const asOf = url.searchParams.get("asOf") ?? "";
   const periodStart = url.searchParams.get("periodStart");
   const shape = url.searchParams.get("shape") ?? "native";
+  const format = url.searchParams.get("format") ?? "json";
 
   if (!NS_INTERNALID_RX.test(rootSubsidiary)) {
     return NextResponse.json(
@@ -86,6 +87,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           "deployment consolidates under the remeasurement method. " +
           "Omit periodStart; see PROJECT_STATUS v1.27.",
       },
+      { status: 400 }
+    );
+  }
+  if (format !== "json" && format !== "csv") {
+    return NextResponse.json(
+      { error: 'Invalid format. Required: "json" or "csv".' },
       { status: 400 }
     );
   }
@@ -197,6 +204,92 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       hints
     );
     return NextResponse.json(nsBody);
+  }
+
+  // ---- 5. CSV format (operator ETL pipelines) ----------------------
+  //
+  // Wide format: one CSV row per account with per-entity debit/credit
+  // columns AND consolidated/elimination columns. NS's SubsidiaryElim
+  // CSV export does the same — column count varies with the entity
+  // hierarchy. Format is operator-driven and self-describing via the
+  // header row.
+  if (format === "csv") {
+    const entityCodes = report.entitiesIncluded.map((e) => e.code);
+    const header: string[] = [
+      "accountCode",
+      "accountName",
+      "type",
+      "subtype",
+      ...entityCodes.flatMap((c) => [`${c}_debit`, `${c}_credit`]),
+      "preEliminationDebit",
+      "preEliminationCredit",
+      "eliminatedDebit",
+      "eliminatedCredit",
+      "consolidatedDebit",
+      "consolidatedCredit",
+      "isEliminated",
+    ];
+    const dataRows = report.rows.map((r) => {
+      // Index per-entity debit/credit by entityCode for fast lookup.
+      const perEntityMap = new Map(
+        r.perEntity.map((p) => [p.entityCode, p])
+      );
+      const perEntityCells = entityCodes.flatMap((c) => {
+        const cell = perEntityMap.get(c);
+        return [
+          cell ? cell.debit.toFixed(4) : "0.0000",
+          cell ? cell.credit.toFixed(4) : "0.0000",
+        ];
+      });
+      return [
+        r.accountCode,
+        r.accountName,
+        r.type,
+        r.subtype ?? "",
+        ...perEntityCells,
+        r.totalDebit.toFixed(4),
+        r.totalCredit.toFixed(4),
+        r.eliminatedDebit.toFixed(4),
+        r.eliminatedCredit.toFixed(4),
+        r.consolidatedDebit.toFixed(4),
+        r.consolidatedCredit.toFixed(4),
+        String(r.isEliminated),
+      ];
+    });
+    // Append totals + translation metadata as trailer rows. Operators
+    // can grep for the empty accountCode to find the section divider.
+    const totalsRow = [
+      "",
+      "TOTALS",
+      "",
+      "",
+      ...entityCodes.flatMap(() => ["", ""]),
+      report.preEliminationTotalDebit.toFixed(4),
+      report.preEliminationTotalCredit.toFixed(4),
+      "",
+      "",
+      report.consolidatedTotalDebit.toFixed(4),
+      report.consolidatedTotalCredit.toFixed(4),
+      "",
+    ];
+    // No CTA row: ASC 830 translation dispositioned unmerged (v1.27);
+    // unlike the JSON shapes (keys pinned null for shape-strict
+    // adapters), CSV has no key contract — omitting the row is honest.
+    const csvRows = [header, ...dataRows, totalsRow];
+    const csv = csvRows
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+    return new NextResponse(csv, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="ns-analytics-consolidated-trial-balance-${book.bookCode}-${asOf}.csv"`,
+      },
+    });
   }
 
   // Native shape (default).
