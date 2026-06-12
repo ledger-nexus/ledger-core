@@ -40,12 +40,12 @@ jobs:
 
     steps:
       - name: Check out ledger-core
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: Code/ledger-core
 
       - name: Check out recon
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ledger-nexus/recon
           path: Code/recon
@@ -55,19 +55,19 @@ jobs:
           # continues.
 
       - name: Check out revenue-rec
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ledger-nexus/revenue-rec
           path: Code/revenue-rec
 
       - name: Check out fa-amort
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ledger-nexus/fa-amort
           path: Code/fa-amort
 
       - name: Check out integrations
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ledger-nexus/integrations
           path: Code/integrations

@@ -29,7 +29,7 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mini_ledger_test?schema=public
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # The repo's lockfile is `package-lock.json` (npm). A previous
       # iteration of this workflow used pnpm, but no `pnpm-lock.yaml`
