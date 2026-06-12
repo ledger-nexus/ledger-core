@@ -205,6 +205,151 @@ export function toNsIncomeStatement(
   };
 }
 
+// ─── Consolidation (NS SubsidiaryElimination) ──────────────────────
+
+export interface NativeConsolidatedRow {
+  accountCode: string;
+  accountName: string;
+  type: AccountType;
+  subtype: string | null;
+  perEntity: { entityCode: string; debit: Decimal; credit: Decimal }[];
+  totalDebit: Decimal;
+  totalCredit: Decimal;
+  isEliminated: boolean;
+  eliminatedDebit: Decimal;
+  eliminatedCredit: Decimal;
+  consolidatedDebit: Decimal;
+  consolidatedCredit: Decimal;
+  consolidatedBalance: Decimal;
+}
+
+export interface NativeConsolidatedEntity {
+  code: string;
+  name: string;
+  isRoot: boolean;
+  functionalCurrencyId: string;
+}
+
+export interface ConsolidationShapeContext extends ShapeContext {
+  rootEntityName: string;
+  /** Map from ledger-core entityCode → NS subsidiary internalid for perEntity rows. */
+  entityCodeToNsInternalid: Record<string, string>;
+}
+
+export interface NsConsolidatedTrialBalanceResponse {
+  reportName: "Consolidated Trial Balance";
+  rootSubsidiary: { internalid: string; name: string };
+  accountingBook: { internalid: string };
+  asOf: string;
+  entities: Array<{
+    internalid: string;
+    code: string;
+    name: string;
+    isRoot: boolean;
+    currency: string;
+  }>;
+  rows: Array<{
+    account: { acctnumber: string; acctname: string; accttype: string };
+    perSubsidiary: Array<{
+      internalid: string;
+      debit: string;
+      credit: string;
+    }>;
+    preEliminationDebit: string;
+    preEliminationCredit: string;
+    eliminatedDebit: string;
+    eliminatedCredit: string;
+    consolidatedDebit: string;
+    consolidatedCredit: string;
+    isEliminated: boolean;
+  }>;
+  totals: {
+    preEliminationDebit: string;
+    preEliminationCredit: string;
+    consolidatedDebit: string;
+    consolidatedCredit: string;
+    /** Always null: ASC 830 translation dispositioned unmerged (v1.27). */
+    cumulativeTranslationAdjustment: null;
+  };
+  /**
+   * Keys preserved for NS-shape-strict BI adapters, values pinned:
+   * this deployment consolidates under the remeasurement method
+   * (PROJECT_STATUS v1.27) — no CTA, no per-entity translation rates.
+   */
+  translation: {
+    active: false;
+    ratesByEntity: null;
+    cta: null;
+  };
+  balances: boolean;
+}
+
+export function toNsConsolidatedTrialBalance(
+  input: {
+    entities: NativeConsolidatedEntity[];
+    rows: NativeConsolidatedRow[];
+    preEliminationTotalDebit: Decimal;
+    preEliminationTotalCredit: Decimal;
+    consolidatedTotalDebit: Decimal;
+    consolidatedTotalCredit: Decimal;
+    balances: boolean;
+  },
+  asOf: string,
+  ctx: ConsolidationShapeContext
+): NsConsolidatedTrialBalanceResponse {
+  // NS perSubsidiary row keys by internalid. Build the reverse map for
+  // the per-row translation. Unknown entities (entityCode not in the
+  // mapping) get an empty internalid — operators should pre-import
+  // every subsidiary in the hierarchy.
+  const nsIdFor = (entityCode: string): string =>
+    ctx.entityCodeToNsInternalid[entityCode] ?? "";
+
+  return {
+    reportName: "Consolidated Trial Balance",
+    rootSubsidiary: {
+      internalid: ctx.subsidiaryInternalid,
+      name: ctx.rootEntityName,
+    },
+    accountingBook: { internalid: ctx.accountingBookInternalid },
+    asOf,
+    entities: input.entities.map((e) => ({
+      internalid: nsIdFor(e.code),
+      code: e.code,
+      name: e.name,
+      isRoot: e.isRoot,
+      currency: e.functionalCurrencyId,
+    })),
+    rows: input.rows.map((r) => ({
+      account: {
+        acctnumber: r.accountCode,
+        acctname: r.accountName,
+        accttype: mapAcctType(r.type),
+      },
+      perSubsidiary: r.perEntity.map((p) => ({
+        internalid: nsIdFor(p.entityCode),
+        debit: p.debit.toFixed(4),
+        credit: p.credit.toFixed(4),
+      })),
+      preEliminationDebit: r.totalDebit.toFixed(4),
+      preEliminationCredit: r.totalCredit.toFixed(4),
+      eliminatedDebit: r.eliminatedDebit.toFixed(4),
+      eliminatedCredit: r.eliminatedCredit.toFixed(4),
+      consolidatedDebit: r.consolidatedDebit.toFixed(4),
+      consolidatedCredit: r.consolidatedCredit.toFixed(4),
+      isEliminated: r.isEliminated,
+    })),
+    totals: {
+      preEliminationDebit: input.preEliminationTotalDebit.toFixed(4),
+      preEliminationCredit: input.preEliminationTotalCredit.toFixed(4),
+      consolidatedDebit: input.consolidatedTotalDebit.toFixed(4),
+      consolidatedCredit: input.consolidatedTotalCredit.toFixed(4),
+      cumulativeTranslationAdjustment: null,
+    },
+    translation: { active: false, ratesByEntity: null, cta: null },
+    balances: input.balances,
+  };
+}
+
 export function toNsBalanceSheet(
   sections: {
     assets: NativeFinancialStatementRow[];
