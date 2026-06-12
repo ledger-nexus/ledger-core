@@ -25,6 +25,8 @@ import type {
   NsExport,
   NsAccountingBook,
   NsSubsidiary,
+  NsOpenItemState,
+  NsOpenItemStatus,
 } from "./types";
 
 export interface ExportToNsInput {
@@ -335,6 +337,91 @@ export async function exportToNs(
     return seg;
   });
 
+  // v0.9 NS Books Phase 3.5 — sub-ledger multi-book reverse export.
+  //
+  // For multi-book mode ONLY, emit a per-book snapshot of every AR/AP
+  // OpenItem that lineage-links to an NS Invoice / VendorBill in
+  // scope. Single-book mode keeps the v0.6 export shape (no
+  // OpenItemState key) — the per-book divergence doesn't exist
+  // there, so emitting an empty array would be lossless noise.
+  //
+  // The query is scoped by `(entity in entityCodes) AND (book in
+  // bookCodesToQuery) AND sourceSystem='NETSUITE'`. Native (non-NS)
+  // open items are filtered out by the sourceSystem clause.
+  //
+  // Status values map straight through — the schema enum already
+  // matches the NS-side intent (OPEN/PARTIAL/APPLIED/etc.). Decimal
+  // columns are stringified to preserve precision across the wire.
+  let openItemStateRows: NsOpenItemState[] = [];
+  if (bookResolution.mode === "multi") {
+    const arRows = await prisma.arOpenItem.findMany({
+      where: {
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "Invoice",
+        entity: { code: { in: entityCodes } },
+        book: { code: { in: bookCodesToQuery } },
+      },
+      select: {
+        sourceRecordId: true,
+        originalAmount: true,
+        currentBalance: true,
+        status: true,
+        entity: { select: { code: true } },
+        book: { select: { code: true } },
+      },
+      orderBy: [{ sourceRecordId: "asc" }],
+    });
+    const apRows = await prisma.apOpenItem.findMany({
+      where: {
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "VendorBill",
+        entity: { code: { in: entityCodes } },
+        book: { code: { in: bookCodesToQuery } },
+      },
+      select: {
+        sourceRecordId: true,
+        originalAmount: true,
+        currentBalance: true,
+        status: true,
+        entity: { select: { code: true } },
+        book: { select: { code: true } },
+      },
+      orderBy: [{ sourceRecordId: "asc" }],
+    });
+    const toState = (
+      r: typeof arRows[number] | typeof apRows[number],
+      side: "Invoice" | "VendorBill"
+    ): NsOpenItemState | null => {
+      if (!r.sourceRecordId) return null;
+      return {
+        sourceRecordType: side,
+        sourceRecordId: r.sourceRecordId,
+        bookCode: r.book.code,
+        entityCode: r.entity.code,
+        originalAmount: r.originalAmount.toString(),
+        currentBalance: r.currentBalance.toString(),
+        status: r.status as NsOpenItemStatus,
+      };
+    };
+    openItemStateRows = [
+      ...arRows.map((r) => toState(r, "Invoice")),
+      ...apRows.map((r) => toState(r, "VendorBill")),
+    ]
+      .filter((s): s is NsOpenItemState => s !== null)
+      // Deterministic ordering: AR before AP (sourceRecordType asc),
+      // then sourceRecordId asc, then bookCode asc. This is what the
+      // canonical-compare relies on for byte-stable diffs across runs.
+      .sort((a, b) => {
+        if (a.sourceRecordType !== b.sourceRecordType) {
+          return a.sourceRecordType.localeCompare(b.sourceRecordType);
+        }
+        if (a.sourceRecordId !== b.sourceRecordId) {
+          return a.sourceRecordId.localeCompare(b.sourceRecordId);
+        }
+        return a.bookCode.localeCompare(b.bookCode);
+      });
+  }
+
   const customFieldDefs = await prisma.customFieldDefinition.findMany({
     where: { sourceErpField: { startsWith: "cust" } },
     orderBy: { fieldKey: "asc" },
@@ -387,6 +474,9 @@ export async function exportToNs(
     CustomerPayment: customerPayments.length ? customerPayments : undefined,
     VendorPayment: vendorPayments.length ? vendorPayments : undefined,
     JournalEntry: journalEntries.length ? journalEntries : undefined,
+    // v0.9 NS Books Phase 3.5 — per-book sub-ledger snapshot. Only
+    // populated in multi mode (see the openItemStateRows guard above).
+    OpenItemState: openItemStateRows.length ? openItemStateRows : undefined,
   };
 }
 
@@ -453,6 +543,28 @@ export function diffNsExports(a: NsExport, b: NsExport): string | null {
       if (aStr !== bStr) {
         return `${key}[${aArr[i].internalid}]: payload differs\n  a=${aStr}\n  b=${bStr}`;
       }
+    }
+  }
+
+  // v0.9 NS Books Phase 3.5 — OpenItemState uses a composite key
+  // (sourceRecordType + sourceRecordId + bookCode) instead of
+  // internalid, so it gets its own canonical-compare branch.
+  const stateKey = (s: { sourceRecordType: string; sourceRecordId: string; bookCode: string }) =>
+    `${s.sourceRecordType}|${s.sourceRecordId}|${s.bookCode}`;
+  const aStateArr = [...(a.OpenItemState ?? [])].sort((x, y) =>
+    stateKey(x).localeCompare(stateKey(y))
+  );
+  const bStateArr = [...(b.OpenItemState ?? [])].sort((x, y) =>
+    stateKey(x).localeCompare(stateKey(y))
+  );
+  if (aStateArr.length !== bStateArr.length) {
+    return `OpenItemState: count differs (a=${aStateArr.length}, b=${bStateArr.length})`;
+  }
+  for (let i = 0; i < aStateArr.length; i++) {
+    const aStr = canonical(aStateArr[i]);
+    const bStr = canonical(bStateArr[i]);
+    if (aStr !== bStr) {
+      return `OpenItemState[${stateKey(aStateArr[i])}]: payload differs\n  a=${aStr}\n  b=${bStr}`;
     }
   }
   return null;
