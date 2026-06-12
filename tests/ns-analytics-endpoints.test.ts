@@ -284,6 +284,34 @@ describe("v0.9 NS SuiteAnalytics Phase 2: NS-side scope resolution", () => {
   });
 });
 
+describe("v0.9 NS SuiteAnalytics Phase 3: shape=ns guard", () => {
+  it("returns 400 for invalid shape value", async () => {
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        { ...VALID_QUERY, shape: "xml" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects shape=ns when scope is native (entityCode + bookCode)", async () => {
+    // shape=ns requires NS-side scope so the response can include real
+    // NS internalids. Mixing the two is operator confusion.
+    const res = await getTrialBalance(
+      makeReq(
+        "/api/external/ns-analytics/trial-balance",
+        { ...VALID_QUERY, shape: "ns" },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/shape=ns requires NS-side scope/);
+  });
+});
+
 describe("v0.9 NS SuiteAnalytics Phase 1: audit log", () => {
   it("a failed auth attempt writes an ACCESS_DENIED audit row", async () => {
     // Snapshot current count of ACCESS_DENIED for the NS_ANALYTICS_AUTH
