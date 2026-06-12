@@ -47,3 +47,16 @@ export type {
   NsJournalEntry,
   NsTransactionLine,
 } from "./types";
+
+// AccountingPeriod bootstrap (extracted from the chain's PR #43; the
+// Subsidiary/Book bootstrap halves were superseded by setupSubsidiaries
+// + setupBooks).
+export {
+  mapNsAccountingPeriod,
+  importAccountingPeriods,
+  nsCalendarCode,
+  nsPeriodCode,
+  type NsAccountingPeriodBootstrap,
+  type MappedPeriod,
+  type ImportAccountingPeriodsResult,
+} from "./periods";
