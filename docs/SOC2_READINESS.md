@@ -4,6 +4,9 @@
 **Scope:** Type 1 readiness assessment across all 5 repos (`ledger-core`, `recon`, `revenue-rec`, `integrations`, `fa-amort`) as of this commit.
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022), Security TSC + Common Criteria CC1–CC9. Availability, Processing Integrity, Confidentiality also referenced where in scope.
 
+**Changelog:**
+- 2026-06-12 — reconciled against main (merge-train session); see PR for verification method. Every closure claim added in this pass cites a merged PR (verified `state: MERGED` via `gh pr view`) or a file present on main. RLS remains deferred/open — Phase-1 foundation only. The 2026-05-25 baseline text is retained where still accurate; dated **Update 2026-06-12** notes mark what changed.
+
 ---
 
 ## What this document is and isn't
@@ -29,25 +32,29 @@ The portfolio has **strong processing-integrity controls** (substrate-level inva
 
 It is **missing or critically weak** on every other area an auditor will look at:
 
-| Area | State | SOC 2 Block? |
+| Area | State (updated 2026-06-12) | SOC 2 Block? |
 |---|---|---|
-| Authentication | Dev-only HMAC cookie stub, no MFA, no password policy | **Yes — CC6** |
-| Access controls (RBAC) | Two-tier (admin/user) by hardcoded email allowlist | **Yes — CC6** |
-| Audit logging | Partial (AI rows, period close); no JE-level or login audit | **Yes — CC5, CC7** |
-| Access logging | None (no request log, no Server Action invocation log) | **Yes — CC6, CC7** |
-| Vulnerability mgmt | No SAST, no Dependabot; 10 known CVEs in deps (4 high) | **Yes — CC7, CC9** |
+| Authentication | Clerk integration landed env-gated (`src/lib/auth/clerk.ts`); dev HMAC cookie stub remains the default until Clerk is activated in production (deficiency #1 open). No MFA until activation | **Yes — CC6** |
+| Access controls (RBAC) | Two-tier (admin/user); per-tenant external-API bearer tokens (`TenantApiToken`, [PR #174](https://github.com/ledger-nexus/ledger-core/pull/174)) | **Yes — CC6** |
+| Tenant isolation | App-level `tenantId` scoping enforced on read + write paths; cross-tenant gaps closed via [PR #237](https://github.com/ledger-nexus/ledger-core/pull/237), [PR #238](https://github.com/ledger-nexus/ledger-core/pull/238), [PR #88](https://github.com/ledger-nexus/ledger-core/pull/88). RLS deferred — Phase-1 foundation only ([PR #227](https://github.com/ledger-nexus/ledger-core/pull/227)); deficiency #12 open | Partial — CC6 |
+| Audit logging | `AuditLog` model + `logAuditEvent` (`src/lib/audit/log.ts`: logins, access denials, privileged actions, token use, data exports); append-only `audit_log` RULE pair (migration 0015) | Partial — CC5, CC7 |
+| Access logging | Token-auth events audited (TOKEN_USED / TOKEN_REJECTED); no general request log or Server Action invocation log | Partial — CC6, CC7 |
+| Vulnerability mgmt | CodeQL SAST + gitleaks + `npm audit` (prod deps, critical) in `.github/workflows/security.yml`; Dependabot enabled; all deps pinned to exact versions ([PR #95](https://github.com/ledger-nexus/ledger-core/pull/95)) | Partial — CC7, CC9 |
+| Control monitoring | Deficiency-log + CLAUDE.md verifiers run nightly ([PR #62](https://github.com/ledger-nexus/ledger-core/pull/62): `scripts/verify-deficiency-log.ts`, `scripts/verify-claude-md-consistency.ts` + two workflows) | Partial — CC4 |
 | Monitoring/alerting | No Sentry/Datadog/error pipeline | **Yes — CC7** |
-| Incident response | No runbook, no on-call, no postmortem template | **Yes — CC7** |
-| Change management | Atomic commits + tests; no branch protection, no CODEOWNERS | Partial — CC8 |
-| Encryption at rest | DB-default only (Neon TLS); no field-level for PII | **Yes — CC6, Confidentiality** |
-| Encryption in transit | TLS via Vercel/Neon default; no HSTS header | Partial — CC6 |
-| Risk assessment | None formal | **Yes — CC3** |
-| Vendor mgmt | No SOC 2 receipts catalogued | **Yes — CC9** |
-| Business continuity | No documented RTO/RPO, no DR test | **Yes — Availability** |
-| Data retention | No policy, no automated purges | **Yes — Privacy/Confidentiality** |
+| Incident response | Runbook at `docs/policies/incident-response.md`; no on-call/alert wiring | Partial — CC7 |
+| Change management | Atomic commits + tests + `.github/CODEOWNERS` + documented config (`.github/BRANCH_PROTECTION.md`); GitHub-side branch-protection rules still not enabled | Partial — CC8 |
+| Encryption at rest | DB-default (Neon); webhook URLs AES-256-GCM at rest (`src/lib/notifications/crypto.ts`); no field-level encryption for other PII | **Yes — CC6, Confidentiality** |
+| Encryption in transit | TLS via Vercel/Neon default; HSTS set in `next.config.js`; nonce-based CSP in `src/middleware.ts` | Partial — CC6 |
+| Risk assessment | `docs/policies/risk-register.md` (20 scored risks); review cadence not yet evidenced | Partial — CC3 |
+| Vendor mgmt | `docs/policies/vendor-management.md` inventory exists; vendor SOC 2 receipts still not on file (deficiency #8 open) | Partial — CC9 |
+| Business continuity | `docs/policies/business-continuity.md` exists; restore drill never run (deficiency #3 open) | Partial — Availability |
+| Data retention | Classification taxonomy in `docs/policies/data-classification.md`; no automated purges | **Yes — Privacy/Confidentiality** |
 | Personnel controls | N/A (solo dev) — will become a gap with employees | Partial — CC1 |
 
-The portfolio is currently **0–10% of the way to SOC 2 Type 2**. Realistic timeline to first Type 1 audit if started today: 90 days of engineering + 90 days of policy work + a Type 1 audit (~6 weeks, ~$15-25k for a small firm). Type 2 follows after a 6-month observation window with evidence.
+The portfolio is currently **0–10% of the way to SOC 2 Type 2** (2026-05-25 baseline). Realistic timeline to first Type 1 audit if started today: 90 days of engineering + 90 days of policy work + a Type 1 audit (~6 weeks, ~$15-25k for a small firm). Type 2 follows after a 6-month observation window with evidence.
+
+> **Update 2026-06-12:** several baseline gaps have since closed (see the dated notes inline and `docs/policies/control-deficiency-log.md`, which is the authoritative open/closed record). This doc deliberately does not restate a readiness percentage — the deficiency log + risk register carry current status.
 
 ---
 
@@ -143,11 +150,13 @@ The portfolio is currently **0–10% of the way to SOC 2 Type 2**. Realistic tim
 
 **[CRITICAL]** No risk register. The portfolio handles accounting data — fraud risks (unauthorized JEs, period-close bypass, manipulation of historical entries) are material and unmitigated formally.
 
+> **Update 2026-06-12:** `docs/policies/risk-register.md` exists on main with 20 scored risks (likelihood × impact, mitigation, status) and was reconciled against main in this pass. The finding above is retained as the baseline record; remaining CC3 gap is evidence of a periodic review cadence, not the register's existence.
+
 **[NOTE]** Some risks are *implicitly* mitigated by code: e.g., period-close prevents back-dated entries (CC8 control), debits-equal-credits enforced at the substrate level (CC7 control). These need to be *cataloged* against named risks.
 
 ### Remediation
 
-→ Add `docs/policies/risk-register.md` with top 20 risks, likelihood × impact, mitigation status, owner, review date. Phase 4 below.
+→ ~~Add `docs/policies/risk-register.md` with top 20 risks, likelihood × impact, mitigation status, owner, review date. Phase 4 below.~~ Done (see update above). Remaining: evidence the annual/quarterly review cadence.
 
 ---
 
@@ -159,16 +168,18 @@ The portfolio is currently **0–10% of the way to SOC 2 Type 2**. Realistic tim
 
 | Subcriterion | Evidence | Status |
 |---|---|---|
-| CC4.1 Ongoing evaluations | CI runs test suites on every push | Partial |
-| CC4.2 Communicates deficiencies | No formal mechanism | **Missing** |
+| CC4.1 Ongoing evaluations | CI runs test suites on every push; nightly deficiency-log + CLAUDE.md verifiers ([PR #62](https://github.com/ledger-nexus/ledger-core/pull/62), 2026-06-12) | Partial |
+| CC4.2 Communicates deficiencies | `docs/policies/control-deficiency-log.md` + automated merged-PR verification (2026-06-12) | Partial |
 
 ### Findings
 
 **[CRITICAL]** No mechanism for tracking control deficiencies, internal audit findings, or remediation status. Auditors will expect a tracking system (even a spreadsheet) showing which controls have failed in the observation window and how/when they were fixed.
 
+> **Update 2026-06-12:** closed. `docs/policies/control-deficiency-log.md` is live with a populated row history (open AND closed rows retained), and [PR #62](https://github.com/ledger-nexus/ledger-core/pull/62) added automated verification: `scripts/verify-deficiency-log.ts` (every Closed row must cite a merged PR — checked via `gh pr view` against GitHub) and `scripts/verify-claude-md-consistency.ts` (cross-repo CLAUDE.md drift), each run by a nightly workflow (`.github/workflows/deficiency-log-verify.yml`, `.github/workflows/claude-md-consistency.yml`). This is the remediation for the attestation-drift class (deficiency #27 — docs claiming work that never merged).
+
 ### Remediation
 
-→ Add `docs/policies/control-deficiency-log.md` as a template.
+→ ~~Add `docs/policies/control-deficiency-log.md` as a template.~~ Done, plus automated nightly verification (see update above).
 
 ---
 
@@ -197,8 +208,8 @@ The portfolio is currently **0–10% of the way to SOC 2 Type 2**. Realistic tim
 
 ### Remediation
 
-→ Add `docs/policies/access-control.md` documenting the access model.
-→ Add an `AuditLog` table that records every privileged action (period close, user lifecycle, JE posting, etc.) — see Phase 3a below.
+→ ~~Add `docs/policies/access-control.md` documenting the access model.~~ Done — file exists on main.
+→ ~~Add an `AuditLog` table that records every privileged action (period close, user lifecycle, JE posting, etc.) — see Phase 3a below.~~ Done — `AuditLog` model (`prisma/schema.prisma`) + `logAuditEvent`/`auditPrivilegedAction` (`src/lib/audit/log.ts`); the table is append-only at the DB layer (UPDATE/DELETE no-op RULE pair, migration `0015_audit_log_rules_and_lineage_uniq` + `prisma/sql/audit-log-append-only.sql` — see deficiency log #13/#14). Remaining: coverage review that every privileged Server Action actually calls it.
 
 ---
 
@@ -216,7 +227,7 @@ The portfolio is currently **0–10% of the way to SOC 2 Type 2**. Realistic tim
 | CC6.4 Restricts access to data | Two-tier RBAC, all-or-nothing for admin actions | Partial |
 | CC6.5 Asset disposal | No formal | **Missing** |
 | CC6.6 Network boundary | Token-gated internal HTTP boundaries (good); no WAF | Partial |
-| CC6.7 Restricts transmission | TLS by default; no HSTS header set | Partial |
+| CC6.7 Restricts transmission | TLS by default; HSTS set in `next.config.js` (2026-06-12) | Partial |
 | CC6.8 Endpoint protection | N/A — cloud only | N/A |
 
 ### Findings
@@ -229,6 +240,8 @@ The portfolio is currently **0–10% of the way to SOC 2 Type 2**. Realistic tim
 ```
 
 This is the single biggest gap. Until real auth is in place, every other CC6 control is moot.
+
+> **Update 2026-06-12:** Clerk-backed auth landed on main as an env-gated dispatch (`src/lib/auth/clerk.ts` — activates when `CLERK_SECRET_KEY` is set, with JIT user provisioning by email). The dev HMAC stub remains the fallback when the env is unset, so this finding **stays open** (deficiency #1) until Clerk is activated in production and the stub path is retired.
 
 **[CRITICAL]** No MFA. SOC 2 expects MFA for all privileged access (admin role), often for all access. Today there's no way to require a second factor.
 
@@ -251,15 +264,20 @@ SOC 2 expects role assignment to be DB-driven with approval workflow and audit t
 
 **[MEDIUM]** Internal HTTP endpoints are token-gated (`INTERNAL_API_TOKEN`). Token rotation isn't formalized — there's no documented procedure to rotate without downtime.
 
+> **Update 2026-06-12:** [PR #174](https://github.com/ledger-nexus/ledger-core/pull/174) added per-tenant `TenantApiToken` bearer auth for the external API (SHA-256-hashed tokens, timing-safe comparison via `crypto.timingSafeEqual`, revocable per tenant without redeploy, per-token last-used timestamps — `src/lib/auth/token.ts`). The global `INTERNAL_API_TOKEN` env path remains as a backward-compatibility fallback until companion repos rotate to per-tenant tokens.
+
+**Tenant isolation (added 2026-06-12).** Multi-tenancy shipped after the 2026-05-25 baseline: every customer-data table carries `tenantId` (NOT NULL on 26 tables — deficiency #11, Closed), with scope derived from the session, never client input. Recent merged hardening closed concrete cross-tenant gaps: [PR #237](https://github.com/ledger-nexus/ledger-core/pull/237) (consolidation + `getTrialBalance` lookups tenant-scoped; client-controlled `?root=` pinned to the session tenant — deficiency #15), [PR #238](https://github.com/ledger-nexus/ledger-core/pull/238) (IS / BS / cash-flow / BTD / M-3 account scans tenant-scoped — deficiency #16), [PR #88](https://github.com/ledger-nexus/ledger-core/pull/88) (cross-tenant write via unscoped `createFixedAsset` entity lookup — deficiency #28). **RLS is NOT enforced**: only the Phase-1 foundation exists ([PR #227](https://github.com/ledger-nexus/ledger-core/pull/227) — `withTenantContext` sets the `app.current_tenant_id` GUC, currently inert; no policies, no `FORCE ROW LEVEL SECURITY`). Enforcement today is application-level tenant-scoped WHERE clauses; database-layer RLS is deliberately deferred and tracked as deficiency #12 (Open).
+
 **[STRONG]** Server-side rendering with Server Actions means most "API endpoints" don't exist in the conventional sense; this removes a class of attack surface.
 
 ### Remediation
 
-→ Swap dev cookie for Clerk or NextAuth. See `docs/auth-swap.md` for the swap recipe. Critical path.
+→ Swap dev cookie for Clerk or NextAuth. See `docs/auth-swap.md` for the swap recipe. Critical path. *(2026-06-12: Clerk code path landed env-gated; activation in production still outstanding.)*
 → Add granular RBAC (see `docs/policies/access-control.md` template in Phase 4).
-→ Implement `AuditLog` (Phase 3a) so every login/logout/access-grant/access-revoke event is captured.
-→ Add HSTS header (Phase 3b).
-→ Document token rotation procedure (Phase 4 policy).
+→ ~~Implement `AuditLog` (Phase 3a) so every login/logout/access-grant/access-revoke event is captured.~~ Done — see CC5 remediation.
+→ ~~Add HSTS header (Phase 3b).~~ Done — `next.config.js` (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) + nonce-based CSP in `src/middleware.ts`.
+→ Document token rotation procedure (Phase 4 policy). *(2026-06-12: per-tenant revocable tokens via [PR #174](https://github.com/ledger-nexus/ledger-core/pull/174) reduce the blast radius; rotation procedure doc still outstanding.)*
+→ RLS Phases 2–4 (policies → query-path migration → FORCE) — deliberately deferred, user-gated; deficiency #12 stays open until then.
 
 ---
 
@@ -291,13 +309,15 @@ SOC 2 expects role assignment to be DB-driven with approval workflow and audit t
 
 **[MEDIUM]** No vulnerability scanning. `npm audit` is not run in CI. As of this commit, all 5 repos have 10 known CVEs (4 high, 6 moderate) in transitive deps.
 
+> **Update 2026-06-12:** closed in ledger-core. `.github/workflows/security.yml` runs gitleaks (secret scan), `npm audit --omit=dev --audit-level=critical`, and CodeQL SAST on push + weekly schedule; `.github/dependabot.yml` is in place; and all npm deps are pinned to exact versions (no `^`/`~` ranges) via [PR #95](https://github.com/ledger-nexus/ledger-core/pull/95) — deficiency #4, Closed.
+
 ### Remediation
 
 → Add Sentry to all 5 repos via `@sentry/nextjs`. See Phase 3 below.
-→ Add `/api/health` endpoint per repo. See Phase 3 below.
-→ Add `npm audit` step to CI. See Phase 3d below.
-→ Add Dependabot config (Phase 3d).
-→ Add incident response runbook (Phase 4).
+→ Add `/api/health` endpoint per repo. See Phase 3 below. *(2026-06-12: still not shipped — no health route exists under `src/app/api/`.)*
+→ ~~Add `npm audit` step to CI. See Phase 3d below.~~ Done — `.github/workflows/security.yml`.
+→ ~~Add Dependabot config (Phase 3d).~~ Done — `.github/dependabot.yml`.
+→ ~~Add incident response runbook (Phase 4).~~ Done — `docs/policies/incident-response.md` (on-call/alert wiring still outstanding).
 → Log aggregation: enable Vercel's Datadog/Better Stack integration, or pipe to a long-term storage bucket.
 
 ---
@@ -326,6 +346,8 @@ SOC 2 expects role assignment to be DB-driven with approval workflow and audit t
 
 **[HIGH]** No `CODEOWNERS` file. Even for a solo project, listing the owner of each subdirectory shows auditors that ownership is intentional.
 
+> **Update 2026-06-12:** `.github/CODEOWNERS` and `.github/BRANCH_PROTECTION.md` (the documented protection config) exist on main. The GitHub-side branch-protection **rules themselves are still not enabled** — CI checks are advisory — so the CRITICAL finding above stays open.
+
 **[HIGH]** CI runs tests but doesn't gate merge. Without branch protection rules in GitHub settings, a failing CI doesn't block a push.
 
 **[STRONG]** Commit messages are atomic and descriptive (e.g., `v1.16: quick wins — packet download, friendly errors, test suite green` with detailed bullet-pointed body). Auditors will note this favorably.
@@ -334,10 +356,10 @@ SOC 2 expects role assignment to be DB-driven with approval workflow and audit t
 
 ### Remediation
 
-→ Add `.github/CODEOWNERS` (Phase 3e).
-→ Document branch protection rules (`.github/BRANCH_PROTECTION.md`) (Phase 3e).
-→ Add a "Required Status Checks" section in repo settings via `gh api`.
-→ Add `npm audit` to required checks (Phase 3d).
+→ ~~Add `.github/CODEOWNERS` (Phase 3e).~~ Done.
+→ ~~Document branch protection rules (`.github/BRANCH_PROTECTION.md`) (Phase 3e).~~ Done (documentation only — not yet enabled in GitHub settings).
+→ Add a "Required Status Checks" section in repo settings via `gh api`. *(Still outstanding — checks are advisory as of 2026-06-12.)*
+→ Add `npm audit` to required checks (Phase 3d). *(Runs in CI via `security.yml`; not a required check until branch protection is enabled.)*
 
 ---
 
@@ -387,6 +409,8 @@ SOC 2 expects role assignment to be DB-driven with approval workflow and audit t
 
 **[HIGH]** No DLP (data loss prevention). No mechanism to prevent confidential data from being exported in CSV/PDF reports without authorization.
 
+> **Update 2026-06-12 (export hardening, partial):** CSV export surfaces neutralize spreadsheet formula injection (CWE-1236) via [PR #187](https://github.com/ledger-nexus/ledger-core/pull/187); report CSV routes are tenant-scoped per [PR #237](https://github.com/ledger-nexus/ledger-core/pull/237)/[PR #238](https://github.com/ledger-nexus/ledger-core/pull/238); Slack webhook URLs are AES-256-GCM-encrypted at rest (`src/lib/notifications/crypto.ts`). Field-level encryption for other confidential data and authorization-gated export remain open.
+
 ### Privacy TSC (when in scope)
 
 Not currently in scope — portfolio handles minimal PII. Becomes critical once real bookkeeping clients onboard:
@@ -408,6 +432,8 @@ Not currently in scope — portfolio handles minimal PII. Becomes critical once 
 
 **Critical items must be remediated before a Type 1 audit can be scheduled.** High items must be remediated before a Type 2 observation window begins (Type 2 requires 6 months of operational evidence).
 
+> **Note 2026-06-12:** the counts above reflect the 2026-05-25 baseline and are retained as the point-in-time record. Findings closed since then are marked inline with dated update notes; `docs/policies/control-deficiency-log.md` is the authoritative running open/closed tally (its Closed rows are machine-verified against merged PRs nightly).
+
 ---
 
 ## What we're implementing in code (this commit)
@@ -422,6 +448,8 @@ Phase 3 of this work is the code that's tractable today. See sibling commits for
 7. `/api/health` endpoints (CC7)
 
 These close some of the High and Medium findings but leave every Critical finding outstanding — those require business decisions (real auth provider, SOC 2 budget, vendor selection) that aren't code-addressable.
+
+> **Status check 2026-06-12 (verified against main):** items 1–5 shipped — `AuditLog` (`prisma/schema.prisma`, `src/lib/audit/log.ts`), security headers + nonce CSP (`next.config.js`, `src/middleware.ts`), env validation (`src/lib/env.ts`), gitleaks + Dependabot + `npm audit` + CodeQL (`.github/workflows/security.yml`, `.github/dependabot.yml`), `.github/CODEOWNERS` + `.github/BRANCH_PROTECTION.md`. Items 6–7 did **not** ship: there is no `public/.well-known/security.txt` and no `/api/health` route on main. They stay on the remediation list.
 
 ---
 
