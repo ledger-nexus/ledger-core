@@ -35,7 +35,7 @@ jobs:
       # iteration of this workflow used pnpm, but no `pnpm-lock.yaml`
       # was ever committed, so `pnpm install --frozen-lockfile` failed
       # in ~5s on every PR. Switched to npm to match the actual repo.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
