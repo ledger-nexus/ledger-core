@@ -8,7 +8,7 @@ If you have found a security issue in this repository, please report it
 - Email: `security@ledger-nexus.com` (replace with real address when
   the domain is provisioned)
 - GitHub: open a private security advisory at
-  https://github.com/ledger-nexus/REPO/security/advisories/new
+  https://github.com/ledger-nexus/ledger-core/security/advisories/new
 
 Please **do not** open a public GitHub issue for security problems.
 
@@ -42,7 +42,27 @@ of acknowledgement on request.
 
 ## SOC 2 framework
 
-This project is being prepared for SOC 2 Type 1 audit readiness. See
-`docs/SOC2_READINESS.md` for the current assessment and remediation
-status.
+This project is approaching SOC 2 Type 1 audit readiness. The
+authoritative artifacts:
+
+- `docs/SOC2_READINESS.md` — current assessment + per-criterion status
+- `docs/SOC2_CONTROL_MATRIX.md` — CC1–CC9 + 4 TSCs → file/line evidence map
+- `docs/policies/` — 10-document policy framework (security, access-control,
+  change-management, incident-response, data-classification, data-subject-
+  requests, vendor-management, risk-register, business-continuity,
+  control-deficiency-log, bypass-log)
+- `docs/architecture/portfolio-data-locations.md` — portfolio-wide data
+  location map (auditor entry point)
+
+## Incident handling
+
+If your report meets the SEV-1 or SEV-2 bar (production data exposure,
+auth bypass, unauthorized JE post, encryption-key compromise, vendor
+breach), it gets triaged per the procedure in
+`docs/policies/incident-response.md` — acknowledgement within 15 minutes,
+status update within 30 minutes, GDPR Art. 33 notification within 72
+hours if PII is confirmed exposed.
+
+Operational steps for the on-call engineer live in
+`docs/runbooks/incident-response.md`.
 
