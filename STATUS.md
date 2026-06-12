@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session 2026-06-11-report-tenant-scope · 2026-06-11
+- **Scope**: Deficiency #16 — tenant-scoped the remaining unscoped account scans in report modules (IS, BS via `entityTenantId`; cash-flow, BTD, M-3 via resolve-entity-first) + 5 poisoned-shared-account regression tests (`tests/report-tenant-scoping.test.ts`, verified to fail pre-fix) + deficiency #16 → Closed. BTD finding: its subtype scan read the ENTIRE account table across all tenants.
+- **Branch**: `fix/report-tenant-scoped-account-scans` (pushed; PR open against main)
+- **Outcome**: tsc clean; 10/11 affected suites green (111 tests) — `netsuite-mapping.test.ts` FK failures verified pre-existing on main (state-dependent, unrelated; `ar_open_item_partyId_fkey`).
+
 ### Session 2026-06-11-consolidation-tenant-scope · 2026-06-11
 - **Scope**: Tenant-scoped three unscoped lookups in the consolidation report path (account-metadata subtype/isContra bleed into IC elimination, client-controlled `?root=` cross-tenant read, `getTrialBalance` shared-account scan) + adversarial regression tests + deficiency log #15 (Closed) / #16 (Open: same pattern in IS/BS/cash-flow/M-3)
 - **Branch**: `fix/consolidation-tenant-scoped-lookups` (pushed; PR open against main)
