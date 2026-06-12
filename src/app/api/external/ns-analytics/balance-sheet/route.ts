@@ -14,6 +14,7 @@ import {
   authenticateExternalRequest,
   auditExternalReportAccess,
   resolveScopeFromQuery,
+  fetchAccountSubtypeHints,
 } from "@/lib/external/ns-analytics-auth";
 import { toNsBalanceSheet } from "@/lib/external/ns-report-shapes";
 
@@ -101,6 +102,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // v0.9 Phase 3.5 — NS-canonical shape branch (mirror of TB route).
   if (shape === "ns") {
+    const codes = [
+      ...report.assets.map((r) => r.code),
+      ...report.liabilities.map((r) => r.code),
+      ...report.equity.map((r) => r.code),
+    ];
+    const hints = await fetchAccountSubtypeHints(prisma, auth.tenantId, codes);
     const nsBody = toNsBalanceSheet(
       {
         assets: report.assets,
@@ -119,7 +126,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       {
         subsidiaryInternalid: url.searchParams.get("subsidiary") ?? "",
         accountingBookInternalid: url.searchParams.get("accountingBook") ?? "",
-      }
+      },
+      hints
     );
     return NextResponse.json(nsBody);
   }

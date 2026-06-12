@@ -24,6 +24,7 @@ import {
   authenticateExternalRequest,
   auditExternalReportAccess,
   resolveScopeFromQuery,
+  fetchAccountSubtypeHints,
 } from "@/lib/external/ns-analytics-auth";
 import { toNsTrialBalance } from "@/lib/external/ns-report-shapes";
 
@@ -125,8 +126,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // v0.9 Phase 3 — NS-canonical shape branch. The mapper is a pure
   // function — no DB access — so this is just a shape transform.
   if (shape === "ns") {
-    // scope.source === "ns" by the guard above; pull NS internalids
-    // from query params for the response context.
+    // Subtype-refined NS accttype mapping (Bank vs OthCurAsset etc.).
+    const hints = await fetchAccountSubtypeHints(
+      prisma,
+      auth.tenantId,
+      report.rows.map((r) => r.accountCode)
+    );
     const nsBody = toNsTrialBalance(
       report.rows,
       { totalDebit: report.totalDebit, totalCredit: report.totalCredit },
@@ -134,7 +139,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       {
         subsidiaryInternalid: url.searchParams.get("subsidiary") ?? "",
         accountingBookInternalid: url.searchParams.get("accountingBook") ?? "",
-      }
+      },
+      hints
     );
     return NextResponse.json(nsBody);
   }
