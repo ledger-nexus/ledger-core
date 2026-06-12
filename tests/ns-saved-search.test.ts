@@ -326,6 +326,106 @@ describe("v0.9 NS SuiteAnalytics Phase 4: Transaction searchType happy path", ()
   });
 });
 
+describe("v0.9 NS SuiteAnalytics Phase 4 follow-up: Customer/Vendor/Item searchTypes", () => {
+  it("Customer searchType returns 200 with NS-shaped rows (empty tenant)", async () => {
+    const res = await savedSearch(
+      makeReq({ searchType: "Customer" }, `Bearer ${token}`)
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-total-count")).toBe("0");
+    const body = await res.json();
+    expect(body._meta.searchType).toBe("Customer");
+    expect(body.rows).toEqual([]);
+  });
+
+  it("Vendor searchType returns 200 with NS-shaped rows (empty tenant)", async () => {
+    const res = await savedSearch(
+      makeReq({ searchType: "Vendor" }, `Bearer ${token}`)
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body._meta.searchType).toBe("Vendor");
+  });
+
+  it("Item searchType returns 200 with NS-shaped rows (empty tenant)", async () => {
+    const res = await savedSearch(
+      makeReq({ searchType: "Item" }, `Bearer ${token}`)
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body._meta.searchType).toBe("Item");
+  });
+
+  it("Customer accepts entityid + companyname filters", async () => {
+    const res = await savedSearch(
+      makeReq(
+        {
+          searchType: "Customer",
+          filters: [
+            { field: "entityid", operator: "EQUALS", values: ["ACME"] },
+            {
+              field: "companyname",
+              operator: "ANYOF",
+              values: ["Acme Corp", "Acme LLC"],
+            },
+          ],
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("Vendor rejects unknown field (defeats column-name injection)", async () => {
+    const res = await savedSearch(
+      makeReq(
+        {
+          searchType: "Vendor",
+          filters: [{ field: "secret", operator: "EQUALS", values: ["x"] }],
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/Unknown field/);
+  });
+
+  it("Item rejects mismatched operator for itemtype (WITHIN on string)", async () => {
+    const res = await savedSearch(
+      makeReq(
+        {
+          searchType: "Item",
+          filters: [
+            {
+              field: "itemtype",
+              operator: "WITHIN",
+              values: ["SERVICE", "INVENTORY"],
+            },
+          ],
+        },
+        `Bearer ${token}`
+      )
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("validation error message lists all 5 searchTypes for unknown input", async () => {
+    const res = await savedSearch(
+      makeReq({ searchType: "Pony" }, `Bearer ${token}`)
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    // The error message names the 5 valid types so operators don't have
+    // to guess. Pin all 5 explicitly.
+    expect(body.error).toContain("Account");
+    expect(body.error).toContain("Transaction");
+    expect(body.error).toContain("Customer");
+    expect(body.error).toContain("Vendor");
+    expect(body.error).toContain("Item");
+  });
+});
+
 describe("v0.9 NS SuiteAnalytics Phase 4: filter-injection defense", () => {
   it("rejects SQL-ish field name", async () => {
     const res = await savedSearch(
