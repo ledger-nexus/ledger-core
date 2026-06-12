@@ -10,6 +10,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
+import { CrossBookApplicationError } from "../types";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 import { toDecimal } from "../../utils/decimal";
 import { isUuid } from "../../utils/uuid";
@@ -146,10 +147,33 @@ export async function applyApPayment(
   return await prisma.$transaction(async (tx) => {
     const item = await tx.apOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
-      select: { currentBalance: true, status: true, tenantId: true },
+      // bookId pulled for the Phase 3.5.D cross-book guard below.
+      select: {
+        currentBalance: true,
+        status: true,
+        tenantId: true,
+        bookId: true,
+        book: { select: { code: true } },
+      },
     });
     if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
       throw new Error(`Cannot apply payment to AP item in ${item.status} state`);
+    }
+
+    // v0.9 NS Books Phase 3.5.D — cross-book application guard (mirror
+    // of applyArPayment). The payment JE must be on the same book as
+    // the OpenItem; cross-book apply leaves the per-book TB imbalanced.
+    const appliedByEntry = await tx.journalEntry.findUniqueOrThrow({
+      where: { id: input.appliedByEntryId },
+      select: { bookId: true, book: { select: { code: true } } },
+    });
+    if (appliedByEntry.bookId !== item.bookId) {
+      throw new CrossBookApplicationError(
+        input.openItemId,
+        item.book.code,
+        input.appliedByEntryId,
+        appliedByEntry.book.code
+      );
     }
 
     const applied = toDecimal(input.appliedAmount);
