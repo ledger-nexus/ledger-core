@@ -345,7 +345,27 @@ The third NS architectural axis after multi-sub (v1.26) and the FX lifecycle (v1
 
 Still open in this arc: Phase 3.5 (sub-ledger multi-book + per-tx `bookspecific[]` exchangerate), Phase 4 (reverse exporter reconstructs `bookspecific[]` for the roundtrip proof), Phase 5 (UI book-mapping editor on /import/netsuite).
 
-### v1.29+ — beyond
+> **Update (v1.29):** every item above subsequently landed — Phases 4/4.5/5 (#158/#163/#165), the Phase 3.5 sub-arc (#167–#172), and the per-book idempotency wired through the sub-ledger paths (#169). The "still open" list is preserved for history only.
+
+### v1.29 — NS Books completion + SuiteAnalytics external API (landed 2026-06-11/12)
+
+The closing arcs of the NetSuite line, landed car-by-car through the merge train with per-car review. With these, every documented deferral from v0.7–v0.9 is closed or dispositioned.
+
+**NS Books finale + Phase 3.5 sub-arc:** byte-perfect AccountingBook roundtrip via the frozen-payload stash (#163), the `nsIsElimination` dual-write retired after verifying zero readers (#164), the book-mapping UI on a verified `requireAdmin` boundary (#165), the Phase 3.5 design doc with corrective preamble (#167), sub-ledger lineage uniques live-applied as migration 0018 **plus the migration-mirror section the chain missed** — partial uniques are db-push-invisible (#168), the per-book sub-ledger loops with per-book resume extended to all four paths in transit (#169), aging CSV filename collision fix (#170), the cross-book application guard (#171), and the multi-book discovery banner (#172).
+
+**SuiteAnalytics external API (#173–#187):** bearer-authed read endpoints under `/api/external/ns-analytics/` for BI tools expecting NS REST shapes.
+- **#173 design** landed with a corrective preamble: no CTA on main (v1.27 disposition), and "RLS enforcement" corrected to explicit tenant-scoped queries (RLS is Phase-1-only, deficiency #12 user-gated).
+- **#174 auth** reuses the existing `TenantApiToken` infra (SHA-256 + `timingSafeEqual`, rotation/revocation); `tenantId` derives from the token, never query params; ACCESS_DENIED/DATA_EXPORT audit rows with IP + UA.
+- **#175 resolvers** — NS internalid → ledger-core code via lineage; `resolveNsAccount` tenant-scoped in port (an unscoped lookup was a cross-tenant existence oracle).
+- **#176/#177 shape mappers** — NS-canonical TB/IS/BS via `?shape=ns`; #182 refined the 5→14 accttype taxonomy with subtype hints.
+- **#178 Saved Search** — whitelisted fields/operators per searchType, scalar-only values, hard caps, structural injection resistance (Prisma where-objects, never SQL); #181 added Customer/Vendor/Item; #184 added the amount filter on denormalized JE totals (migration 0019 + backfill).
+- **#179 consolidated TB** — `periodStart` rejected with an explicit 400 (remeasurement method; no translation layer exists), translation JSON keys pinned null for shape-strict adapters; #183 added wide-format CSV (no CTA row — CSV has no key contract).
+- **#185** — `OpenItemState` reverse-export extension carrying the per-book sub-ledger divergence NS's one-item-per-transaction shape cannot represent.
+- **#187 (34th adversarial pass)** — CWE-1236 CSV formula injection closed across all four serializers: shared `toCsv` helper prepends a quote to `=`/`+`/`-`/`@`/tab/CR leaders; NS-controlled account names flow byref into CSVs auditors open in Excel.
+
+**Forward-compat flag (recorded on #181):** saved-search string filters use equality on columns the deferred encryption-split PRs plan to encrypt (e.g. `Party.displayName`, plaintext today) — when that arc revives, those filters silently match nothing unless deterministic encryption or a search-index column ships with it.
+
+### v1.30+ — beyond
 The v1.0 polish list (autocomplete, recurring entries, multi-currency revaluation, FX gain/loss wiring) is fully shipped, and v1.27 completed realized FX on settlement. Remaining FX depth — current-rate-method consolidation translation + CTA (`POST_CTA` close-task stub) — is gated on per-line functional-currency amounts (see the v1.27 disposition) and waits for a multi-entity foreign-currency engagement to ask for it.
 
 ---
