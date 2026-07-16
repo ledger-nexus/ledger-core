@@ -162,10 +162,16 @@ export async function reassignRecord(
     try {
       await emitReassignmentNotification(prisma, input);
     } catch (e) {
-      console.warn(
-        `Reassignment of ${input.recordType} ${input.recordId.slice(0, 8)} succeeded but notification emit failed:`,
-        e
-      );
+      // Pass the dynamic (caller-influenced) values as structured
+      // arguments rather than interpolating them into console.warn's
+      // format-string position — keeps user-controlled data out of the
+      // format sink (satisfies CodeQL js/tainted-format-string) and is
+      // better structured-logging hygiene.
+      console.warn("Reassignment succeeded but notification emit failed:", {
+        recordType: input.recordType,
+        recordId: input.recordId.slice(0, 8),
+        error: e,
+      });
     }
   }
 
