@@ -9,9 +9,14 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { reassignRecord, ReassignError } from "@/lib/ownership/reassign";
+import {
+  reassignRecordInTx,
+  emitReassignmentNotification,
+  ReassignError,
+} from "@/lib/ownership/reassign";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { withTenantContext } from "@/lib/tenant-context";
 
 export interface ReassignArItemState {
   ok: boolean;
@@ -34,8 +39,11 @@ export async function reassignArItemAction(input: {
       return { ok: false, message: "newOwnerType must be USER or QUEUE" };
     }
 
-    await reassignRecord(prisma, {
-      recordType: "ArOpenItem",
+    // RLS Phase 2b Class T: tx-scoped reassignRecordInTx +
+    // outside-tx notification emit. See reassign-ap-item.ts for the
+    // full rationale on the two-phase pattern.
+    const reassignInput = {
+      recordType: "ArOpenItem" as const,
       recordId: input.openItemId,
       newOwner: { type: input.newOwnerType, id: input.newOwnerId },
       actorUserId: user.id,
@@ -45,7 +53,19 @@ export async function reassignArItemAction(input: {
       actorTenantId: tenant.id,
       reason: input.reason?.trim() || `manual:by ${user.displayName}`,
       lockFromRules: true, // manual reassignments lock the record from rules
-    });
+    };
+    await withTenantContext(prisma, tenant.id, async (tx) =>
+      reassignRecordInTx(tx, reassignInput)
+    );
+
+    try {
+      await emitReassignmentNotification(prisma, reassignInput);
+    } catch (e) {
+      console.warn(
+        `Reassignment of ArOpenItem ${input.openItemId.slice(0, 8)} succeeded but notification emit failed:`,
+        e
+      );
+    }
 
     revalidatePath("/ar");
     return { ok: true };
