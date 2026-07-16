@@ -75,6 +75,10 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   type?: EncryptedColumnType;
 }> = [
   { model: "JournalEntry", field: "memo" },
+  // Bank-feed descriptions carry merchant/payee detail — as sensitive as
+  // a JE memo. The dedupeHash is computed on plaintext at import time, so
+  // encrypting the stored description doesn't affect idempotency.
+  { model: "BankTransaction", field: "description" },
   // EmailDelivery body fields contain literal email content sent to
   // users — JE memos, owner-transfer offers, invite tokens. Highest-
   // cost-per-leak after JE memo because a leaked email body typically

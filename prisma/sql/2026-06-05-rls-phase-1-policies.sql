@@ -536,6 +536,14 @@ CREATE POLICY notification_dispatch_tenant_isolation ON notification_dispatch
   USING ("tenantId" = app_current_tenant_id())
   WITH CHECK ("tenantId" = app_current_tenant_id());
 
+-- 51. bank_transaction (bank-feed staging; direct NOT NULL tenantId)
+ALTER TABLE bank_transaction ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS bank_transaction_tenant_isolation ON bank_transaction;
+CREATE POLICY bank_transaction_tenant_isolation ON bank_transaction
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
 -- =============================================================================
 -- Verification
 -- =============================================================================
@@ -548,7 +556,7 @@ CREATE POLICY notification_dispatch_tenant_isolation ON notification_dispatch
 --     AND rowsecurity = true
 --   ORDER BY tablename;
 --
--- Expected: 50 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
+-- Expected: 51 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
 -- defines but does not FORCE).
 --
 -- Policy listing:
@@ -556,6 +564,6 @@ CREATE POLICY notification_dispatch_tenant_isolation ON notification_dispatch
 --   WHERE schemaname = 'public'
 --   ORDER BY tablename, policyname;
 --
--- Expected: 50 rows, all named <table>_tenant_isolation.
+-- Expected: 51 rows, all named <table>_tenant_isolation.
 
 -- End of Phase 1 migration.

@@ -51,6 +51,7 @@ import { applyApPaymentAction } from "@/app/actions/apply-ap-payment";
 import { applyArPaymentAction } from "@/app/actions/apply-ar-payment";
 import { reassignArItemAction } from "@/app/actions/reassign-ar-item";
 import { reassignApItemAction } from "@/app/actions/reassign-ap-item";
+import { categorizeBankTransactionAction } from "@/app/actions/bank-feed";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";
 import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
@@ -67,6 +68,7 @@ let entityIdA: string;
 let entityIdB: string;
 let arItemA: string;
 let apItemA: string;
+let bankTxnA: string;
 
 beforeAll(async () => {
   await prisma.currency.upsert({
@@ -211,11 +213,36 @@ beforeAll(async () => {
       controlAccountCode: "2000",
     })
   ).id;
+
+  // A FOR_REVIEW bank line in tenant A — the bait the cross-tenant
+  // categorize test tries to reach from tenant B.
+  const bookA = await prisma.book.findUniqueOrThrow({ where: { code: "US_GAAP" }, select: { id: true } });
+  const cashA = await prisma.account.findFirstOrThrow({
+    where: { tenantId: tenantA.id, code: "1000", entityId: entityIdA },
+    select: { id: true },
+  });
+  bankTxnA = (
+    await prisma.bankTransaction.create({
+      data: {
+        tenantId: tenantA.id,
+        entityId: entityIdA,
+        bookId: bookA.id,
+        bankAccountId: cashA.id,
+        postedDate: new Date("2026-05-20"),
+        description: "PEN BANK LINE",
+        amount: "-25.0000",
+        dedupeHash: `pen-${SUFFIX}`,
+        status: "FOR_REVIEW",
+      },
+      select: { id: true },
+    })
+  ).id;
 });
 
 afterAll(async () => {
   for (const tid of [tenantA?.id, tenantB?.id]) {
     if (!tid) continue;
+    await prisma.bankTransaction.deleteMany({ where: { tenantId: tid } });
     await prisma.arApplication.deleteMany({ where: { openItem: { tenantId: tid } } });
     await prisma.apApplication.deleteMany({ where: { openItem: { tenantId: tid } } });
     await prisma.arOpenItem.deleteMany({ where: { tenantId: tid } });
@@ -352,6 +379,35 @@ describe("createJournalEntryAction — provenance is not client input", () => {
       select: { source: true },
     });
     expect(entry.source).toBe("MANUAL");
+  });
+});
+
+describe("categorizeBankTransactionAction — auth + tenant scope", () => {
+  it("refuses an anonymous categorize (was: n/a — new surface)", async () => {
+    signOut();
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("categoryAccountCode", "6000");
+    const r = await categorizeBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/signed in/i);
+  });
+
+  it("refuses a cross-tenant bank line (reads as not found, no post)", async () => {
+    // Signed in to tenant B, categorize tenant A's bank line. The
+    // tenant-scoped load returns nothing → "not found", and no JE posts.
+    signInAs(tenantB);
+    const before = await prisma.journalEntry.count({ where: { tenantId: tenantB.id } });
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("categoryAccountCode", "6000");
+    const r = await categorizeBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/not found/i);
+    // Tenant A's line is untouched, still FOR_REVIEW.
+    const txn = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: bankTxnA } });
+    expect(txn.status).toBe("FOR_REVIEW");
+    expect(await prisma.journalEntry.count({ where: { tenantId: tenantB.id } })).toBe(before);
   });
 });
 
