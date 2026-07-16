@@ -127,15 +127,22 @@ export async function deactivateUserAction(
           // block deactivation — the failed records will surface as
           // orphans afterward.
           failedCount += 1;
+          // Caller-controlled record fields go to console.warn as
+          // structured args, never the format-string position (CodeQL
+          // js/tainted-format-string).
           if (e instanceof ReassignError) {
-            console.warn(
-              `Skipping reassignment of ${rec.recordType} ${rec.recordId.slice(0, 8)}: ${e.code} ${e.message}`
-            );
+            console.warn("Skipping reassignment (ReassignError):", {
+              recordType: rec.recordType,
+              recordId: rec.recordId.slice(0, 8),
+              code: e.code,
+              message: e.message,
+            });
           } else {
-            console.warn(
-              `Skipping reassignment of ${rec.recordType} ${rec.recordId.slice(0, 8)}:`,
-              e
-            );
+            console.warn("Skipping reassignment:", {
+              recordType: rec.recordType,
+              recordId: rec.recordId.slice(0, 8),
+              error: e,
+            });
           }
         }
       }

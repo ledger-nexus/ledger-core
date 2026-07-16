@@ -61,10 +61,13 @@ export async function reassignArItemAction(input: {
     try {
       await emitReassignmentNotification(prisma, reassignInput);
     } catch (e) {
-      console.warn(
-        `Reassignment of ArOpenItem ${input.openItemId.slice(0, 8)} succeeded but notification emit failed:`,
-        e
-      );
+      // Keep caller-controlled data out of console.warn's format-string
+      // position (CodeQL js/tainted-format-string) — pass it structured.
+      console.warn("Reassignment succeeded but notification emit failed:", {
+        recordType: "ArOpenItem",
+        openItemId: input.openItemId.slice(0, 8),
+        error: e,
+      });
     }
 
     revalidatePath("/ar");

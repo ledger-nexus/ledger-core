@@ -71,10 +71,13 @@ export async function adminReassignAction(input: {
     try {
       await emitReassignmentNotification(prisma, reassignInput);
     } catch (e) {
-      console.warn(
-        `Admin reassignment of ${input.recordType} ${input.recordId.slice(0, 8)} succeeded but notification emit failed:`,
-        e
-      );
+      // Keep caller-controlled data out of console.warn's format-string
+      // position (CodeQL js/tainted-format-string) — pass it structured.
+      console.warn("Admin reassignment succeeded but notification emit failed:", {
+        recordType: input.recordType,
+        recordId: input.recordId.slice(0, 8),
+        error: e,
+      });
     }
 
     revalidatePath("/admin/orphans");
