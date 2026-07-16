@@ -114,9 +114,10 @@ model Tenant {
   notificationDispatches    NotificationDispatch[]
   bankTransactions          BankTransaction[]
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   deletedAt DateTime? // soft delete
+  BankRule  BankRule[]
 
   @@index([ownerUserId])
   @@map("tenant")
@@ -571,6 +572,8 @@ model Account {
   reconciliations         Reconciliation[]
   bankFeedTransactions    BankTransaction[] @relation("BankTxnBankAccount")
   categorizedTransactions BankTransaction[] @relation("BankTxnCategory")
+  bankRuleCategories      BankRule[]        @relation("BankRuleCategory")
+  bankRuleAccounts        BankRule[]        @relation("BankRuleBankAccount")
   // BlackLine arc Phase 3: flux / variance analysis.
   fluxLines               FluxLine[]
 
@@ -2505,5 +2508,51 @@ model BankTransaction {
 enum BankTxnStatus {
   FOR_REVIEW
   CATEGORIZED
+  // Linked to an EXISTING journal entry instead of posting a new one —
+  // the books already recorded this money (a manual JE, a recurring
+  // posting), so the feed line just claims it. No entry is created.
+  MATCHED
   EXCLUDED
+}
+
+// A learned categorization rule for the bank feed. Created automatically
+// each time a line is categorized: next time a line's normalized merchant
+// text contains this rule's matchText, the inbox pre-selects the category
+// (suggestion only — nothing posts without the user's Add). This is QBO's
+// learning matcher, minus auto-add, which stays a later, opt-in step.
+model BankRule {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // Normalized merchant text (lowercased, digit-runs stripped — see
+  // normalizeMerchant). Encrypted at rest like the descriptions it derives
+  // from; matching happens in application code over the tenant's decrypted
+  // rules, never in SQL.
+  matchText String
+  // Plain SHA-256 of the normalized matchText, for the uniqueness the
+  // encrypted column can't provide (random IV → different ciphertext per
+  // write). Same tradeoff as BankTransaction.dedupeHash and accepted for
+  // the same reason: uniqueness needs determinism.
+  matchHash String
+
+  // Optional: restrict the rule to lines from one bank account (a payee
+  // that should be Groceries from the card but Reimbursable from Checking).
+  bankAccountId String?  @db.Uuid
+  bankAccount   Account? @relation("BankRuleBankAccount", fields: [bankAccountId], references: [id])
+
+  categoryAccountId String  @db.Uuid
+  categoryAccount   Account @relation("BankRuleCategory", fields: [categoryAccountId], references: [id])
+
+  // Learning weight: bumped every time a categorize confirms this rule's
+  // merchant→category pairing. When two rules both match, higher wins.
+  timesUsed  Int      @default(1)
+  lastUsedAt DateTime @default(now())
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  @@unique([tenantId, matchHash])
+  @@index([tenantId])
+  @@map("bank_rule")
 }

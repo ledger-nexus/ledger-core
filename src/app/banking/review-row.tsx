@@ -12,6 +12,7 @@ import { useFormState, useFormStatus } from "react-dom";
 import {
   categorizeBankTransactionAction,
   excludeBankTransactionAction,
+  matchBankTransactionAction,
   type ActionState,
 } from "@/app/actions/bank-feed";
 import { TR, TD } from "@/components/ui/table";
@@ -52,6 +53,8 @@ export default function ReviewRow({
   bankAccountLabel,
   amount,
   categories,
+  suggestedCategory,
+  matchCandidates,
 }: {
   id: string;
   postedDate: string;
@@ -59,14 +62,26 @@ export default function ReviewRow({
   bankAccountLabel: string;
   amount: string; // signed, 2dp
   categories: { code: string; name: string }[];
+  /** Category code the learned rules pre-select, or null. */
+  suggestedCategory?: string | null;
+  /** Existing entries this line could match instead of posting. */
+  matchCandidates?: { entryId: string; entryNumber: string; date: string; memo: string }[];
 }) {
   const [catState, categorizeAction] = useFormState(categorizeBankTransactionAction, initial);
   const [exState, excludeAction] = useFormState(excludeBankTransactionAction, initial);
+  const [matchState, matchAction] = useFormState(matchBankTransactionAction, initial);
 
   const isMoneyOut = amount.startsWith("-");
   const magnitude = amount.replace("-", "");
   const error =
-    catState?.ok === false ? catState.error : exState?.ok === false ? exState.error : null;
+    catState?.ok === false
+      ? catState.error
+      : exState?.ok === false
+        ? exState.error
+        : matchState?.ok === false
+          ? matchState.error
+          : null;
+  const hasMatch = (matchCandidates?.length ?? 0) > 0;
 
   return (
     <>
@@ -83,7 +98,11 @@ export default function ReviewRow({
         <TD>
           <form action={categorizeAction} className="flex items-center gap-2">
             <input type="hidden" name="id" value={id} />
-            <Select name="categoryAccountCode" defaultValue="" className="min-w-[13rem]">
+            <Select
+              name="categoryAccountCode"
+              defaultValue={suggestedCategory ?? ""}
+              className="min-w-[13rem]"
+            >
               <option value="" disabled>
                 Choose a category…
               </option>
@@ -103,6 +122,37 @@ export default function ReviewRow({
           </form>
         </TD>
       </TR>
+      {suggestedCategory && (
+        <tr>
+          <td colSpan={6} className="px-3 pb-1 text-xs text-ink-500">
+            Suggested from a past entry — change it if this one is different.
+          </td>
+        </tr>
+      )}
+      {hasMatch && (
+        <tr>
+          <td colSpan={6} className="px-3 pb-2">
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-ink-200 bg-ink-50 px-2 py-1.5 text-xs">
+              <span className="font-medium text-ink-700">
+                Already in your books?
+              </span>
+              {matchCandidates!.map((c) => (
+                <form key={c.entryId} action={matchAction} className="inline">
+                  <input type="hidden" name="id" value={id} />
+                  <input type="hidden" name="entryId" value={c.entryId} />
+                  <button
+                    type="submit"
+                    className="rounded-md border border-ink-300 bg-white px-2 py-0.5 font-medium text-accent-600 hover:bg-ink-100"
+                  >
+                    Match {c.entryNumber}
+                    <span className="ml-1 text-ink-400">{c.date}</span>
+                  </button>
+                </form>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
       {error && (
         <tr>
           <td colSpan={6} className="px-3 pb-2 text-xs text-negative">

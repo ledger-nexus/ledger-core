@@ -544,6 +544,14 @@ CREATE POLICY bank_transaction_tenant_isolation ON bank_transaction
   USING ("tenantId" = app_current_tenant_id())
   WITH CHECK ("tenantId" = app_current_tenant_id());
 
+-- 52. bank_rule (learned bank-feed categorization rules; direct NOT NULL tenantId)
+ALTER TABLE bank_rule ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS bank_rule_tenant_isolation ON bank_rule;
+CREATE POLICY bank_rule_tenant_isolation ON bank_rule
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
 -- =============================================================================
 -- Verification
 -- =============================================================================
@@ -556,7 +564,7 @@ CREATE POLICY bank_transaction_tenant_isolation ON bank_transaction
 --     AND rowsecurity = true
 --   ORDER BY tablename;
 --
--- Expected: 51 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
+-- Expected: 52 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
 -- defines but does not FORCE).
 --
 -- Policy listing:
@@ -564,6 +572,6 @@ CREATE POLICY bank_transaction_tenant_isolation ON bank_transaction
 --   WHERE schemaname = 'public'
 --   ORDER BY tablename, policyname;
 --
--- Expected: 51 rows, all named <table>_tenant_isolation.
+-- Expected: 52 rows, all named <table>_tenant_isolation.
 
 -- End of Phase 1 migration.

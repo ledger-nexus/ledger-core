@@ -51,7 +51,10 @@ import { applyApPaymentAction } from "@/app/actions/apply-ap-payment";
 import { applyArPaymentAction } from "@/app/actions/apply-ar-payment";
 import { reassignArItemAction } from "@/app/actions/reassign-ar-item";
 import { reassignApItemAction } from "@/app/actions/reassign-ap-item";
-import { categorizeBankTransactionAction } from "@/app/actions/bank-feed";
+import {
+  categorizeBankTransactionAction,
+  matchBankTransactionAction,
+} from "@/app/actions/bank-feed";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";
 import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
@@ -408,6 +411,47 @@ describe("categorizeBankTransactionAction — auth + tenant scope", () => {
     const txn = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: bankTxnA } });
     expect(txn.status).toBe("FOR_REVIEW");
     expect(await prisma.journalEntry.count({ where: { tenantId: tenantB.id } })).toBe(before);
+  });
+});
+
+describe("matchBankTransactionAction — auth + tenant scope", () => {
+  it("refuses an anonymous match", async () => {
+    signOut();
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("entryId", "00000000-0000-0000-0000-000000000000");
+    const r = await matchBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/signed in/i);
+  });
+
+  it("refuses matching a cross-tenant bank line (not found, no claim)", async () => {
+    // A genuinely matchable tenant-A entry: it moves account 1000 by the
+    // same -25 as bankTxnA, so the ONLY thing between tenant B and a
+    // cross-tenant claim is the tenant scope. Prove that's enough.
+    const target = await postJournalEntry(prisma, {
+      tenantId: tenantA.id,
+      entityCode: "ACME",
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-05-20"),
+      memo: "cross-tenant match target",
+      source: "MANUAL",
+      lines: [
+        { accountCode: "1000", credit: "25" }, // -25 on the bank account
+        { accountCode: "6000", debit: "25" },
+      ],
+    });
+    signInAs(tenantB);
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("entryId", target.id);
+    const r = await matchBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/not found/i);
+    // Tenant A's line is untouched — not MATCHED, not claimed.
+    const txn = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: bankTxnA } });
+    expect(txn.status).toBe("FOR_REVIEW");
+    expect(txn.postedEntryId).toBeNull();
   });
 });
 
