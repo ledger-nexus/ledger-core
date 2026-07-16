@@ -17,7 +17,24 @@
 //     carry the daily workload; the long tail sits one disclosure away
 //     instead of competing for attention on every page load.
 //   Miller's Law / Chunking — working memory holds ~7±2 *chunks*, not
-//     items. Four labelled groups of 3–4 beats one list of 25.
+//     items. Five labelled groups of 1–4 beats one list of 25.
+//   Law of Similarity / Common Region — a bounded region reads as "these
+//     things are alike", so the things inside it had better be alike.
+//     Groups are one KIND each, along the split every accounting system
+//     eventually arrives at: events that post to the ledger
+//     (Transactions), the standing records those events point at (Master
+//     data), and aggregations over the events (Reports). NetSuite draws
+//     the same line — a journal entry lives under Transactions, the chart
+//     of accounts under Lists — because an account is a noun and an entry
+//     is something that happened. An earlier pass here folded Master data
+//     into Transactions to save a group; that traded a real distinction
+//     for a smaller number, and Miller's was never the constraint at five
+//     chunks. Restored.
+//   Jakob's Law — users arrive fluent in NetSuite/QBO. Matching the
+//     grouping they already carry costs us nothing and saves them the
+//     translation. This is why we follow NetSuite's ontology while
+//     declining its density: the taxonomy is 25 years of domain evidence;
+//     the hover-menus and click-depth are the toll it pays for it.
 //   Pareto — the ~20% of surfaces (post an entry, read the ledger, run
 //     TB/IS/BS, close a period) that serve ~80% of sessions are primary.
 //     Nothing is removed: advanced/ERP/multi-entity surfaces stay a
@@ -56,16 +73,24 @@ const sections: NavSection[] = [
     items: [{ href: "/", label: "Dashboard" }],
   },
   {
+    // Events that post to the ledger. Everything here either is a posting
+    // or is a template/queue that becomes one.
     label: "Transactions",
-    items: [
-      { href: "/journal-entries", label: "Journal entries" },
-      { href: "/accounts", label: "Chart of accounts" },
-    ],
+    items: [{ href: "/journal-entries", label: "Journal entries" }],
     more: [
       { href: "/journal-entries/paste", label: "Paste from Excel", hint: "bulk lines" },
       { href: "/recurring-entries", label: "Recurring", hint: "templates" },
       { href: "/ar", label: "Open AR" },
       { href: "/ap", label: "Open AP" },
+    ],
+  },
+  {
+    // Standing records the postings point at. An account isn't something
+    // that happened — it's a noun transactions reference, so it doesn't
+    // belong in the list above.
+    label: "Master data",
+    items: [{ href: "/accounts", label: "Chart of accounts" }],
+    more: [
       { href: "/import/netsuite", label: "Import from NetSuite", hint: "single / multi-sub" },
     ],
   },
