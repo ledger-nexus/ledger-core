@@ -76,7 +76,10 @@ const sections: NavSection[] = [
     // Events that post to the ledger. Everything here either is a posting
     // or is a template/queue that becomes one.
     label: "Transactions",
-    items: [{ href: "/journal-entries", label: "Journal entries" }],
+    items: [
+      { href: "/banking", label: "Bank transactions" },
+      { href: "/journal-entries", label: "Journal entries" },
+    ],
     more: [
       { href: "/journal-entries/paste", label: "Paste from Excel", hint: "bulk lines" },
       { href: "/recurring-entries", label: "Recurring", hint: "templates" },
