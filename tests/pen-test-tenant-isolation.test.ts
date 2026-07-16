@@ -298,6 +298,63 @@ describe("createJournalEntryAction — tenant scope", () => {
   });
 });
 
+describe("createJournalEntryAction — provenance is not client input", () => {
+  it("stamps MANUAL even when the request claims AI_APPROVED (was: client-chosen source)", async () => {
+    // `source` is lineage: the ledger's permanent record of HOW an entry
+    // came to exist. AI_APPROVED specifically asserts a control ran — an
+    // AI proposed the entry and a human approved it (see the FX
+    // revaluation gate). SYSTEM/IMPORT assert machine origin.
+    //
+    // The action used to read this straight off the form body through a
+    // bare type assertion, which is erased at runtime — so a hand-typed
+    // entry could be stamped with any origin its author fancied, and the
+    // audit trail would repeat that back to a reviewer as fact. The
+    // manual form is this action's only caller, so anything it posts is
+    // MANUAL by definition and the server says so, not the client.
+    signInAs(tenantA);
+    const fd = buildJeFormData();
+    fd.set("source", "AI_APPROVED"); // forged — must be ignored
+    fd.set("memo", "provenance-forgery-attempt");
+    try {
+      await createJournalEntryAction({}, fd);
+    } catch (e) {
+      if (!(e instanceof Error) || !/NEXT_REDIRECT/.test(e.message)) throw e;
+    }
+    // Identified by recency rather than memo. `prisma` in this file is a
+    // raw client with no encryption extension, and JournalEntry.memo is an
+    // encrypted column — a plaintext filter can't match the ciphertext on
+    // disk, and a read here returns the ciphertext rather than the memo.
+    // `source` is not encrypted, which is the field under test.
+    const entry = await prisma.journalEntry.findFirstOrThrow({
+      where: { tenantId: tenantA.id },
+      orderBy: { createdAt: "desc" },
+      select: { source: true },
+    });
+    expect(entry.source).toBe("MANUAL");
+  });
+
+  it("stamps MANUAL for an origin the form never offered (SEED)", async () => {
+    // The old cast listed SEED and IMPORT among its union members, so a
+    // request that skipped the UI could reach for them even though no
+    // dropdown ever rendered them.
+    signInAs(tenantA);
+    const fd = buildJeFormData();
+    fd.set("source", "SEED");
+    fd.set("memo", "provenance-forgery-attempt-seed");
+    try {
+      await createJournalEntryAction({}, fd);
+    } catch (e) {
+      if (!(e instanceof Error) || !/NEXT_REDIRECT/.test(e.message)) throw e;
+    }
+    const entry = await prisma.journalEntry.findFirstOrThrow({
+      where: { tenantId: tenantA.id },
+      orderBy: { createdAt: "desc" },
+      select: { source: true },
+    });
+    expect(entry.source).toBe("MANUAL");
+  });
+});
+
 describe("applyApPaymentAction — auth + tenant scope", () => {
   it("refuses an anonymous POST (was: anonymous AP payment)", async () => {
     signOut();

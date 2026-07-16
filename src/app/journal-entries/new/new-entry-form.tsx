@@ -150,14 +150,14 @@ export function NewEntryForm({
               defaultValue={new Date().toISOString().slice(0, 10)}
             />
           </div>
-          <div>
-            <Label htmlFor="source">Source</Label>
-            <Select name="source" id="source" defaultValue="MANUAL">
-              <option value="MANUAL">MANUAL</option>
-              <option value="SYSTEM">SYSTEM</option>
-              <option value="AI_APPROVED">AI_APPROVED</option>
-            </Select>
-          </div>
+          {/* No Source control by design. `source` is lineage — the record
+              of HOW an entry came to exist — not a user preference. An
+              entry typed into this form is MANUAL, and the Server Action
+              stamps that server-side. SYSTEM / AI_APPROVED / IMPORT belong
+              to the code paths that genuinely produce them (the recurring
+              runner, the FX revaluation approval gate, the ERP importers);
+              offering them here only let a human hand-type an entry and
+              label it as machine-originated. */}
           <div className="sm:col-span-3">
             <Label htmlFor="memo">Memo</Label>
             <Input
@@ -304,13 +304,16 @@ export function NewEntryForm({
                 </TD>
                 <TD />
               </tr>
+              {/* The one line on this form that decides whether the entry
+                  can post, so it says what it means: "Δ (Dr − Cr)" named
+                  the arithmetic, not the consequence. */}
               <tr className="bg-ink-50">
                 <TD colSpan={4} className="text-ink-700">
-                  Δ (Dr − Cr)
+                  {balanced ? "Balanced" : "Out of balance by"}
                 </TD>
                 <TD className="text-right">
                   <Badge tone={balanced ? "positive" : "negative"}>
-                    {balanced ? "balanced ✓" : `Δ ${formatMoney(difference)}`}
+                    {balanced ? "✓" : formatMoney(difference.abs())}
                   </Badge>
                 </TD>
                 <TD />
