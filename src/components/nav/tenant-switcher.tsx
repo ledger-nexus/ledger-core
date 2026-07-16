@@ -14,6 +14,7 @@
 // currently-selected tenant is the cookie value (or the user's single
 // membership if no cookie is set yet).
 
+import { Card, CardContent } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/input";
 import { setTenantAction } from "@/app/actions/set-tenant";
 import {
@@ -28,10 +29,17 @@ export async function TenantSwitcher() {
     listMyTenants(),
   ]);
 
-  // Hide entirely when there's nothing to switch.
+  // Hide entirely when there's nothing to switch. The Card chrome lives
+  // inside this component so it leaves with the content — the layout used
+  // to wrap the switcher in a fixed-width Card unconditionally, so every
+  // single-tenant user (i.e. nearly all of them) got an empty white box
+  // parked in the header.
   if (!current || all.length < 2) return null;
 
   return (
+    <div className="w-48">
+      <Card className="shadow-none">
+        <CardContent className="px-3 py-2">
     <form action={setTenantAction} className="flex flex-col gap-2">
       <div>
         <Label htmlFor="tenantSlug">Tenant</Label>
@@ -49,6 +57,9 @@ export async function TenantSwitcher() {
       >
         Switch tenant
       </button>
-    </form>
+        </form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

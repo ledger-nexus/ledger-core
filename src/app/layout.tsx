@@ -58,9 +58,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   {scope.entityCode} <span className="text-ink-400">/</span>{" "}
                   <span className="text-ink-700">{scope.bookCode}</span>
                 </h1>
-                <p className="text-xs text-ink-500">
-                  Scope: every report on this page is computed for the (entity, book) above.
-                </p>
               </div>
               <div className="flex items-start gap-3">
                 {currentUser && (
@@ -70,14 +67,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     unreadCount={notifications.unreadCount}
                   />
                 )}
-                <div className="w-48">
-                  <Card className="shadow-none">
-                    <CardContent className="px-3 py-2">
-                      {/* Renders nothing for single-tenant users. */}
-                      <TenantSwitcher />
-                    </CardContent>
-                  </Card>
-                </div>
+                {/* Each switcher owns its own Card so it can render
+                    nothing at all when there's nothing to switch. */}
+                <TenantSwitcher />
                 <div className="w-56">
                   <Card className="shadow-none">
                     <CardContent className="px-3 py-2">
@@ -85,13 +77,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     </CardContent>
                   </Card>
                 </div>
-                <div className="w-64">
-                  <Card className="shadow-none">
-                    <CardContent className="px-3 py-3">
-                      <BookSwitcher scope={scope} />
-                    </CardContent>
-                  </Card>
-                </div>
+                <BookSwitcher scope={scope} />
               </div>
             </header>
             <div className="flex-1 overflow-y-auto px-8 py-6">{children}</div>
