@@ -44,13 +44,27 @@ export async function createJournalEntryAction(
 
     const documentDateStr = String(formData.get("documentDate") ?? "");
     const memo = String(formData.get("memo") ?? "").trim();
-    const source = (String(formData.get("source") ?? "MANUAL") as
-      | "MANUAL"
-      | "SYSTEM"
-      | "AI_APPROVED"
-      | "SEED"
-      | "IMPORT");
     const linesJson = String(formData.get("linesJson") ?? "[]");
+
+    // `source` is lineage, not input. This action exists to serve one
+    // caller — the manual entry form — so an entry it posts is MANUAL by
+    // definition, and we stamp that here rather than believe the client.
+    //
+    // It previously read the value from formData through a bare type
+    // assertion (`String(...) as "MANUAL" | "SYSTEM" | ...`). Assertions
+    // are erased at runtime, so this neither validated nor constrained
+    // anything: the form offered SYSTEM and AI_APPROVED outright, and a
+    // hand-rolled POST could pass SEED or IMPORT just as easily. Any of
+    // them would land in the ledger as that entry's permanent story of
+    // where it came from.
+    //
+    // That matters because AI_APPROVED is a claim about a control: it
+    // asserts an AI proposed the entry and a human approved it (the
+    // reference path is the FX revaluation gate). SYSTEM and IMPORT
+    // likewise assert machine origin. A person typing debits and credits
+    // into a form could stamp any of those on their own work, and the
+    // audit trail would repeat it back to a reviewer as fact.
+    const source = "MANUAL" as const;
 
     if (!documentDateStr) {
       return { ok: false, error: "Document date is required" };
