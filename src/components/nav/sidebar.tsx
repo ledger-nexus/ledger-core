@@ -98,6 +98,12 @@ const sections: NavSection[] = [
     ],
   },
   {
+    // Cross-cutting controls that aren't a ledger surface. "Automations"
+    // is the governance view for everything acting on your behalf.
+    label: "Settings",
+    items: [{ href: "/automations", label: "Automations" }],
+  },
+  {
     label: "Reports",
     items: [
       { href: "/reports/trial-balance", label: "Trial balance" },
