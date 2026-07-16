@@ -269,8 +269,15 @@ export default async function DashboardPage() {
       : null;
 
   // Aggregate cash from bank-flagged accounts on the BS.
+  //
+  // This matched account CODES by regex (/^10\d{2}$|^Q1$|^NS1000$/) — a
+  // guess at each install's numbering convention. It counted any 10xx
+  // asset as cash whether or not it was a bank account, and missed every
+  // bank account numbered outside that range (imported charts, or a chart
+  // that simply numbers differently). The chart already records the answer
+  // on Account.isBank; use it.
   const cash = bs.assets
-    .filter((a) => /^10\d{2}$|^Q1$|^NS1000$/.test(a.code))
+    .filter((a) => a.isBank)
     .reduce((acc, a) => acc.plus(a.amount), new Decimal(0));
 
   // Net assets = what's owned less what's owed. Net worth for a household,
