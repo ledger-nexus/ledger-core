@@ -27,16 +27,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
+      # The repo's lockfile is `package-lock.json` (npm). A previous
+      # iteration of this workflow used pnpm, but no `pnpm-lock.yaml`
+      # was ever committed, so setup-node's `cache: pnpm` failed in
+      # ~15s on every push. Switched to npm to match the actual repo
+      # (mirrors ci.yml).
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+          cache: npm
 
-      - run: pnpm install --frozen-lockfile
+      - run: npm ci
 
       - name: Generate CycloneDX SBOM
         # cyclonedx-npm reads node_modules + package-lock.json and emits
