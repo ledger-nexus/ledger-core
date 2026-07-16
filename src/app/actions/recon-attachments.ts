@@ -44,6 +44,7 @@ import { prisma } from "@/lib/db";
 import { requireCurrentUser } from "@/lib/auth/current-user";
 import { requireCurrentTenant, isTenantAdmin } from "@/lib/auth/tenant";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import { ATTACHMENT_ACCEPT_HINT } from "@/lib/recon/attachment-constants";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Validation policy
@@ -68,9 +69,6 @@ const ALLOWED_CONTENT_TYPES = new Set<string>([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
 ]);
 
-// Display-friendly hint for the UI's file picker.
-export const ATTACHMENT_ACCEPT_HINT =
-  "PDF, PNG, JPEG, CSV, XLSX up to 10 MB";
 
 // Filename safety. Strip path separators so a malicious filename like
 // "../../etc/passwd" can't influence any downstream code path. Lift to

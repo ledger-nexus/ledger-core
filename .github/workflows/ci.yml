@@ -74,3 +74,15 @@ jobs:
       # works.
       - run: npm run db:seed
       - run: npm test
+
+      # Production build. tsc and vitest both pass on code Next.js will
+      # refuse to build — the "use server" export rule is enforced by the
+      # bundler, not the type system — so without this step a deploy-
+      # breaking change lands on main green. That is exactly how
+      # ATTACHMENT_ACCEPT_HINT (a non-async export from an actions file)
+      # got in and sat there.
+      #
+      # Needs a DATABASE_URL because route modules are evaluated during
+      # the build; the job's Postgres service is already up.
+      - name: Production build
+        run: npx next build

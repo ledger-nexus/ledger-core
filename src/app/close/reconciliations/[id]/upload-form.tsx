@@ -16,9 +16,9 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   uploadAttachment,
-  ATTACHMENT_ACCEPT_HINT,
   MAX_ATTACHMENT_BYTES,
 } from "@/app/actions/recon-attachments";
+import { ATTACHMENT_ACCEPT_HINT } from "@/lib/recon/attachment-constants";
 
 interface Props {
   reconId: string;
