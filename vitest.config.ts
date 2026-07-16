@@ -13,6 +13,10 @@ export default defineConfig({
     // per query; 20s is too tight when a clearLedger() alone runs 7
     // scoped deleteMany calls.
     testTimeout: 60_000,
+    // 30s — afterAll cleanups walk 10+ scoped deleteMany calls to
+    // prevent shared-DB cruft accumulation; the default 10s budgets
+    // for fast in-process hooks, not Neon-latency cleanup chains.
+    hookTimeout: 30_000,
   },
   resolve: {
     alias: {
