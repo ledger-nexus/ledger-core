@@ -179,6 +179,12 @@ export interface FinancialStatementRow {
   amount: Decimal;
   parentCode: string | null;
   isContra: boolean;
+  /**
+   * Mirrors `Account.isBank`. Carried on the row so callers can aggregate
+   * cash from the chart's own flag rather than pattern-matching account
+   * codes — code ranges are a per-install convention, not a contract.
+   */
+  isBank: boolean;
 }
 
 export interface IncomeStatement {
@@ -263,11 +269,11 @@ export async function getIncomeStatement(
     const parentCode = acct.parent?.code ?? null;
     if (acct.type === "REVENUE") {
       const amount = credit.minus(debit);
-      revenue.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra });
+      revenue.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra, isBank: false });
       totalRevenue = totalRevenue.plus(amount);
     } else {
       const amount = debit.minus(credit);
-      expenses.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra });
+      expenses.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra, isBank: false });
       totalExpenses = totalExpenses.plus(amount);
     }
   }
@@ -388,6 +394,7 @@ export async function getBalanceSheet(
       amount,
       parentCode,
       isContra: acct.isContra,
+      isBank: acct.isBank,
     };
     if (acct.type === "ASSET") {
       assets.push(row);
@@ -420,6 +427,7 @@ export async function getBalanceSheet(
     // in the Equity hierarchy.
     parentCode: null,
     isContra: false,
+    isBank: false,
   });
   totalEquity = totalEquity.plus(retainedEarnings);
 
