@@ -104,7 +104,7 @@ export default async function MonthEndPage({
     return (
       <EmptyState
         title="No periods seeded"
-        description="Run pnpm db:seed to create the fiscal calendar before reviewing month-end."
+        description="This entity has no fiscal calendar yet, so there is no month to review."
       />
     );
   }

@@ -118,7 +118,7 @@ export default async function ReconciliationsListPage({
     return (
       <EmptyState
         title="No periods seeded"
-        description={`No fiscal periods exist for ${entity.code}. Run pnpm db:seed.`}
+        description={`${entity.code} has no fiscal periods yet, so there is nothing to reconcile.`}
       />
     );
   }

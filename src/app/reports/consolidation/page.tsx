@@ -64,7 +64,7 @@ export default async function ConsolidationPage({
         <h2 className="text-xl font-semibold text-ink-900">Consolidation</h2>
         <EmptyState
           title="No multi-entity hierarchy in the database"
-          description="The Northwind seed creates a single entity. Run pnpm db:seed (or POST /api/admin/reset) to load the Acme Group consolidation demo (parent + 2 subs)."
+          description="Consolidation combines a parent entity with its subsidiaries. This book has a single entity, so there is nothing to consolidate."
         />
       </div>
     );

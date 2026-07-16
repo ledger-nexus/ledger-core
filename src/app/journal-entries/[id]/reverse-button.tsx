@@ -50,7 +50,7 @@ export default function ReverseButton({
     setError(null);
     const today = new Date().toISOString().slice(0, 10);
     const ok = window.confirm(
-      `Reverse ${entryNumber}?\n\nThis posts a new sign-flipped JE dated ${today} and marks the original as REVERSED. The reversal goes through postJournalEntry — if its period is closed, the action will fail and the original entry stays untouched.\n\nProceed?`
+      `Reverse ${entryNumber}?\n\nThis posts an opposite entry dated ${today} and marks the original as REVERSED. The original entry is never altered.\n\nIf ${today} falls in a closed period, nothing will be posted.\n\nProceed?`
     );
     if (!ok) return;
     startTransition(async () => {

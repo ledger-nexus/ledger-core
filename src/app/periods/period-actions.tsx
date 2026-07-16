@@ -35,7 +35,7 @@ export default function PeriodActions({
 
   function handleClose() {
     const ok = window.confirm(
-      `Close period ${periodCode} on ${entityCode} / ${bookCode}?\n\nAfter close, postJournalEntry will reject all writes to this (entity, book, period). The close is admin-reversible.`
+      `Close period ${periodCode} on ${entityCode} / ${bookCode}?\n\nOnce closed, no entries can be posted into this period. An admin can reopen it.`
     );
     if (!ok) return;
     setError(null);

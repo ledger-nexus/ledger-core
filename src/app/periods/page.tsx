@@ -143,12 +143,9 @@ export default async function PeriodsPage() {
       <header>
         <h1 className="text-xl font-semibold text-ink-900">Periods</h1>
         <p className="text-sm text-ink-500">
-          Per-(entity, book) close status for every fiscal period. Closing a period
-          freezes posting against it; the substrate{" "}
-          <code className="font-mono text-xs">postJournalEntry</code> rejects writes
-          with{" "}
-          <code className="font-mono text-xs">PERIOD_CLOSED</code> for any{" "}
-          <strong>(entity, book, period)</strong> in this list with a Closed badge.
+          Close status for every fiscal period. Closing a period freezes it — any
+          entry dated into a period marked <strong>Closed</strong> will be
+          rejected. Closing is reversible by an admin.
         </p>
         <p className="text-xs text-ink-500 mt-1">
           Scope: <span className="font-mono">{entity.code}</span> ·{" "}
@@ -175,7 +172,7 @@ export default async function PeriodsPage() {
           {periods.length === 0 ? (
             <EmptyState
               title="No periods seeded"
-              description="Run the seed (pnpm db:seed) to create the monthly fiscal calendar."
+              description="This entity has no fiscal calendar yet, so there are no periods to open or close."
             />
           ) : (
             <Table>
