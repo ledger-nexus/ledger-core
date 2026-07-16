@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session 2026-07-15-sbom-npm-fix · started 2026-07-15 19:15 · heartbeat 19:15
+- **Scope**: Fix the always-red SBOM workflow — it uses pnpm caching/install but the repo is npm-only (package-lock.json). Switch to npm to match ci.yml.
+- **Files / globs**: `.github/workflows/sbom.yml`
+- **Branch**: `claude/bold-curie-961bd4`
+- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/bold-curie-961bd4`
 
 ---
 
