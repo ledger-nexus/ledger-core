@@ -70,7 +70,12 @@ interface NavSection {
 const sections: NavSection[] = [
   {
     label: "Overview",
-    items: [{ href: "/", label: "Dashboard" }],
+    items: [
+      { href: "/", label: "Dashboard" },
+      // Plain-English query surface, not a ledger page — an entry point,
+      // so it sits beside Dashboard rather than under a data group.
+      { href: "/ask", label: "Ask your ledger" },
+    ],
   },
   {
     // Events that post to the ledger. Everything here either is a posting
