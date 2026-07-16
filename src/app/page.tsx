@@ -1,7 +1,11 @@
-// Dashboard — first thing a recruiter sees. Shows that the substrate is
-// alive: cash, AR open, AP open, fixed-asset NBV for the current scope,
-// plus a cross-book P&L delta if there's a Tax book to diff against, and
-// the most recent journal entries.
+// Dashboard — the current financial position for the active (entity, book):
+// cash, net assets, YTD P&L, plus a cross-book delta if there's a Tax book
+// to diff against, and the most recent journal entries.
+//
+// KPI tiles are relevance-gated (Selective Attention): a wall of identical
+// 0.00 tiles hides the numbers that matter, so sub-ledger tiles only render
+// for books that actually use that sub-ledger. Nothing is removed — a book
+// with AR shows AR.
 
 import Link from "next/link";
 import { Decimal } from "decimal.js";
@@ -22,11 +26,24 @@ import { getBookTaxDifference } from "@/lib/accounting/reports/book-tax-differen
 import { enumerateDueDates } from "@/lib/accounting/recurring";
 import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
 
-const ASOF = new Date("2026-06-30"); // demo cutoff matching the seed
-const YEAR_START = new Date("2026-01-01");
-
 export default async function DashboardPage() {
   const scope = getScope();
+
+  // As-of is *now*, resolved per request.
+  //
+  // This was previously a module-level `new Date("2026-06-30")` — the demo
+  // seed's cutoff. Every balance below is computed as-of this date, so the
+  // hardcoded value silently hid every entry posted after it: a real book
+  // reported 0.00 across the board while its entries sat there, dated later.
+  // Module scope would also freeze the value at server start, so it's
+  // computed inside the request.
+  const now = new Date();
+  const ASOF = now;
+  const YEAR_START = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  // Midnight today (UTC) — the boundary for "this period has ended".
+  const todayUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
 
   // Onboarding gate: three states the signed-in user can be in.
   //
@@ -110,6 +127,9 @@ export default async function DashboardPage() {
     lastClose,
     openPeriodCount,
     subledgerTies,
+    arItemCount,
+    apItemCount,
+    fixedAssetCount,
   ] = await Promise.all([
     getBalanceSheet(prisma, scope, ASOF),
     getIncomeStatement(prisma, scope, YEAR_START, ASOF),
@@ -176,13 +196,17 @@ export default async function DashboardPage() {
         period: { select: { code: true } },
       },
     }),
-    // Count of periods on the entity's calendar that don't have a
-    // close row for this book. "Open periods" = posting still allowed
-    // there. Useful at month-end: "you have 3 open periods — close
-    // April before you close May."
+    // Periods that have ENDED but still have no close row for this book —
+    // i.e. genuinely behind.
+    //
+    // This previously counted every close-less period including future
+    // months, so a fresh install with a 12-month calendar reported
+    // "12 · behind on closes" on day one. A period you haven't reached
+    // yet isn't a backlog; only an elapsed one is.
     prisma.period.count({
       where: {
         calendar: { entity: { code: scope.entityCode } },
+        endsOn: { lt: todayUtc },
         // No close row for THIS book.
         NOT: {
           closes: {
@@ -201,6 +225,20 @@ export default async function DashboardPage() {
       entityCode: scope.entityCode,
       bookCode: scope.bookCode,
       asOf: ASOF,
+    }),
+    // Relevance probes for the sub-ledger KPI tiles. A book that has never
+    // had a receivable doesn't benefit from an "Accounts receivable 0.00"
+    // tile — it just dilutes the tiles that do carry signal. We gate on
+    // "has this sub-ledger ever been used here", not on "is the balance
+    // non-zero", so a book that runs AR still sees AR when it nets to nil.
+    prisma.arOpenItem.count({
+      where: { entity: { code: scope.entityCode }, book: { code: scope.bookCode } },
+    }),
+    prisma.apOpenItem.count({
+      where: { entity: { code: scope.entityCode }, book: { code: scope.bookCode } },
+    }),
+    prisma.fixedAsset.count({
+      where: { entity: { code: scope.entityCode } },
     }),
   ]);
 
@@ -234,6 +272,11 @@ export default async function DashboardPage() {
   const cash = bs.assets
     .filter((a) => /^10\d{2}$|^Q1$|^NS1000$/.test(a.code))
     .reduce((acc, a) => acc.plus(a.amount), new Decimal(0));
+
+  // Net assets = what's owned less what's owed. Net worth for a household,
+  // equity for a company — the balance sheet's bottom line, which the
+  // dashboard previously never surfaced despite fetching the statement.
+  const netAssets = bs.totalAssets.minus(bs.totalLiabilities);
 
   // Cross-book BTD vs US_TAX, only if scope is US_GAAP (the obvious pairing).
   let btdSummary: { delta: Decimal; otherBook: string } | null = null;
@@ -269,12 +312,21 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      {/* KPI grid */}
+      {/* KPI grid. Cash and net assets lead: they answer "what do I have"
+          and "what am I worth", which is what the page is opened for
+          (Serial Position). Sub-ledger tiles render only for books that
+          use those sub-ledgers. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="Cash" value={cash} />
-        <Kpi label="Accounts receivable (open)" value={arOpen} />
-        <Kpi label="Accounts payable (open)" value={apOpen} />
-        <Kpi label="Fixed-asset NBV" value={nbv.nbv} />
+        <Kpi
+          label="Net assets"
+          value={netAssets}
+          hint="assets − liabilities"
+          tone={netAssets.isNegative() ? "negative" : "positive"}
+        />
+        {arItemCount > 0 && <Kpi label="Accounts receivable (open)" value={arOpen} />}
+        {apItemCount > 0 && <Kpi label="Accounts payable (open)" value={apOpen} />}
+        {fixedAssetCount > 0 && <Kpi label="Fixed-asset NBV" value={nbv.nbv} />}
         <Kpi label="Revenue YTD" value={pnl.totalRevenue} />
         <Kpi label="Expenses YTD" value={pnl.totalExpenses} />
         <Kpi label="Net income YTD" value={pnl.netIncome} tone={pnl.netIncome.isNegative() ? "negative" : "positive"} />
