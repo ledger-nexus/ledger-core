@@ -65,7 +65,7 @@ export default async function CloseDashboardPage({
     return (
       <EmptyState
         title="No periods seeded"
-        description="Run pnpm db:seed to bootstrap the calendar."
+        description="This entity has no fiscal calendar yet, so there is nothing to close."
       />
     );
   }

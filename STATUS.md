@@ -26,7 +26,12 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session: laws-of-ux-nav (Claude, 2026-07-16)
+
+- **Claiming:** `src/components/nav/sidebar.tsx`, empty-state/help copy in `src/app/**/page.tsx`
+- **Why:** Laws-of-UX restructure — nav progressive disclosure + remove dev-facing copy
+- **Branch:** `laws-of-ux-nav` (worktree; shared checkout untouched)
+- **Until:** PR merged
 
 ---
 

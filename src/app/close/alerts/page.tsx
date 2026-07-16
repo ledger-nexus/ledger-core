@@ -74,7 +74,7 @@ export default async function CloseAlertsPage({
     return (
       <EmptyState
         title="No periods seeded"
-        description="Run pnpm db:seed."
+        description="This entity has no fiscal calendar yet, so there is nothing to raise alerts against."
       />
     );
   }

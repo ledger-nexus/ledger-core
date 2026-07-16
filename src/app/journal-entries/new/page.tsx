@@ -92,8 +92,8 @@ export default async function NewEntryPage({
             </>
           ) : (
             <>
-              Manual posting via <code className="font-mono">postJournalEntry</code> — the same code path the seed and
-              ERP importers use.
+              Record a transaction by hand. Debits and credits must balance
+              before it can post.
             </>
           )}
         </p>

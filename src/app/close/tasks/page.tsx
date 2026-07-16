@@ -116,7 +116,7 @@ export default async function CloseTasksListPage({
     return (
       <EmptyState
         title="No periods seeded"
-        description="Run pnpm db:seed to create the fiscal calendar."
+        description="This entity has no fiscal calendar yet, so close tasks cannot be scheduled."
       />
     );
   }

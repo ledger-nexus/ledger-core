@@ -57,10 +57,9 @@ export default async function NewRecurringPage() {
       <div>
         <h2 className="text-xl font-semibold text-ink-900">New recurring template</h2>
         <p className="text-sm text-ink-500 max-w-prose">
-          Define a balanced JE shape + a cadence. Every cadence step will produce a
-          fresh entry via <code className="font-mono">postJournalEntry</code> when
-          the runner fires. The first entry is dated the start date; subsequent
-          entries step forward by cadence.
+          Define a balanced entry and how often it repeats. Each time it comes
+          due, a fresh entry posts automatically. The first is dated the start
+          date; each one after steps forward by the cadence.
         </p>
       </div>
       <NewRecurringForm

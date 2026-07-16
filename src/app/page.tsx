@@ -90,7 +90,7 @@ export default async function DashboardPage() {
         <h2 className="text-xl font-semibold text-ink-900">Dashboard</h2>
         <EmptyState
           title="No journal entries in this scope yet"
-          description="Run `pnpm db:seed` to load the Northwind Cloud demo, or import a QBO/NetSuite export."
+          description="Post your first journal entry to get started — most books open with an entry recording your opening balances."
         />
       </div>
     );
