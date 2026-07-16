@@ -21,6 +21,8 @@ import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { logAuditEvent } from "@/lib/audit/log";
 import { parseBankCsv, computeDedupeHash, BankCsvError } from "@/lib/banking/import";
 import { deriveCategorizationLines } from "@/lib/banking/post";
+import { normalizeMerchant, computeMatchHash } from "@/lib/banking/rules";
+import { lineMovementOnNormalSide } from "@/lib/banking/match";
 
 export type ActionState =
   | { ok?: undefined; error?: undefined }
@@ -222,6 +224,37 @@ export async function categorizeBankTransactionAction(
       return je.entryNumber;
     });
 
+    // Learn the merchant→category pairing (best-effort — a learning
+    // failure must never fail the categorize the user just watched
+    // succeed). Next import of this merchant pre-selects the category.
+    try {
+      const norm = normalizeMerchant(txn.description);
+      if (norm.length >= 3) {
+        const matchHash = computeMatchHash(norm);
+        await prisma.bankRule.upsert({
+          where: { tenantId_matchHash: { tenantId: scope.tenantId, matchHash } },
+          create: {
+            tenantId: scope.tenantId,
+            matchText: norm,
+            matchHash,
+            categoryAccountId: category.id,
+            createdBy: user.email,
+          },
+          update: {
+            // The latest human decision wins: re-point the category and
+            // bump the confirmation count.
+            categoryAccountId: category.id,
+            timesUsed: { increment: 1 },
+            lastUsedAt: new Date(),
+          },
+        });
+      }
+    } catch (learnErr) {
+      console.warn("bank-feed rule learning skipped:", {
+        error: learnErr instanceof Error ? learnErr.message : String(learnErr),
+      });
+    }
+
     await logAuditEvent({
       eventType: "PRIVILEGED_ACTION",
       action: "bank-feed.categorize",
@@ -295,5 +328,113 @@ export async function excludeBankTransactionAction(
     if (e instanceof NotAuthenticatedError) return { ok: false, error: "You must be signed in." };
     if (e instanceof NoScopeError) return { ok: false, error: "Pick an entity + book first." };
     return { ok: false, error: e instanceof Error ? e.message : "Exclude failed." };
+  }
+}
+
+// ── Match to an existing entry (no posting) ─────────────────────────────
+
+const matchSchema = z.object({
+  id: z.string().uuid(),
+  entryId: z.string().uuid(),
+});
+
+export async function matchBankTransactionAction(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  try {
+    const user = await requireCurrentUser();
+    const scope = await requireCurrentScope();
+    const parsed = matchSchema.safeParse({
+      id: String(formData.get("id") ?? ""),
+      entryId: String(formData.get("entryId") ?? ""),
+    });
+    if (!parsed.success) return { ok: false, error: "Invalid input." };
+
+    const txn = await prisma.bankTransaction.findFirst({
+      where: { id: parsed.data.id, tenantId: scope.tenantId },
+      select: {
+        id: true,
+        status: true,
+        amount: true,
+        bankAccountId: true,
+        bankAccount: { select: { normalBalance: true } },
+      },
+    });
+    if (!txn) return { ok: false, error: "Transaction not found." };
+    if (txn.status !== "FOR_REVIEW") {
+      return { ok: false, error: `This transaction is already ${txn.status.toLowerCase()}.` };
+    }
+
+    // Server-side re-verification — the client's candidate list is a
+    // convenience, not an authorization. The entry must be in this tenant
+    // + scope, carry a line on the SAME bank account whose signed movement
+    // EXACTLY equals the feed amount, and not already be claimed by
+    // another feed line.
+    const entry = await prisma.journalEntry.findFirst({
+      where: {
+        id: parsed.data.entryId,
+        tenantId: scope.tenantId,
+        entity: { code: scope.entityCode },
+        book: { code: scope.bookCode },
+      },
+      select: {
+        id: true,
+        entryNumber: true,
+        lines: {
+          where: { accountId: txn.bankAccountId },
+          select: { debit: true, credit: true },
+        },
+      },
+    });
+    if (!entry) return { ok: false, error: "Entry not found." };
+
+    const amount = new Decimal(txn.amount.toString());
+    const normalIsDebit = txn.bankAccount.normalBalance === "DEBIT";
+    const hasEqualLine = entry.lines.some((l) =>
+      lineMovementOnNormalSide(
+        new Decimal(l.debit.toString()),
+        new Decimal(l.credit.toString()),
+        normalIsDebit
+      ).equals(amount)
+    );
+    if (!hasEqualLine) {
+      return {
+        ok: false,
+        error: "That entry doesn't move this account by the same amount — not a match.",
+      };
+    }
+
+    const alreadyClaimed = await prisma.bankTransaction.findFirst({
+      where: { tenantId: scope.tenantId, postedEntryId: entry.id },
+      select: { id: true },
+    });
+    if (alreadyClaimed) {
+      return { ok: false, error: "Another bank line already matched that entry." };
+    }
+
+    await prisma.bankTransaction.update({
+      where: { id: txn.id },
+      data: { status: "MATCHED", postedEntry: { connect: { id: entry.id } } },
+    });
+
+    await logAuditEvent({
+      eventType: "PRIVILEGED_ACTION",
+      action: "bank-feed.match",
+      outcome: "SUCCESS",
+      actorUserId: user.id,
+      actorEmail: user.email,
+      resource: "BankTransaction",
+      resourceId: txn.id,
+      tenantId: scope.tenantId,
+      metadata: { matchedEntry: entry.entryNumber },
+    });
+
+    revalidatePath("/banking");
+    return { ok: true, message: `Matched to ${entry.entryNumber} — nothing new posted.` };
+  } catch (e) {
+    if (e instanceof NotAuthenticatedError) return { ok: false, error: "You must be signed in." };
+    if (e instanceof NoScopeError) return { ok: false, error: "Pick an entity + book first." };
+    return { ok: false, error: e instanceof Error ? e.message : "Match failed." };
   }
 }

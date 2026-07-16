@@ -79,6 +79,9 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // a JE memo. The dedupeHash is computed on plaintext at import time, so
   // encrypting the stored description doesn't affect idempotency.
   { model: "BankTransaction", field: "description" },
+  // Learned rules derive from those descriptions; same sensitivity. The
+  // sha256 matchHash column provides the uniqueness the ciphertext can't.
+  { model: "BankRule", field: "matchText" },
   // EmailDelivery body fields contain literal email content sent to
   // users — JE memos, owner-transfer offers, invite tokens. Highest-
   // cost-per-leak after JE memo because a leaked email body typically
