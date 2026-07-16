@@ -34,6 +34,7 @@
 
 import type { PrismaClient, Cadence } from "@prisma/client";
 import { postJournalEntry } from "./post-journal";
+import { withTenantContext } from "../tenant-context";
 
 export interface RunRecurringInput {
   /** Inclusive upper bound. All cadence steps with docDate <= throughDate get posted. */
@@ -187,30 +188,38 @@ export async function runRecurringEntries(
     let lastSuccessfulDocDate: Date | null = null;
     for (const docDate of dueDates) {
       try {
-        await postJournalEntry(prisma, {
-          tenantId: template.tenantId,
-          entityCode: template.entity.code,
-          bookCode: template.book.code,
-          documentDate: docDate,
-          // Posting date == doc date for recurrings. They're predictable;
-          // there's no "I forgot to enter this last month" backdating gap.
-          postingDate: docDate,
-          memo: template.memo,
-          currencyCode: template.currencyId,
-          source: "SYSTEM",
-          createdBy: input.triggeredBy,
-          sourceSystem: "SUBSTRATE",
-          sourceRecordType: "RecurringEntry",
-          sourceRecordId: `${template.id}:${isoDate(docDate)}`,
-          lines: template.lines.map((l) => ({
-            accountCode: l.accountCode,
-            debit: l.debit.toString(),
-            credit: l.credit.toString(),
-            description: l.description ?? undefined,
-            partyCode: l.partyCode ?? undefined,
-            itemCode: l.itemCode ?? undefined,
-          })),
-        });
+        // RLS Phase 2b — per-iteration GUC: each postJournalEntry runs
+        // in its OWN withTenantContext tx so a bad period doesn't roll
+        // back already-posted ones. This is the substrate-contract for
+        // the runner — "all-or-NONE within a template's batch, but
+        // per-period atomicity across the batch." Per-template
+        // lastPostedDate advances to the highest SUCCEEDED docDate.
+        await withTenantContext(prisma, template.tenantId, async (tx) =>
+          postJournalEntry(tx, {
+            tenantId: template.tenantId,
+            entityCode: template.entity.code,
+            bookCode: template.book.code,
+            documentDate: docDate,
+            // Posting date == doc date for recurrings. They're predictable;
+            // there's no "I forgot to enter this last month" backdating gap.
+            postingDate: docDate,
+            memo: template.memo,
+            currencyCode: template.currencyId,
+            source: "SYSTEM",
+            createdBy: input.triggeredBy,
+            sourceSystem: "SUBSTRATE",
+            sourceRecordType: "RecurringEntry",
+            sourceRecordId: `${template.id}:${isoDate(docDate)}`,
+            lines: template.lines.map((l) => ({
+              accountCode: l.accountCode,
+              debit: l.debit.toString(),
+              credit: l.credit.toString(),
+              description: l.description ?? undefined,
+              partyCode: l.partyCode ?? undefined,
+              itemCode: l.itemCode ?? undefined,
+            })),
+          })
+        );
         summary.posted += 1;
         result.entriesPosted += 1;
         lastSuccessfulDocDate = docDate;
@@ -227,10 +236,16 @@ export async function runRecurringEntries(
     }
 
     if (lastSuccessfulDocDate != null) {
-      await prisma.recurringEntry.update({
-        where: { id: template.id },
-        data: { lastPostedDate: lastSuccessfulDocDate },
-      });
+      // RLS Phase 2b: lastPostedDate update gets the GUC too. Separate
+      // withTenantContext (not bundled with the per-iteration posts) so
+      // a late-iteration post failure still allows the advancement
+      // through the prior successes.
+      await withTenantContext(prisma, template.tenantId, async (tx) =>
+        tx.recurringEntry.update({
+          where: { id: template.id },
+          data: { lastPostedDate: lastSuccessfulDocDate },
+        })
+      );
     }
 
     result.templates.push(summary);

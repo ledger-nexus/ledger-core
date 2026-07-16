@@ -26,6 +26,7 @@ import {
 } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import { withTenantContext } from "@/lib/tenant-context";
 
 export type ChartChoice = "standard" | "empty";
 
@@ -106,28 +107,11 @@ export async function setupFirstEntityAction(
     return { ok: false, message: "Invalid chartType — must be 'standard' or 'empty'." };
   }
 
-  // ─── Idempotency: refresh-safe check for already-set-up tenant ──────
-  const existingEntityCount = await prisma.legalEntity.count({
-    where: { tenantId: tenant.id },
-  });
-  if (existingEntityCount > 0) {
-    // Tenant already has entities. Return early without modifying anything.
-    // The caller's UI bounces the user to / where they can continue.
-    return {
-      ok: true,
-      message: "Workspace already set up; redirecting to dashboard.",
-    };
-  }
-
-  // Phase 4b complete: LegalEntity.code is unique per [tenantId, code].
-  // Cross-tenant collisions are no longer possible. The idempotency
-  // check above (existingEntityCount > 0) guarantees the calling tenant
-  // has no entities yet, so the upcoming create can't collide within
-  // its own namespace either.
-
   // ─── Ensure USD currency + US_GAAP book exist ────────────────────────
-  // These are platform-level (shared across tenants) and may already
-  // exist from the Phase 1 migration / seeds. Idempotent upserts.
+  // These are platform-level (shared across tenants — no tenantId on
+  // either) and may already exist from the Phase 1 migration / seeds.
+  // Idempotent upserts. Done OUTSIDE withTenantContext because these
+  // rows are global, not tenant-scoped.
   await prisma.currency.upsert({
     where: { code: "USD" },
     create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
@@ -146,12 +130,32 @@ export async function setupFirstEntityAction(
   });
 
   // ─── Create the entity, calendar, periods, optional chart ────────────
-  // Done as a single transaction so a failure mid-flow leaves nothing
-  // partially set up.
+  // RLS Phase 2b shape T2: the idempotency check + entire bootstrap
+  // (entity + calendar + 12 periods + optional 12 accounts) runs inside
+  // one withTenantContext tx. Moving the idempotency check INSIDE the
+  // tx is the right call — it's a tenant-scoped read that needs the
+  // GUC under Phase 3 FORCE, and a re-entry early-exit produces an
+  // empty tx (no rows committed) which is the right semantic.
   const currentYear = new Date().getFullYear();
   const tenantId = tenant.id;
 
-  const result = await prisma.$transaction(async (tx) => {
+  type SetupOutcome =
+    | { kind: "alreadySetUp" }
+    | { kind: "ok"; entityId: string; entityCode: string };
+
+  const result = await withTenantContext(prisma, tenantId, async (tx): Promise<SetupOutcome> => {
+    // Idempotency: refresh-safe check for already-set-up tenant.
+    const existingEntityCount = await tx.legalEntity.count({
+      where: { tenantId },
+    });
+    if (existingEntityCount > 0) {
+      return { kind: "alreadySetUp" };
+    }
+
+    // Phase 4b complete: LegalEntity.code is unique per [tenantId, code].
+    // Cross-tenant collisions are no longer possible. The idempotency
+    // check above guarantees the calling tenant has no entities yet,
+    // so the upcoming create can't collide within its own namespace either.
     const entity = await tx.legalEntity.create({
       data: {
         tenantId,
@@ -207,8 +211,17 @@ export async function setupFirstEntityAction(
       }
     }
 
-    return { entityId: entity.id, entityCode: entity.code };
+    return { kind: "ok", entityId: entity.id, entityCode: entity.code };
   });
+
+  if (result.kind === "alreadySetUp") {
+    // Tenant already has entities. Return early without modifying anything.
+    // The caller's UI bounces the user to / where they can continue.
+    return {
+      ok: true,
+      message: "Workspace already set up; redirecting to dashboard.",
+    };
+  }
 
   // Audit the setup as a privileged action — it's a one-time
   // workspace bootstrap and reviewers want to see when each tenant

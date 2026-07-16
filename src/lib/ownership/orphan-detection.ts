@@ -22,6 +22,13 @@ export interface OrphanedRecord {
   recordId: string;
   ownerId: string | null;
   ownerType: "USER" | "QUEUE";
+  /**
+   * Tenant the record belongs to. Required so RLS-aware callers (e.g.,
+   * user-lifecycle bulk reassign) can set the GUC per-record before
+   * each reassignment. Each Orphan*-yielding select pulls this from
+   * the underlying row.
+   */
+  tenantId: string;
   cause:
     | "OWNER_USER_NOT_FOUND"
     | "OWNER_USER_INACTIVE"
@@ -62,6 +69,7 @@ export async function findOrphans(
         ownerId: true,
         ownerType: true,
         createdAt: true,
+        tenantId: true,
         entity: { select: { code: true } },
         book: { select: { code: true } },
       },
@@ -122,6 +130,7 @@ export async function findOrphans(
           recordId: c.id,
           ownerId: c.ownerId,
           ownerType: c.ownerType,
+          tenantId: c.tenantId,
           cause,
           entityCode: c.entity.code,
           bookCode: c.book.code,
@@ -148,6 +157,7 @@ export async function findOrphans(
         ownerId: true,
         ownerType: true,
         createdAt: true,
+        tenantId: true,
         entity: { select: { code: true } },
         book: { select: { code: true } },
       },
@@ -207,6 +217,7 @@ export async function findOrphans(
           recordId: c.id,
           ownerId: c.ownerId,
           ownerType: c.ownerType,
+          tenantId: c.tenantId,
           cause,
           entityCode: c.entity.code,
           bookCode: c.book.code,
@@ -231,6 +242,7 @@ export async function findOrphans(
         ownerId: true,
         ownerType: true,
         createdAt: true,
+        tenantId: true,
         entity: { select: { code: true } },
         book: { select: { code: true } },
       },
@@ -290,6 +302,7 @@ export async function findOrphans(
           recordId: c.id,
           ownerId: c.ownerId,
           ownerType: c.ownerType,
+          tenantId: c.tenantId,
           cause,
           entityCode: c.entity.code,
           bookCode: c.book.code,
@@ -320,6 +333,7 @@ export async function previewOrphansForUserChange(
         ownerId: true,
         ownerType: true,
         createdAt: true,
+        tenantId: true,
         entity: { select: { code: true } },
         book: { select: { code: true } },
       },
@@ -336,6 +350,7 @@ export async function previewOrphansForUserChange(
         ownerId: true,
         ownerType: true,
         createdAt: true,
+        tenantId: true,
         entity: { select: { code: true } },
         book: { select: { code: true } },
       },
@@ -352,6 +367,7 @@ export async function previewOrphansForUserChange(
         ownerId: true,
         ownerType: true,
         createdAt: true,
+        tenantId: true,
         entity: { select: { code: true } },
         book: { select: { code: true } },
       },
@@ -367,6 +383,7 @@ export async function previewOrphansForUserChange(
       recordId: c.id,
       ownerId: c.ownerId,
       ownerType: c.ownerType,
+      tenantId: c.tenantId,
       cause: "OWNER_USER_INACTIVE",
       entityCode: c.entity.code,
       bookCode: c.book.code,
@@ -379,6 +396,7 @@ export async function previewOrphansForUserChange(
       recordId: c.id,
       ownerId: c.ownerId,
       ownerType: c.ownerType,
+      tenantId: c.tenantId,
       cause: "OWNER_USER_INACTIVE",
       entityCode: c.entity.code,
       bookCode: c.book.code,
@@ -391,6 +409,7 @@ export async function previewOrphansForUserChange(
       recordId: c.id,
       ownerId: c.ownerId,
       ownerType: c.ownerType,
+      tenantId: c.tenantId,
       cause: "OWNER_USER_INACTIVE",
       entityCode: c.entity.code,
       bookCode: c.book.code,

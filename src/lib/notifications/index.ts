@@ -16,7 +16,13 @@
 // emission (used during bulk operations like user-deactivation
 // reassignments where flooding the new owner's inbox would be hostile).
 
-import { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+
+// Widened DB client type — accepts both PrismaClient and TransactionClient
+// so callers can pass either the singleton (`prisma`) or a transaction
+// client from `withTenantContext` / `prisma.$transaction`. RLS Phase 2b
+// pattern (see docs/architecture/rls-phase-2b-migration-guide.md).
+type Db = PrismaClient | Prisma.TransactionClient;
 
 export type NotificationCategory =
   | "REASSIGNMENT"
@@ -60,7 +66,7 @@ export interface NotifyResult {
  * succeeds even if the bell doesn't ring.
  */
 export async function notify(
-  prisma: PrismaClient,
+  prisma: Db,
   input: NotifyInput
 ): Promise<NotifyResult> {
   // Resolve the recipient set.
@@ -115,7 +121,7 @@ export async function notify(
  * dropdown snappy.
  */
 export async function getRecentNotifications(
-  prisma: PrismaClient,
+  prisma: Db,
   userId: string,
   options?: { unreadLimit?: number; readLimit?: number }
 ): Promise<{
@@ -188,7 +194,7 @@ function unknownPrismaSelect() {
  * null for "all unread for this user."
  */
 export async function markRead(
-  prisma: PrismaClient,
+  prisma: Db,
   userId: string,
   notificationIds: string[] | null
 ): Promise<{ markedCount: number }> {
