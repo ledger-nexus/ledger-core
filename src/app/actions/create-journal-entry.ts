@@ -2,10 +2,11 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
 import { requireCurrentScope, NoScopeError } from "@/lib/scope";
+import { prisma } from "@/lib/db";
+import { withTenantContext } from "@/lib/tenant-context";
 
 export interface NewEntryDraftLine {
   accountCode: string;
@@ -68,23 +69,31 @@ export async function createJournalEntryAction(
       return { ok: false, error: "Entry must have at least 2 lines" };
     }
 
-    const result = await postJournalEntry(prisma, {
-      tenantId: scope.tenantId,
-      entityCode: scope.entityCode,
-      bookCode: scope.bookCode,
-      documentDate: new Date(documentDateStr),
-      memo,
-      source,
-      createdBy: user.email,
-      ownerUserId: user.id,
-      lines: lines.map((l) => ({
-        accountCode: l.accountCode,
-        debit: l.side === "DEBIT" ? l.amount : undefined,
-        credit: l.side === "CREDIT" ? l.amount : undefined,
-        partyCode: l.partyCode || undefined,
-        description: l.description || undefined,
-      })),
-    });
+    // RLS Phase 2b: wrap the JE post in withTenantContext so the
+    // SET LOCAL app.current_tenant_id GUC reaches postJournalEntry's
+    // writes. postJournalEntry already accepts both PrismaClient and
+    // TransactionClient (ledger-core v1.11 contract — see CLAUDE.md),
+    // so no helper widening is required. This is the simplest possible
+    // RLS migration: ONE prisma call → wrap + swap.
+    const result = await withTenantContext(prisma, scope.tenantId, async (tx) =>
+      postJournalEntry(tx, {
+        tenantId: scope.tenantId,
+        entityCode: scope.entityCode,
+        bookCode: scope.bookCode,
+        documentDate: new Date(documentDateStr),
+        memo,
+        source,
+        createdBy: user.email,
+        ownerUserId: user.id,
+        lines: lines.map((l) => ({
+          accountCode: l.accountCode,
+          debit: l.side === "DEBIT" ? l.amount : undefined,
+          credit: l.side === "CREDIT" ? l.amount : undefined,
+          partyCode: l.partyCode || undefined,
+          description: l.description || undefined,
+        })),
+      })
+    );
     entryId = result.id;
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {

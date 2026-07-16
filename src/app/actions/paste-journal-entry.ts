@@ -14,11 +14,12 @@
 // rows before pressing OK).
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { parsePastedLines, type ParsedLine } from "@/lib/accounting/paste-parser";
 import { requireCurrentUser } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { prisma } from "@/lib/db";
+import { withTenantContext } from "@/lib/tenant-context";
 
 // ─── Preview ───────────────────────────────────────────────────────────────
 
@@ -143,25 +144,31 @@ export async function postPastedEntryAction(
 
   // Post via the substrate. tenantId passed so postJournalEntry's
   // Phase-4b-aware lookup scopes correctly.
+  //
+  // RLS Phase 2b: wrap the postJournalEntry call in withTenantContext.
+  // postJournalEntry already accepts both PrismaClient + TransactionClient
+  // (ledger-core v1.11 contract), so no helper widening is required.
   try {
-    const result = await postJournalEntry(prisma, {
-      tenantId: tenant.id,
-      entityCode: input.entityCode,
-      bookCode: input.bookCode,
-      documentDate: docDate,
-      memo,
-      source: "MANUAL",
-      createdBy: user.email,
-      ownerUserId: user.id,
-      lines: parsed.lines.map((l: ParsedLine) => ({
-        accountCode: l.accountCode,
-        debit: l.debit.greaterThan(0) ? l.debit.toFixed(4) : undefined,
-        credit: l.credit.greaterThan(0) ? l.credit.toFixed(4) : undefined,
-        description: l.description,
-        partyCode: l.partyCode,
-        itemCode: l.itemCode,
-      })),
-    });
+    const result = await withTenantContext(prisma, tenant.id, async (tx) =>
+      postJournalEntry(tx, {
+        tenantId: tenant.id,
+        entityCode: input.entityCode,
+        bookCode: input.bookCode,
+        documentDate: docDate,
+        memo,
+        source: "MANUAL",
+        createdBy: user.email,
+        ownerUserId: user.id,
+        lines: parsed.lines.map((l: ParsedLine) => ({
+          accountCode: l.accountCode,
+          debit: l.debit.greaterThan(0) ? l.debit.toFixed(4) : undefined,
+          credit: l.credit.greaterThan(0) ? l.credit.toFixed(4) : undefined,
+          description: l.description,
+          partyCode: l.partyCode,
+          itemCode: l.itemCode,
+        })),
+      })
+    );
     revalidatePath("/journal-entries");
     return {
       ok: true,

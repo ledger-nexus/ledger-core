@@ -12,11 +12,15 @@
 // becomes the only sensible default for legacy code paths still being
 // migrated.
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+
+// Widened DB client type — accepts both PrismaClient and TransactionClient.
+// RLS Phase 2b pattern; see docs/architecture/rls-phase-2b-migration-guide.md.
+type Db = PrismaClient | Prisma.TransactionClient;
 
 const DEFAULT_TENANT_SLUG = "default";
 
-export async function getDefaultTenantId(prisma: PrismaClient): Promise<string> {
+export async function getDefaultTenantId(prisma: Db): Promise<string> {
   const t = await prisma.tenant.findUnique({
     where: { slug: DEFAULT_TENANT_SLUG },
     select: { id: true },

@@ -9,6 +9,7 @@
 // Invariant: sum of currentBalance for status IN (OPEN, PARTIAL) per
 // (entity, book) === AR control account balance (Dr). See tests.
 
+import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../post-journal";
@@ -155,11 +156,13 @@ export interface ApplyArPaymentInput {
   appliedDate: Date;
 }
 
-export async function applyArPayment(
-  prisma: PrismaClient,
+// Class T (RLS Phase 2b): transactional body exported separately so
+// Server Actions can run it inside withTenantContext's transaction.
+export async function applyArPaymentInTx(
+  tx: Prisma.TransactionClient,
   input: ApplyArPaymentInput
 ): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
-  return await prisma.$transaction(async (tx) => {
+  {
     const item = await tx.arOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
       // tenantId pulled so the application row inherits the same scope.
@@ -248,7 +251,14 @@ export async function applyArPayment(
     }
 
     return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
-  });
+  }
+}
+
+export async function applyArPayment(
+  prisma: PrismaClient,
+  input: ApplyArPaymentInput
+): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
+  return prisma.$transaction((tx) => applyArPaymentInTx(tx, input));
 }
 
 // Write-off of an AR open item. Two methods supported:

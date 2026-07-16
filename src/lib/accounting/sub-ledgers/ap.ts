@@ -8,6 +8,7 @@
 // Invariant: sum of currentBalance for status IN (OPEN, PARTIAL, REOPENED)
 // per (entity, book) === AP control account balance (Cr).
 
+import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { CrossBookApplicationError } from "../types";
@@ -140,11 +141,13 @@ export interface ApplyApPaymentInput {
   appliedDate: Date;
 }
 
-export async function applyApPayment(
-  prisma: PrismaClient,
+// Class T (RLS Phase 2b): transactional body exported separately so
+// Server Actions can run it inside withTenantContext's transaction.
+export async function applyApPaymentInTx(
+  tx: Prisma.TransactionClient,
   input: ApplyApPaymentInput
 ): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
-  return await prisma.$transaction(async (tx) => {
+  {
     const item = await tx.apOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
       // bookId pulled for the Phase 3.5.D cross-book guard below.
@@ -217,7 +220,14 @@ export async function applyApPayment(
     }
 
     return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
-  });
+  }
+}
+
+export async function applyApPayment(
+  prisma: PrismaClient,
+  input: ApplyApPaymentInput
+): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
+  return prisma.$transaction((tx) => applyApPaymentInTx(tx, input));
 }
 
 export async function openApBalance(

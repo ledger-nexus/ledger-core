@@ -15,7 +15,6 @@
 // trail captures who said what when.
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import {
   requireCurrentUser,
   isAdmin,
@@ -26,6 +25,8 @@ import {
   auditPrivilegedAction,
   auditAccessDenied,
 } from "@/lib/audit/log";
+import { prisma } from "@/lib/db";
+import { withTenantContext } from "@/lib/tenant-context";
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
@@ -61,27 +62,35 @@ export async function createJournalEntryNoteAction(
     return { ok: false, message: "Note body must be 1–2000 chars." };
   }
 
-  // Tenant-scoped: a forged entryId from another tenant returns "not found".
-  const entry = await prisma.journalEntry.findFirst({
-    where: { id: input.entryId, tenantId: tenant.id },
-    select: { id: true, entryNumber: true },
+  // RLS Phase 2b: read-then-write inside one withTenantContext tx.
+  // The findFirst tenant-scope predicate stays as defense in depth.
+  const result = await withTenantContext(prisma, tenant.id, async (tx) => {
+    const entry = await tx.journalEntry.findFirst({
+      where: { id: input.entryId, tenantId: tenant.id },
+      select: { id: true, entryNumber: true },
+    });
+    if (!entry) {
+      return { kind: "notFound" as const };
+    }
+
+    const note = await tx.journalEntryNote.create({
+      data: {
+        tenantId: tenant.id,
+        entryId: entry.id,
+        authorUserId: user.id,
+        // Snapshot author email so the note's authorship survives even
+        // if the User row gets deactivated / email changes.
+        authorEmail: user.email,
+        body,
+      },
+      select: { id: true },
+    });
+    return { kind: "ok" as const, note, entry };
   });
-  if (!entry) {
+  if (result.kind === "notFound") {
     return { ok: false, message: "Journal entry not found in this tenant." };
   }
-
-  const note = await prisma.journalEntryNote.create({
-    data: {
-      tenantId: tenant.id,
-      entryId: entry.id,
-      authorUserId: user.id,
-      // Snapshot author email so the note's authorship survives even
-      // if the User row gets deactivated / email changes.
-      authorEmail: user.email,
-      body,
-    },
-    select: { id: true },
-  });
+  const { note, entry } = result;
 
   await auditPrivilegedAction({
     actor: user,
@@ -141,23 +150,30 @@ async function toggleResolve(
     return { ok: false, message: "No active tenant." };
   }
 
+  // RLS Phase 2b: updateMany + findUnique inside one withTenantContext tx.
   // Tenant-scope the update via a compound where (updateMany with id +
   // tenantId match). Returns 0 if cross-tenant.
-  const updated = await prisma.journalEntryNote.updateMany({
-    where: { id: noteId, tenantId: tenant.id },
-    data: resolve
-      ? { resolvedAt: new Date(), resolvedBy: user.email }
-      : { resolvedAt: null, resolvedBy: null },
+  const result = await withTenantContext(prisma, tenant.id, async (tx) => {
+    const updated = await tx.journalEntryNote.updateMany({
+      where: { id: noteId, tenantId: tenant.id },
+      data: resolve
+        ? { resolvedAt: new Date(), resolvedBy: user.email }
+        : { resolvedAt: null, resolvedBy: null },
+    });
+    if (updated.count === 0) {
+      return { kind: "notFound" as const };
+    }
+    // Look up the note so we can revalidate the right entry's page.
+    const note = await tx.journalEntryNote.findUnique({
+      where: { id: noteId },
+      select: { entryId: true },
+    });
+    return { kind: "ok" as const, note };
   });
-  if (updated.count === 0) {
+  if (result.kind === "notFound") {
     return { ok: false, message: "Note not found in this tenant." };
   }
-
-  // Look up the note so we can revalidate the right entry's page.
-  const note = await prisma.journalEntryNote.findUnique({
-    where: { id: noteId },
-    select: { entryId: true },
-  });
+  const { note } = result;
 
   await auditPrivilegedAction({
     actor: user,
@@ -199,10 +215,16 @@ export async function deleteJournalEntryNoteAction(
     return { ok: false, message: "No active tenant." };
   }
 
-  const note = await prisma.journalEntryNote.findFirst({
-    where: { id: input.noteId, tenantId: tenant.id },
-    select: { id: true, entryId: true, authorUserId: true, authorEmail: true },
-  });
+  // RLS Phase 2b: tenant-scoped lookup runs inside withTenantContext.
+  // Authorization check on the result happens OUTSIDE the tx so the
+  // auditAccessDenied emit (which opens its own connection) doesn't
+  // run inside a tx that we don't intend to roll back.
+  const note = await withTenantContext(prisma, tenant.id, async (tx) =>
+    tx.journalEntryNote.findFirst({
+      where: { id: input.noteId, tenantId: tenant.id },
+      select: { id: true, entryId: true, authorUserId: true, authorEmail: true },
+    })
+  );
   if (!note) {
     return { ok: false, message: "Note not found in this tenant." };
   }
@@ -224,7 +246,10 @@ export async function deleteJournalEntryNoteAction(
     };
   }
 
-  await prisma.journalEntryNote.delete({ where: { id: note.id } });
+  // Authorized delete — wrap in withTenantContext for the RLS GUC.
+  await withTenantContext(prisma, tenant.id, async (tx) =>
+    tx.journalEntryNote.delete({ where: { id: note.id } })
+  );
 
   await auditPrivilegedAction({
     actor: user,
