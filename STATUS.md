@@ -26,7 +26,15 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session: laws-of-ux-nav (Claude, 2026-07-16)
+### Session: codex-findings (Claude, 2026-07-17)
+
+- **Claiming:** `src/app/page.tsx` (data/scope layer only, NOT empty-state copy), `src/lib/accounting/subledger-ties.ts`, `src/lib/accounting/sub-ledgers/fixed-assets.ts`, `src/lib/assistant/tools.ts`, `src/app/actions/bank-feed.ts`, `prisma/schema.prisma` + a new migration
+- **Why:** Remediate the 8 Codex review findings on `main@0cb47d4` (cross-tenant dashboard leak, assistant-tool book widening, bank-feed IDOR/TOCTOU) across 3 stacked PRs
+- **Branch:** `fix/codex-1-dashboard-cross-tenant-scope` (PR A, in flight), then PR B (assistant tools), PR C (bank-feed + schema)
+- **Note:** the `laws-of-ux-nav` claim below is stale (started 2026-07-16, work merged in #267/#11/#13); my page.tsx edits touch the scope/query layer, not its empty-state copy — no real overlap
+- **Until:** all 3 PRs merged
+
+### ~~Session: laws-of-ux-nav (Claude, 2026-07-16)~~ — stale per 2026-07-17 (work merged: #267 + tasks #11/#13)
 
 - **Claiming:** `src/components/nav/sidebar.tsx`, empty-state/help copy in `src/app/**/page.tsx`
 - **Why:** Laws-of-UX restructure — nav progressive disclosure + remove dev-facing copy

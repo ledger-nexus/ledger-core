@@ -10,9 +10,9 @@
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { getCurrentTenant, listMyTenants } from "@/lib/auth/tenant";
+import { listMyTenants } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -27,8 +27,6 @@ import { enumerateDueDates } from "@/lib/accounting/recurring";
 import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
 
 export default async function DashboardPage() {
-  const scope = getScope();
-
   // As-of is *now*, resolved per request.
   //
   // This was previously a module-level `new Date("2026-06-30")` — the demo
@@ -97,9 +95,37 @@ export default async function DashboardPage() {
     }
   }
 
+  // Tenant-verified scope for every read below.
+  //
+  // This page previously read `getScope()` — the RAW lc-scope cookie —
+  // and fed scope.entityCode straight into report calls and Prisma
+  // queries. A signed-in user could hand-edit the cookie to ANOTHER
+  // tenant's entity code and have the dashboard render that entity's
+  // balances, JE metadata, and activity (a cross-tenant read leak).
+  // getCurrentScope() resolves the cookie against THIS tenant's entities
+  // and pre-resolves entityId + tenantId, so every query below is pinned
+  // to a (tenantId, entityId) the caller actually owns. Fail closed when
+  // it can't resolve (not signed in, or the tenant has no entity).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-ink-900">Dashboard</h2>
+        <EmptyState
+          title="Sign in to view your dashboard"
+          description="Your financial position appears here once you're signed in to a workspace with at least one entity."
+        />
+      </div>
+    );
+  }
+
   // Bail early with an empty state if the seed hasn't been run.
   const entryCount = await prisma.journalEntry.count({
-    where: { entity: { code: scope.entityCode }, book: { code: scope.bookCode } },
+    where: {
+      tenantId: scope.tenantId,
+      entityId: scope.entityId,
+      book: { code: scope.bookCode },
+    },
   });
   if (entryCount === 0) {
     return (
@@ -131,14 +157,17 @@ export default async function DashboardPage() {
     apItemCount,
     fixedAssetCount,
   ] = await Promise.all([
+    // scope carries tenantId, so the report resolvers pin the entity to
+    // this tenant (resolveEntityBook uses scope.tenantId).
     getBalanceSheet(prisma, scope, ASOF),
     getIncomeStatement(prisma, scope, YEAR_START, ASOF),
-    openArBalance(prisma, scope.entityCode, scope.bookCode),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
-    netBookValue(prisma, scope.entityCode, scope.bookCode),
+    openArBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
+    openApBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
+    netBookValue(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.journalEntry.findMany({
       where: {
-        entity: { code: scope.entityCode },
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
       },
       orderBy: [{ documentDate: "desc" }, { createdAt: "desc" }],
@@ -159,9 +188,10 @@ export default async function DashboardPage() {
     // them in /journal-entries (filtered list shows the "N open" badge).
     prisma.journalEntryNote.count({
       where: {
+        tenantId: scope.tenantId,
         resolvedAt: null,
         entry: {
-          entity: { code: scope.entityCode },
+          entityId: scope.entityId,
           book: { code: scope.bookCode },
         },
       },
@@ -172,7 +202,8 @@ export default async function DashboardPage() {
     prisma.recurringEntry.findMany({
       where: {
         isActive: true,
-        entity: { code: scope.entityCode },
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
       },
       select: {
@@ -186,7 +217,8 @@ export default async function DashboardPage() {
     // dashboard show "May 2026 closed 4 days ago by …".
     prisma.periodClose.findFirst({
       where: {
-        entity: { code: scope.entityCode },
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
         book: { code: scope.bookCode },
       },
       orderBy: { closedAt: "desc" },
@@ -205,7 +237,8 @@ export default async function DashboardPage() {
     // yet isn't a backlog; only an elapsed one is.
     prisma.period.count({
       where: {
-        calendar: { entity: { code: scope.entityCode } },
+        tenantId: scope.tenantId,
+        calendar: { entity: { id: scope.entityId } },
         endsOn: { lt: todayUtc },
         // No close row for THIS book.
         NOT: {
@@ -222,6 +255,7 @@ export default async function DashboardPage() {
     // posted to a control account without flowing through the sub-
     // ledger, or a sub-ledger write that drifted from the JE total.
     checkSubledgerTies(prisma, {
+      tenantId: scope.tenantId,
       entityCode: scope.entityCode,
       bookCode: scope.bookCode,
       asOf: ASOF,
@@ -232,13 +266,21 @@ export default async function DashboardPage() {
     // "has this sub-ledger ever been used here", not on "is the balance
     // non-zero", so a book that runs AR still sees AR when it nets to nil.
     prisma.arOpenItem.count({
-      where: { entity: { code: scope.entityCode }, book: { code: scope.bookCode } },
+      where: {
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
+        book: { code: scope.bookCode },
+      },
     }),
     prisma.apOpenItem.count({
-      where: { entity: { code: scope.entityCode }, book: { code: scope.bookCode } },
+      where: {
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
+        book: { code: scope.bookCode },
+      },
     }),
     prisma.fixedAsset.count({
-      where: { entity: { code: scope.entityCode } },
+      where: { tenantId: scope.tenantId, entityId: scope.entityId },
     }),
   ]);
 
@@ -252,7 +294,8 @@ export default async function DashboardPage() {
   // loop ("7 waiting") pulls the user back; inbox-zero reads as calm.
   const forReviewCount = await prisma.bankTransaction.count({
     where: {
-      entity: { code: scope.entityCode },
+      tenantId: scope.tenantId,
+      entityId: scope.entityId,
       book: { code: scope.bookCode },
       status: "FOR_REVIEW",
     },
@@ -265,10 +308,10 @@ export default async function DashboardPage() {
   // tasks would blend into the count.
   let closeProgress: { periodCode: string; done: number; total: number } | null =
     null;
-  const dashTenant = await getCurrentTenant();
-  if (dashTenant) {
+  {
+    // scope.tenantId is the tenant-verified tenant resolved at the top.
     const scopedTask = {
-      tenantId: dashTenant.id,
+      tenantId: scope.tenantId,
       AND: [
         { OR: [{ entity: { code: scope.entityCode } }, { entityId: null }] },
         { OR: [{ book: { code: scope.bookCode } }, { bookId: null }] },
@@ -675,13 +718,14 @@ function Kpi({
   hint?: string;
   tone?: "positive" | "negative" | "neutral";
 }) {
-  const num = value.toNumber();
+  // Sign check stays in Decimal — never round-trip money through a JS
+  // number just to read its sign (precision loss on large balances).
   const accent =
     tone === "positive"
       ? "text-positive"
       : tone === "negative"
         ? "text-negative"
-        : num < 0
+        : value.isNegative()
           ? "text-negative"
           : "text-ink-900";
   return (
