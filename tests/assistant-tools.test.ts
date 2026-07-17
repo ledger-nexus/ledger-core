@@ -15,7 +15,6 @@
 
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { executeTool, type AssistantScope } from "@/lib/assistant/tools";
 import { askLedger } from "@/lib/assistant/ask";
@@ -57,6 +56,8 @@ describe("ask-your-ledger graceful degradation", () => {
 
 const ENTITY_CODE = "ASKQ_ENT";
 const BOOK_CODE = "US_GAAP";
+const TENANT_SLUG = "askq-test";
+const USER_EMAIL = "askq@test.local";
 const AS_OF = new Date("2026-12-31");
 
 const HAS_DB = !!process.env.DATABASE_URL;
@@ -65,25 +66,44 @@ let scope: AssistantScope;
 
 describe.skipIf(!HAS_DB)("ask-your-ledger tool executor", () => {
   beforeAll(async () => {
-    const tenantId = await getDefaultTenantId(prisma);
-    scope = { tenantId, entityCode: ENTITY_CODE, bookCode: BOOK_CODE };
-
-    // Self-heal: a killed prior run leaves this entity's rows behind and
-    // would poison the numbers. Scrub in FK order before seeding.
-    const existing = await prisma.legalEntity.findFirst({
-      where: { tenantId, code: ENTITY_CODE },
+    // DEDICATED tenant, not the default one. Sharing the default tenant
+    // let other suites' shared (entityId-null) same-code accounts shadow
+    // this suite's chart in by-code metadata maps — reproduced as the
+    // cash-flow classifier dropping the credit-card line when run after
+    // sub-ledgers/invariants. Per the repo fixture rules: mint your own.
+    // Self-heal first: earlier versions of this suite seeded ASKQ_ENT under
+    // the DEFAULT tenant — scrub the code GLOBALLY so exactly one ASKQ_ENT
+    // can exist (postJournalEntry resolves by code; twins = wrong entity).
+    const twins = await prisma.legalEntity.findMany({
+      where: { code: ENTITY_CODE },
       select: { id: true },
     });
-    if (existing) {
-      await prisma.journalLine.deleteMany({
-        where: { entry: { entityId: existing.id } },
-      });
-      await prisma.journalEntry.deleteMany({ where: { entityId: existing.id } });
-      await prisma.account.deleteMany({ where: { entityId: existing.id } });
-      await prisma.legalEntity.delete({ where: { id: existing.id } });
+    for (const twin of twins) {
+      await prisma.journalLine.deleteMany({ where: { entry: { entityId: twin.id } } });
+      await prisma.journalEntry.deleteMany({ where: { entityId: twin.id } });
+      await prisma.account.deleteMany({ where: { entityId: twin.id } });
+      await prisma.legalEntity.delete({ where: { id: twin.id } });
     }
+    const stale = await prisma.tenant.findUnique({ where: { slug: TENANT_SLUG } });
+    if (stale) {
+      await prisma.journalLine.deleteMany({ where: { tenantId: stale.id } });
+      await prisma.journalEntry.deleteMany({ where: { tenantId: stale.id } });
+      await prisma.account.deleteMany({ where: { tenantId: stale.id } });
+      await prisma.legalEntity.deleteMany({ where: { tenantId: stale.id } });
+      await prisma.tenantMembership.deleteMany({ where: { tenantId: stale.id } });
+      await prisma.tenant.delete({ where: { id: stale.id } });
+    }
+    await prisma.user.deleteMany({ where: { email: USER_EMAIL } });
 
-    await seed(tenantId);
+    const user = await prisma.user.create({
+      data: { email: USER_EMAIL, displayName: "AskQ Test" },
+    });
+    const tenant = await prisma.tenant.create({
+      data: { slug: TENANT_SLUG, name: "AskQ Test Tenant", ownerUserId: user.id },
+    });
+    scope = { tenantId: tenant.id, entityCode: ENTITY_CODE, bookCode: BOOK_CODE };
+
+    await seed(tenant.id);
   });
 
   beforeEach(async () => {
@@ -167,6 +187,70 @@ describe.skipIf(!HAS_DB)("ask-your-ledger tool executor", () => {
     expect(r.entries[0].memo.toLowerCase()).toContain("salary");
   });
 
+  it("get_cash_flow reports operating/financing split and reconciles to actual cash", async () => {
+    const r = (await executeTool(
+      prisma,
+      scope,
+      "get_cash_flow",
+      { from: "2026-01-01", to: "2026-12-31" },
+      AS_OF
+    )) as {
+      netIncome: string;
+      operatingCashFlow: string;
+      financingCashFlow: string;
+      netCashFlow: string;
+      endingCash: string;
+      reconciles: boolean;
+    };
+    expect(r.netIncome).toBe("4500.00");
+    // Credit-card balance +200 is a working-capital source of cash.
+    expect(r.operatingCashFlow).toBe("4700.00");
+    // Opening-balance equity is financing.
+    expect(r.financingCashFlow).toBe("20000.00");
+    expect(r.netCashFlow).toBe("24700.00");
+    expect(r.endingCash).toBe("24700.00");
+    expect(r.reconciles).toBe(true);
+  });
+
+  it("get_ar_aging / get_ap_aging return zeroed buckets when no open items exist", async () => {
+    for (const tool of ["get_ar_aging", "get_ap_aging"] as const) {
+      const r = (await executeTool(prisma, scope, tool, {}, AS_OF)) as {
+        totalOpen: string;
+        buckets: { bucket: string; total: string; items: number }[];
+      };
+      expect(r.totalOpen).toBe("0.00");
+      expect(r.buckets.map((b) => b.bucket)).toEqual([
+        "CURRENT",
+        "1_30",
+        "31_60",
+        "61_90",
+        "OVER_90",
+      ]);
+      expect(r.buckets.every((b) => b.total === "0.00" && b.items === 0)).toBe(true);
+    }
+  });
+
+  it("get_book_tax_difference compares the session book against the tax book", async () => {
+    const r = (await executeTool(
+      prisma,
+      scope,
+      "get_book_tax_difference",
+      { from: "2026-01-01", to: "2026-12-31" },
+      AS_OF
+    )) as {
+      bookNetIncome: string;
+      taxNetIncome: string;
+      totalDelta: string;
+      bookCode: string;
+      taxBookCode: string;
+    };
+    expect(r.bookCode).toBe("US_GAAP");
+    expect(r.taxBookCode).toBe("US_TAX");
+    expect(r.bookNetIncome).toBe("4500.00"); // 5,000 salary − 500 groceries
+    expect(r.taxNetIncome).toBe("4800.00"); // tax basis: 4,800 salary, no deduction
+    expect(r.totalDelta).toBe("-300.00"); // book − tax
+  });
+
   it("scopes reads to the granted tenant/entity — a foreign entity code is not honored", async () => {
     // The scope is server-derived; the executor must only read ASKQ_ENT.
     // Confirm it never returns another entity's accounts by asking for a
@@ -228,8 +312,10 @@ async function seed(tenantId: string) {
   });
 
   const accounts = [
-    { code: "1000", name: "Checking", type: "ASSET", normalBalance: "DEBIT", isBank: true },
-    { code: "2000", name: "Credit Card", type: "LIABILITY", normalBalance: "CREDIT", isBank: false },
+    { code: "1000", name: "Checking", type: "ASSET", normalBalance: "DEBIT", isBank: true, subtype: "CASH" },
+    // Subtype drives the cash-flow classifier (a subtype-less liability is
+    // honestly UNCATEGORIZED there) — model the card as an accrued liability.
+    { code: "2000", name: "Credit Card", type: "LIABILITY", normalBalance: "CREDIT", isBank: false, subtype: "ACCRUED" },
     { code: "3000", name: "Opening Balance Equity", type: "EQUITY", normalBalance: "CREDIT", isBank: false },
     { code: "4000", name: "Salary Income", type: "REVENUE", normalBalance: "CREDIT", isBank: false },
     { code: "6100", name: "Groceries", type: "EXPENSE", normalBalance: "DEBIT", isBank: false },
@@ -249,6 +335,7 @@ async function seed(tenantId: string) {
           normalBalance: a.normalBalance,
           isContra: false,
           isBank: a.isBank,
+          subtype: "subtype" in a ? (a as { subtype?: string }).subtype ?? null : null,
         },
       });
     }
@@ -261,6 +348,7 @@ async function post(
   lines: { accountCode: string; debit?: number; credit?: number }[]
 ) {
   return postJournalEntry(prisma, {
+    tenantId: scope.tenantId,
     entityCode: ENTITY_CODE,
     bookCode: BOOK_CODE,
     currencyCode: "USD",
@@ -272,6 +360,22 @@ async function post(
 }
 
 async function postFixtures() {
+  // Tax-basis view of the same year for book-tax difference: salary only,
+  // recognized at 4,800 (a 200 timing difference vs the GAAP book's 5,000
+  // and no grocery deduction — deltas are the point, not realism).
+  await postJournalEntry(prisma, {
+    tenantId: scope.tenantId,
+    entityCode: ENTITY_CODE,
+    bookCode: "US_TAX",
+    currencyCode: "USD",
+    documentDate: new Date("2026-02-15"),
+    memo: "February salary (tax basis)",
+    source: "MANUAL",
+    lines: [
+      { accountCode: "1000", debit: 4800 },
+      { accountCode: "4000", credit: 4800 },
+    ],
+  });
   await post("2026-01-01", "Opening balances", [
     { accountCode: "1000", debit: 20000 },
     { accountCode: "3000", credit: 20000 },

@@ -233,10 +233,15 @@ export async function applyApPayment(
 export async function openApBalance(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  // Tenant pin — entity codes are only unique per tenant; UI/API callers
+  // MUST pass this (deficiency #16 pattern, closed for reports, was still
+  // open here). Optional for legacy substrate scripts.
+  tenantId?: string
 ): Promise<Decimal> {
   const rows = await prisma.apOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
@@ -257,10 +262,13 @@ export async function apAging(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,
-  asOf: Date
+  asOf: Date,
+  // Tenant pin — see openApBalance. Same cross-tenant same-code hole.
+  tenantId?: string
 ): Promise<ApAgingBucket[]> {
   const items = await prisma.apOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },

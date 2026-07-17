@@ -13,6 +13,7 @@ import type { AskResult } from "@/lib/assistant/ask";
 const EXAMPLES = [
   "What's my cash balance?",
   "How much did I spend this year?",
+  "Where did my cash go this year?",
   "What's my net worth right now?",
 ];
 
@@ -24,6 +25,10 @@ const CONSULTED_LABEL: Record<string, string> = {
   list_accounts: "the chart of accounts",
   get_account_activity: "account activity",
   search_journal_entries: "journal entries",
+  get_cash_flow: "the cash flow statement",
+  get_ar_aging: "AR aging",
+  get_ap_aging: "AP aging",
+  get_book_tax_difference: "book-tax differences",
 };
 
 export function AskForm() {
