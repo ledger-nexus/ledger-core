@@ -7,8 +7,7 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -43,11 +42,18 @@ export default async function CloseAlertsPage({
 }: {
   searchParams: { period?: string; severity?: string; pillar?: string };
 }) {
-  const scope = getScope();
-  const tenant = await getCurrentTenant();
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="Scope not found"
+        description="Sign in and select a tenant with at least one entity."
+      />
+    );
+  }
 
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode, ...(tenant ? { tenantId: tenant.id } : {}) },
+    where: { tenantId: scope.tenantId, code: scope.entityCode },
     select: { id: true, code: true, name: true },
   });
   const book = await prisma.book.findUnique({
@@ -55,7 +61,7 @@ export default async function CloseAlertsPage({
     select: { id: true, code: true, name: true },
   });
 
-  if (!tenant || !entity || !book) {
+  if (!entity || !book) {
     return (
       <EmptyState
         title="Scope not found"
@@ -94,7 +100,7 @@ export default async function CloseAlertsPage({
   }
 
   const alerts = await getCloseAlerts(prisma, {
-    tenantId: tenant.id,
+    tenantId: scope.tenantId,
     entityId: entity.id,
     bookId: book.id,
     periodId: selectedPeriod.id,

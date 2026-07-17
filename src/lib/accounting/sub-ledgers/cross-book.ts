@@ -32,11 +32,16 @@ export interface EntityBookSummary {
  */
 export async function listEntityBooksWithOpenItems(
   prisma: PrismaClient,
-  entityCode: string
+  entityCode: string,
+  // Tenant pin — entity codes are unique only per tenant, so a UI caller
+  // MUST pass this or a colliding code could count another tenant's open
+  // items. Optional for substrate scripts.
+  tenantId?: string
 ): Promise<EntityBookSummary[]> {
   const arRows = await prisma.arOpenItem.groupBy({
     by: ["bookId"],
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
     },
@@ -45,6 +50,7 @@ export async function listEntityBooksWithOpenItems(
   const apRows = await prisma.apOpenItem.groupBy({
     by: ["bookId"],
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
     },

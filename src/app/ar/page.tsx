@@ -2,9 +2,7 @@
 
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
-import { tenantScopeOrNone } from "@/lib/db-sentinels";
+import { getCurrentScope } from "@/lib/scope";
 import { openArBalance } from "@/lib/accounting/sub-ledgers/ar";
 import { listEntityBooksWithOpenItems } from "@/lib/accounting/sub-ledgers/cross-book";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,10 +15,19 @@ import { ApplyArPaymentRow } from "./apply-payment-row";
 import { ReassignArRow } from "./reassign-ar-row";
 
 export default async function ArPage() {
-  const scope = getScope();
-  // Tenant scope (Phase 4c) — defense in depth against cross-tenant reads.
-  const tenant = await getCurrentTenant();
-  const tenantFilter = tenantScopeOrNone(tenant?.id);
+  // Tenant-verified scope — raw getScope() would let a hand-edited cookie
+  // name another tenant's entity code. getCurrentScope() resolves it
+  // against this tenant and pre-resolves entityId/tenantId.
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing AR."
+      />
+    );
+  }
+  const tenantFilter = { tenantId: scope.tenantId };
   const [openItems, total, cashAccounts, users, queues, entityBooks] = await Promise.all([
     prisma.arOpenItem.findMany({
       where: {
@@ -45,9 +52,10 @@ export default async function ArPage() {
         party: { select: { code: true, displayName: true } },
       },
     }),
-    openArBalance(prisma, scope.entityCode, scope.bookCode),
+    openArBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.account.findMany({
       where: {
+        tenantId: scope.tenantId,
         active: true,
         isBank: true,
         OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
@@ -56,7 +64,10 @@ export default async function ArPage() {
       select: { code: true, name: true },
     }),
     prisma.user.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        tenantMemberships: { some: { tenantId: scope.tenantId } },
+      },
       select: { id: true, displayName: true },
       orderBy: { displayName: "asc" },
     }),
@@ -69,7 +80,7 @@ export default async function ArPage() {
     // open AR/AP items, so the banner can surface multi-book reality
     // when the operator is on `(entity, US_GAAP)` while `US_TAX` also
     // has open items.
-    listEntityBooksWithOpenItems(prisma, scope.entityCode),
+    listEntityBooksWithOpenItems(prisma, scope.entityCode, scope.tenantId),
   ]);
 
   // Resolve owner display labels (user displayName or queue name).

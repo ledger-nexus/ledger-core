@@ -33,9 +33,7 @@
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
-import { tenantScopeOrNone } from "@/lib/db-sentinels";
+import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -80,14 +78,21 @@ export default async function ReconciliationsListPage({
 }: {
   searchParams: { period?: string; status?: string; sort?: string };
 }) {
-  const scope = getScope();
-  const tenant = await getCurrentTenant();
-  const tenantFilter = tenantScopeOrNone(tenant?.id);
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="Scope not found"
+        description="Sign in and select a tenant with at least one entity."
+      />
+    );
+  }
+  const tenantFilter = { tenantId: scope.tenantId };
 
-  // Resolve scope → entity + book IDs the same way the periods page does.
-  // Phase 4b: entity code is unique per [tenantId, code]; use findFirst.
+  // Resolve scope → entity + book IDs. Phase 4b: entity code is unique
+  // per [tenantId, code].
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode, ...(tenant ? { tenantId: tenant.id } : {}) },
+    where: { tenantId: scope.tenantId, code: scope.entityCode },
     select: { id: true, code: true, name: true },
   });
   const book = await prisma.book.findUnique({

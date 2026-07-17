@@ -6,8 +6,7 @@
 // bank-feed loop, native to the ledger.
 
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -18,10 +17,9 @@ import ImportForm from "./import-form";
 import ReviewRow from "./review-row";
 
 export default async function BankingPage() {
-  const tenant = await getCurrentTenant();
-  const scope = getScope();
+  const scope = await getCurrentScope();
 
-  if (!tenant) {
+  if (!scope) {
     return (
       <div className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold text-ink-900">Bank transactions</h2>
@@ -35,7 +33,7 @@ export default async function BankingPage() {
     // first (the usual case), but any account is allowed.
     prisma.account.findMany({
       where: {
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         active: true,
         OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
       },
@@ -45,7 +43,7 @@ export default async function BankingPage() {
     // Category targets — every active account, for coding a line.
     prisma.account.findMany({
       where: {
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         active: true,
         OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
       },
@@ -54,7 +52,7 @@ export default async function BankingPage() {
     }),
     prisma.bankTransaction.findMany({
       where: {
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         status: "FOR_REVIEW",
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
@@ -73,7 +71,7 @@ export default async function BankingPage() {
     }),
     prisma.bankTransaction.count({
       where: {
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         status: { in: ["CATEGORIZED", "MATCHED"] },
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
@@ -82,7 +80,7 @@ export default async function BankingPage() {
     // Learned rules — decrypted by the client extension; matching happens
     // here in JS, never in SQL over ciphertext.
     prisma.bankRule.findMany({
-      where: { tenantId: tenant.id },
+      where: { tenantId: scope.tenantId },
       select: {
         id: true,
         matchText: true,
@@ -112,7 +110,7 @@ export default async function BankingPage() {
     forReview.map(async (t) => {
       const rule = bestRuleFor(ruleSet, t.description, t.bankAccountId);
       const candidates = await findMatchCandidates(prisma, {
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         entityId: t.entityId,
         bookId: t.bookId,
         bankAccountId: t.bankAccountId,

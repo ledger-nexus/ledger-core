@@ -2,22 +2,20 @@
 // the form lives in the adjacent client component.
 
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { EmptyState } from "@/components/ui/empty-state";
 import NewRecurringForm from "./new-recurring-form";
 
 export default async function NewRecurringPage() {
-  const tenant = await getCurrentTenant();
+  const scope = await getCurrentScope();
   const user = await getCurrentUser();
-  const scope = getScope();
 
-  if (!tenant) {
+  if (!scope) {
     return (
       <EmptyState
         title="No active tenant"
-        description="Sign in and select a tenant before creating a template."
+        description="Sign in and select a tenant with at least one entity before creating a template."
       />
     );
   }
@@ -34,7 +32,7 @@ export default async function NewRecurringPage() {
     prisma.account.findMany({
       where: {
         active: true,
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
       },
       orderBy: { code: "asc" },
@@ -46,7 +44,7 @@ export default async function NewRecurringPage() {
       select: { code: true, name: true },
     }),
     prisma.legalEntity.findMany({
-      where: { tenantId: tenant.id },
+      where: { tenantId: scope.tenantId },
       orderBy: { code: "asc" },
       select: { code: true, name: true },
     }),
