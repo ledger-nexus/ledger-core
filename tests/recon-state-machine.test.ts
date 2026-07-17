@@ -33,7 +33,7 @@ import { Decimal } from "decimal.js";
 import { PrismaClient } from "@prisma/client";
 
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
-import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -168,11 +168,11 @@ async function cleanup(): Promise<void> {
   // XX000 while the rules are armed — even with zero referencing
   // audit rows. Delete the fixture-actor audit rows in the same
   // window so they don't leak as orphans.
-  await withAuditLogMutable(prisma, async () => {
-    await prisma.auditLog.deleteMany({
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.auditLog.deleteMany({
       where: { actorUserId: { in: createdUserIds } },
     });
-    await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
+    await tx.user.deleteMany({ where: { id: { in: createdUserIds } } });
   });
 }
 

@@ -27,7 +27,7 @@ import { getCashFlowStatement } from "../src/lib/accounting/reports/cash-flow";
 import { getBookTaxDifference } from "../src/lib/accounting/reports/book-tax-difference";
 import { getM3Detail } from "../src/lib/accounting/reports/m3-detail";
 import { defaultTranslationCategory } from "../src/lib/db/chart-of-accounts";
-import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -254,8 +254,8 @@ afterAll(async () => {
   await prisma.tenant.delete({ where: { id: poisonTenantId } });
   // app_user hard-deletes trip the audit_log append-only RULE's
   // referential-integrity check — needs the mutable window.
-  await withAuditLogMutable(prisma, async () => {
-    await prisma.user.delete({ where: { id: poisonOwnerUserId } });
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.user.delete({ where: { id: poisonOwnerUserId } });
   });
   await prisma.$disconnect();
 });

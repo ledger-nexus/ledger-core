@@ -41,7 +41,7 @@ import { GET as bsCsv } from "@/app/api/reports/balance-sheet/csv/route";
 import { GET as isCsv } from "@/app/api/reports/income-statement/csv/route";
 import { GET as tbCsv } from "@/app/api/reports/trial-balance/csv/route";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
-import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const SUFFIX = ("HIER" + Date.now().toString(36)).toUpperCase();
@@ -193,9 +193,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await withAuditLogMutable(prisma, async () => {
-    await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
-  });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
@@ -203,9 +200,16 @@ afterAll(async () => {
   await prisma.fiscalCalendar.deleteMany({ where: { entityId } });
   await prisma.recordEvent.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { id: entityId } });
-  await prisma.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.tenant.delete({ where: { id: tenant.id } });
-  await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.auditLog.deleteMany({
+      where: {
+        OR: [{ tenantId: tenant.id }, { actorUserId: user.id }],
+      },
+    });
+    await tx.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
+    await tx.tenant.delete({ where: { id: tenant.id } });
+    await tx.user.delete({ where: { id: user.id } });
+  });
   await prisma.$disconnect();
 });
 

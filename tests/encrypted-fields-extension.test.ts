@@ -7,7 +7,7 @@
 // Confidentiality TSC.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
@@ -130,32 +130,6 @@ afterAll(async () => {
       });
       await rawPrisma.journalEntry.deleteMany({ where: { entityId: ent.id } });
     }
-    // AuditLog test rows for AuditLog.metadata describe block. Wrap in
-    // withAuditLogMutable since the append-only RULE would otherwise
-    // silently no-op the delete.
-    await withAuditLogMutable(rawPrisma, async () => {
-      await rawPrisma.auditLog.deleteMany({
-        where: { action: { contains: SUFFIX } },
-      });
-      // Deleting a User row triggers Postgres's referential-integrity
-      // query against audit_log (actorUserId FK) — under the
-      // append-only RULEs, that internal query errors with XX000
-      // ("rule having rewritten the query"). Any user.deleteMany must
-      // therefore run inside this rules-dropped window, after clearing
-      // the users' audit rows.
-      const testUsers = await rawPrisma.user.findMany({
-        where: { email: { contains: SUFFIX } },
-        select: { id: true },
-      });
-      if (testUsers.length > 0) {
-        await rawPrisma.auditLog.deleteMany({
-          where: { actorUserId: { in: testUsers.map((u) => u.id) } },
-        });
-      }
-      await rawPrisma.user.deleteMany({
-        where: { email: { contains: `enc-user-${SUFFIX}` } },
-      });
-    });
     // Party test rows: identified by the SUFFIX-stamped code.
     await rawPrisma.party.deleteMany({
       where: { code: { contains: SUFFIX } },
@@ -169,23 +143,32 @@ afterAll(async () => {
     // delete that too. Tenant has TenantMembership cascading via FK,
     // but the test never adds members, so a direct deleteMany is safe.
     // (Both `enc-tenant-` and `enc-notif-` slugs match.)
-    await rawPrisma.notification.deleteMany({
-      where: { tenant: { slug: { contains: SUFFIX } } },
-    });
-    await rawPrisma.tenant.deleteMany({
-      where: { slug: { contains: SUFFIX } },
-    });
-    // Same audit_log-FK hazard as above — user deletes need the
-    // rules-dropped window (their audit rows were already cleared in
-    // the first window's SUFFIX sweep).
-    await withAuditLogMutable(rawPrisma, async () => {
-      await rawPrisma.user.deleteMany({
+    await withAuditLogMutableTransaction(rawPrisma, async (tx) => {
+      const testUsers = await tx.user.findMany({
+        where: { email: { contains: SUFFIX } },
+        select: { id: true },
+      });
+      const testTenants = await tx.tenant.findMany({
+        where: { slug: { contains: SUFFIX } },
+        select: { id: true },
+      });
+      await tx.auditLog.deleteMany({
         where: {
           OR: [
-            { email: { contains: `enc-tenant-owner-${SUFFIX}` } },
-            { email: { contains: `enc-notif-owner-${SUFFIX}` } },
+            { action: { contains: SUFFIX } },
+            { actorUserId: { in: testUsers.map((u) => u.id) } },
+            { tenantId: { in: testTenants.map((t) => t.id) } },
           ],
         },
+      });
+      await tx.notification.deleteMany({
+        where: { tenantId: { in: testTenants.map((t) => t.id) } },
+      });
+      await tx.tenant.deleteMany({
+        where: { id: { in: testTenants.map((t) => t.id) } },
+      });
+      await tx.user.deleteMany({
+        where: { id: { in: testUsers.map((u) => u.id) } },
       });
     });
     await rawPrisma.$disconnect();
