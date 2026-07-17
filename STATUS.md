@@ -33,9 +33,21 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Branch:** `laws-of-ux-nav` (worktree; shared checkout untouched)
 - **Until:** PR merged
 
+### Session po-collision-fix · started 2026-07-16 21:10 · heartbeat 21:25
+
+- **Scope**: fix PR #262's migration-ordinal collision — two `0017_` directories on the branch (`0017_po_allocation_columns` vs main's `0017_ns_iselimination_entity_column`); rename to `0022_`
+- **Files / globs**: `prisma/migrations/0022_po_allocation_columns/**`, `STATUS.md`
+- **Branch**: `schema/upstream-po-allocation-columns` (PR #262)
+- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/po-upstream`
+
 ---
 
 ## Recent completions
+
+### Session po-upstream · 2026-07-16
+- **Scope**: upstream performance_obligation ASC 606 allocation columns (allocatedAmount, allocationMethod, fairValueMethod, quantity + 2 enums) from revenue-rec PR #17 into ledger-core's schema + migration 0022
+- **Branch**: schema/upstream-po-allocation-columns (worktree .claude/worktrees/po-upstream)
+- **Outcome**: schema-only; DB already has the columns; verified via prisma migrate diff (PO statements gone)
 
 ### Session ask-widen · 2026-07-16
 - **Scope**: /ask tool widening (cash flow, AR/AP aging, book-tax difference — 4 new read-only tools) + tenant pin on arAging/apAging/openArBalance/openApBalance (pre-tenancy signatures, deficiency-#16 class) threaded through aging pages/CSV routes + PROJECT_STATUS v1.26 catch-up entry.
