@@ -149,7 +149,7 @@ universal schema. Reference:
 | `subscriptions`/`subscription_lines`/`charges`/`usage_records` (ASC 606 subscription billing) | **NOT in ledger-nexus** | This is asc606 / RevRec Engine's domain — not in the substrate. NetSuite ships subscription billing as a peer to revenue recognition. |
 | `intercompany_transactions` (1,001 truncated) + `consolidation_processes` + `consolidation_subsidiaries` + `consolidation_translations` | Intercompany + consolidation in ledger-core (`getConsolidatedTrialBalance`) | NetSuite has explicit `consolidation_processes` runs that track translation per subsidiary. ledger-core today does consolidation on read. |
 | `audit_trail_entries` (1,001 truncated × 13 cols) | `AuditLog` (ledger-core; append-only RULE) | NetSuite ships system-wide audit trail. ledger-nexus has the same pattern with Postgres RULE enforcement. |
-| `approval_workflows`/`approval_steps`/`approval_requests`/`approval_authorities`/`approval_delegations` | JE approval queue in ledger-core (`requireJeApproval` config) | NetSuite has full workflow engine; ledger-core has a simpler 4-role × per-tenant approval model. |
+| `approval_workflows`/`approval_steps`/`approval_requests`/`approval_authorities`/`approval_delegations` | JE approval queue in ledger-core (`requireJeApproval` config) | NetSuite has full workflow engine; ledger-core has a simpler 3-role (OWNER/ADMIN/MEMBER) × per-tenant approval model. |
 | `period_close_tasks` (2 × 11) + `period_state_transitions` | `PeriodClose` (ledger-core) + month-end packet | NetSuite has explicit close-task checklist. Worth examining the 2 rows. |
 | `compliance_controls` (81 × 17) + `compliance_tests` (1,001 truncated × 14) | SOC 2 framework in `docs/policies/` | NetSuite tracks SOX controls + test runs. Our framework lives in docs + audit_log. |
 | `tax_provisions`/`deferred_tax_items`/`uncertain_tax_positions`/`return_to_provision_true_ups` | BTD report + M-3 detail in ledger-core | NetSuite has full tax-provision engine. ledger-core today produces the BTD + M-3 reports but doesn't track provisions as posted entities. |
@@ -182,7 +182,7 @@ universal schema. Reference:
 - ❌ Project accounting (`projects`/`project_tasks`/`time_entries`) — out of scope
 - ❌ Payroll (`payroll_runs`/`payroll_lines`/`expense_reports`) — out of scope
 - ❌ Tax provision engine (`tax_provisions`/`deferred_tax_items` as posted entities; we have reporting only)
-- ❌ Approval workflow engine (we have a 4-role × tenant model; NetSuite has multi-step workflows)
+- ❌ Approval workflow engine (we have a 3-role × tenant model; NetSuite has multi-step workflows)
 - ❌ Compliance test framework (`compliance_controls`/`compliance_tests`) — replaced by our docs/policies/
 
 **Partial coverage:**

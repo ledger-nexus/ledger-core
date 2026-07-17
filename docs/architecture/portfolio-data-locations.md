@@ -272,16 +272,19 @@ their own auth — they accept a forwarded user identity from ledger-core
 via a signed session token or verify the request came from
 ledger-core's internal API path.
 
-**Per-tenant isolation:** every customer-data query carries
-`tenantId`. The `assertTenantScope()` helper from `@/lib/soc2/index.ts`
-runs after every fetch-by-id. The 2026-05-29 audit-pass swept this
-across reports, mappers, seeds, and UI in all 5 repos; the
-pen-test-tenant-isolation suite keeps it that way.
+**Per-tenant isolation:** every customer-data query is pinned to the
+session-derived `tenantId` (resolved by `getCurrentScope()`, never
+client input). A generic `assertTenantScope()` helper exists in
+`@/lib/soc2/index.ts` as an available post-fetch defense-in-depth check,
+but is not currently wired in (0 call sites) — the operative control is
+the per-query `WHERE tenantId`. The `pen-test-tenant-isolation` suite
+guards it.
 
-**Per-role policy:** every Server Action calls `requirePermission(...)`
-against the 4-role × 16-permission matrix in
-`src/lib/auth/policy.ts` (mirrored across companion repos for repo-
-specific permissions).
+**Per-role access:** privileged Server Actions gate on per-tenant role
+checks (`isTenantAdmin` = OWNER/ADMIN, or global `requireAdmin`) after
+`requireCurrentUser()` + scope resolution. A centralized
+`requirePermission()` / `src/lib/auth/policy.ts` permission matrix is
+**planned, not built** (access-control v2.1, deficiency #29).
 
 ---
 

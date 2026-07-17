@@ -33,7 +33,7 @@ the `ledger-nexus` portfolio.
 | Are you SOC 2 attested? | Not yet attested; Type 1 audit-ready (≈ 70%). Target Type 1 in Q3 2026; Type 2 follows the 6-month observation window. | `docs/SOC2_READINESS.md` v2.0 |
 | What's encrypted at rest? | 26+ confidential columns across 5 repos with AES-256-GCM transparent encryption + HMAC search hashes (2-key separation). | `docs/architecture/portfolio-data-locations.md` |
 | What's your data-classification scheme? | 4-tier (PUBLIC / INTERNAL / CONFIDENTIAL / RESTRICTED) per-column, enforced at the helper-library level. | `docs/policies/data-classification.md` |
-| Multi-tenant? Cross-tenant isolation? | Yes — `tenantId` on every customer-data table; `assertTenantScope()` helper enforces post-fetch; 4 pen-test passes have shipped. | `docs/SOC2_CONTROL_MATRIX.md` CC6.1 |
+| Multi-tenant? Cross-tenant isolation? | Yes — `tenantId` on every customer-data table; every query is pinned to the session-derived `tenantId` (resolved by `getCurrentScope()`, never client input); pen-test passes shipped. | `docs/SOC2_CONTROL_MATRIX.md` CC6.1 |
 | How do you handle data subject requests (GDPR / CPRA)? | Procedure documented + executable code shipped. UI at `/admin/data-subject-requests`. 30-day SLA. | `docs/policies/data-subject-requests.md` |
 | Sub-processors? | 11 vendors, 3-tier classified, sub-processor disclosure documented. | `docs/policies/vendor-management.md` v2.0 |
 | Incident response procedure? | Policy + runbook split; SEV-1 = 15-minute acknowledgment; GDPR Art. 33 72h breach notification. | `docs/policies/incident-response.md` + `docs/runbooks/incident-response.md` |
@@ -99,7 +99,7 @@ Outsourced to vendors. See [STA — Supply Chain Management] below for vendor in
 | Question | Answer | Reference |
 |---|---|---|
 | Data classification scheme? | 4-tier: PUBLIC / INTERNAL / CONFIDENTIAL / RESTRICTED. Per-column classification on every model. PII-field allowlist runtime-enforces redaction before log emission. | `docs/policies/data-classification.md` |
-| Multi-tenant isolation? | `tenantId UUID @db.Uuid` on every customer-data table; `assertTenantScope()` helper enforced post-fetch; 4 pen-test passes ship; `tests/pen-test-tenant-isolation.test.ts` covers regressions. | `docs/SOC2_CONTROL_MATRIX.md` CC6.1 |
+| Multi-tenant isolation? | `tenantId UUID @db.Uuid` on every customer-data table; every query is pinned to the session-derived `tenantId` (resolved by `getCurrentScope()`); `tests/pen-test-tenant-isolation.ts` covers regressions. | `docs/SOC2_CONTROL_MATRIX.md` CC6.1 |
 | Data residency? | US-East (Vercel + Neon default). Multi-region read replica trigger: 10+ paying customers OR EU customer (per BC v2.0). | BC v2.0 |
 | Cross-border transfer compliance? | Default-US setup; EU customer triggers GDPR-specific DPA + SCCs negotiation per the vendor-management procurement procedure. Not in place yet (deficiency #15). | `docs/policies/vendor-management.md` v2.0 + deficiency log #15 |
 | Data subject request handling? | GDPR Art. 15 (access) + Art. 17 (erasure) + Art. 16 (rectification) + Art. 20 (portability) + Art. 21 (object) + CPRA equivalents. 3 request channels, channel-specific identity verification, 30-day SLA, OWNER-only erasure gate, encryption-at-rest carve-out documented under Art. 34(3)(a). | `docs/policies/data-subject-requests.md` |

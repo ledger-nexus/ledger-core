@@ -5,7 +5,7 @@
 
 ## Why RLS
 
-Multi-tenancy in this substrate enforces tenant isolation at the **application layer** today — every customer-data query goes through Prisma + `assertTenantScope()` helpers + the pen-test-tenant-isolation suite catches regressions. This is the v1 mitigation per deficiency #11 (now Closed) and risk #17.
+Multi-tenancy in this substrate enforces tenant isolation at the **application layer** today — every customer-data query is pinned to the session-derived `tenantId` (`getCurrentScope()`) and the pen-test-tenant-isolation suite catches regressions. (A generic `assertTenantScope()` post-fetch helper exists in `@/lib/soc2` but is not yet wired in — see access-control v2.1 / deficiency #29.) This is the v1 mitigation per deficiency #11 (now Closed) and risk #17.
 
 The remaining gap is **defense-in-depth at the database layer**: an application bug that forgets `where: { tenantId }` returns the wrong tenant's rows. RLS adds a Postgres-enforced backstop:
 

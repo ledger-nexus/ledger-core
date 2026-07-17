@@ -6,13 +6,16 @@
 
 > **2026-07-17 reconciliation (v2.1):** v2.0 documented a centralized
 > permission layer (`src/lib/auth/policy.ts` + `requirePermission()` + 16
-> `canX` helpers), a four-role hierarchy including a read-only `VIEWER`,
-> and an `assertTenantScope()` helper — **none of which exist in code.**
-> The Authorization section below now describes what is actually
-> implemented (three roles; per-action `isAdmin`/`isTenantAdmin` checks;
-> per-query `tenantId` scoping) and flags the centralized layer + `VIEWER`
-> as planned (control-deficiency-log #29). This closes a documentation
-> drift that would otherwise be an audit finding.
+> `canX` helpers) and a four-role hierarchy including a read-only
+> `VIEWER` — **none of which exist in code** (`TenantRole` is three
+> roles; there is no `policy.ts`). It also cited `assertTenantScope()`
+> as the tenant-isolation control; that helper *does* exist in
+> `@/lib/soc2` but has **zero call sites**, so the operative control is
+> the per-query `WHERE tenantId` (hardened in the 2026-07-17 getScope
+> sweep), not a post-fetch assertion. The Authorization section below now
+> describes what is actually implemented and flags the centralized layer
+> + `VIEWER` as planned (control-deficiency-log #29). This closes a
+> documentation drift that would otherwise be an audit finding.
 
 This is the SOC 2 CC6.1/CC6.2/CC6.3 anchor document. Every rule
 below is **either enforced in code or has a documented compensating
@@ -80,11 +83,15 @@ Every privileged path runs, in order:
      layer lands. `src/lib/auth/current-user.ts`.
 
 Cross-tenant data access is closed by pinning **every** customer-data
-query to the session-derived `tenantId` (resolved by `getCurrentScope()`),
-not by a post-fetch helper — there is no `assertTenantScope()`. The
-`tests/pen-test-tenant-isolation.ts` suite exercises attempted bypass
-(forged `lc-scope` cookie, cross-tenant id). See `docs/SOC2_CONTROL_MATRIX.md`
-CC6.1.
+query to the session-derived `tenantId` (resolved by `getCurrentScope()`).
+A generic `assertTenantScope(row, tenantId)` helper exists in
+`@/lib/soc2` as an available post-fetch defense-in-depth check, but it
+currently has **zero call sites** — the operative control is the
+per-query `WHERE tenantId`, not a post-fetch assertion. (Wiring
+`assertTenantScope` in as belt-and-suspenders, or removing it as dead
+code, is tracked with #29.) The `tests/pen-test-tenant-isolation.ts`
+suite exercises attempted bypass (forged `lc-scope` cookie, cross-tenant
+id). See `docs/SOC2_CONTROL_MATRIX.md` CC6.1.
 
 ### Intended permission map (design target for the planned policy layer)
 
