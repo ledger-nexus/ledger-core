@@ -26,6 +26,16 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
+### Session: subledger-fixture-isolation (Claude, 2026-07-16)
+
+- **Claiming:** `tests/sub-ledgers.test.ts` (+ this STATUS.md block)
+- **Why:** replace the suite's TABLE-WIDE deleteMany cleanup with a per-run
+  tenant/entity fixture + self-healing prefix scrub — the global wipe
+  destroyed other suites' fixtures on the shared dev DB and failed live
+  2026-07-16 on recon's `reconciliation_match_journalLineId_fkey`
+- **Branch:** `fix/sub-ledgers-tenant-scoped-fixtures` (worktree bold-curie-961bd4; shared checkout untouched)
+- **Until:** PR merged
+
 ### Session: laws-of-ux-nav (Claude, 2026-07-16)
 
 - **Claiming:** `src/components/nav/sidebar.tsx`, empty-state/help copy in `src/app/**/page.tsx`
