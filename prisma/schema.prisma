@@ -734,7 +734,10 @@ model JournalEntry {
 
   // Backref to inline notes (review comments, follow-up flags).
   notes            JournalEntryNote[]
-  bankTransactions BankTransaction[]
+  // 1:1 — a posted entry is claimed by at most one bank-feed line. The
+  // uniqueness is enforced on BankTransaction.postedEntryId so two feed
+  // lines can't match/categorize onto the same entry (TOCTOU guard).
+  bankTransaction  BankTransaction?
 
   @@unique([tenantId, entryNumber])
   @@index([ownerId])
@@ -2552,7 +2555,12 @@ model BankTransaction {
   // JournalEntry that posted. Null while FOR_REVIEW or EXCLUDED.
   categoryAccountId String?       @db.Uuid
   categoryAccount   Account?      @relation("BankTxnCategory", fields: [categoryAccountId], references: [id])
-  postedEntryId     String?       @db.Uuid
+  // Unique (nullable → Postgres allows many NULLs, so unclaimed lines are
+  // unconstrained): at most one bank line may point at a given posted
+  // entry. This is the DB-level backstop for the match/categorize race —
+  // a second concurrent claim on the same entry fails with P2002 instead
+  // of silently double-linking.
+  postedEntryId     String?       @unique @db.Uuid
   postedEntry       JournalEntry? @relation(fields: [postedEntryId], references: [id])
 
   // EXCLUDE audit — who dismissed it and why (a personal charge on a

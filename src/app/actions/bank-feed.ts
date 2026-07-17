@@ -12,6 +12,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
@@ -28,6 +29,19 @@ export type ActionState =
   | { ok?: undefined; error?: undefined }
   | { ok: true; message: string }
   | { ok: false; error: string };
+
+/**
+ * Thrown inside the posting transaction when a concurrent request already
+ * claimed the FOR_REVIEW row (the conditional claim matched 0 rows). It
+ * rolls the transaction back — nothing is posted — and the caller turns it
+ * into a friendly "already handled" message rather than a 500.
+ */
+class AlreadyHandledError extends Error {
+  constructor() {
+    super("This transaction was already handled by another request.");
+    this.name = "AlreadyHandledError";
+  }
+}
 
 // ── Import ───────────────────────────────────────────────────────────────
 
@@ -159,9 +173,18 @@ export async function categorizeBankTransactionAction(
       return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
     }
 
-    // Tenant-scoped load — a forged id from another tenant reads as "not found".
+    // Scoped load — the line must belong to the caller's tenant AND the
+    // currently-selected (entity, book), not just the tenant. Without the
+    // entity/book pin a forged id from a SIBLING entity in the same tenant
+    // would load, and the categorize would post its JE into the caller's
+    // scope using the foreign line's bank account (cross-entity contamination).
     const txn = await prisma.bankTransaction.findFirst({
-      where: { id: parsed.data.id, tenantId: scope.tenantId },
+      where: {
+        id: parsed.data.id,
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
+        book: { code: scope.bookCode },
+      },
       select: {
         id: true,
         status: true,
@@ -200,6 +223,25 @@ export async function categorizeBankTransactionAction(
     // Post + mark categorized atomically: same transaction, same tenant GUC,
     // so a failed post never leaves the line marked done.
     const entryNumber = await withTenantContext(prisma, scope.tenantId, async (tx) => {
+      // Claim the row FIRST, conditionally on it still being FOR_REVIEW in
+      // this exact scope. Only the request whose updateMany flips exactly
+      // one row proceeds to post — a concurrent categorize (double-submit,
+      // retry, two tabs) sees count 0 and aborts, so the line posts EXACTLY
+      // once. postJournalEntry carries no source lineage here, so its
+      // idempotency key wouldn't dedupe a second post; this claim is the
+      // guard. A throw below rolls back the claim with the post.
+      const claim = await tx.bankTransaction.updateMany({
+        where: {
+          id: txn.id,
+          tenantId: scope.tenantId,
+          entityId: scope.entityId,
+          book: { code: scope.bookCode },
+          status: "FOR_REVIEW",
+        },
+        data: { status: "CATEGORIZED" },
+      });
+      if (claim.count !== 1) throw new AlreadyHandledError();
+
       const je = await postJournalEntry(tx, {
         tenantId: scope.tenantId,
         entityCode: scope.entityCode,
@@ -216,7 +258,6 @@ export async function categorizeBankTransactionAction(
       await tx.bankTransaction.update({
         where: { id: txn.id },
         data: {
-          status: "CATEGORIZED",
           categoryAccount: { connect: { id: category.id } },
           postedEntry: { connect: { id: je.id } },
         },
@@ -272,6 +313,8 @@ export async function categorizeBankTransactionAction(
   } catch (e) {
     if (e instanceof NotAuthenticatedError) return { ok: false, error: "You must be signed in." };
     if (e instanceof NoScopeError) return { ok: false, error: "Pick an entity + book first." };
+    if (e instanceof AlreadyHandledError)
+      return { ok: false, error: "This transaction was already categorized." };
     return { ok: false, error: e instanceof Error ? e.message : "Categorize failed." };
   }
 }
@@ -297,7 +340,12 @@ export async function excludeBankTransactionAction(
     if (!parsed.success) return { ok: false, error: "Invalid input." };
 
     const txn = await prisma.bankTransaction.findFirst({
-      where: { id: parsed.data.id, tenantId: scope.tenantId },
+      where: {
+        id: parsed.data.id,
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
+        book: { code: scope.bookCode },
+      },
       select: { id: true, status: true },
     });
     if (!txn) return { ok: false, error: "Transaction not found." };
@@ -305,10 +353,21 @@ export async function excludeBankTransactionAction(
       return { ok: false, error: `This transaction is already ${txn.status.toLowerCase()}.` };
     }
 
-    await prisma.bankTransaction.update({
-      where: { id: txn.id },
+    // Conditional claim so a concurrent categorize can't lose to (or race
+    // with) an exclude: only a still-FOR_REVIEW row in this scope flips.
+    const claimed = await prisma.bankTransaction.updateMany({
+      where: {
+        id: txn.id,
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
+        book: { code: scope.bookCode },
+        status: "FOR_REVIEW",
+      },
       data: { status: "EXCLUDED", excludedBy: user.email, excludeReason: parsed.data.reason ?? null },
     });
+    if (claimed.count !== 1) {
+      return { ok: false, error: "This transaction was already handled." };
+    }
 
     await logAuditEvent({
       eventType: "PRIVILEGED_ACTION",
@@ -352,7 +411,12 @@ export async function matchBankTransactionAction(
     if (!parsed.success) return { ok: false, error: "Invalid input." };
 
     const txn = await prisma.bankTransaction.findFirst({
-      where: { id: parsed.data.id, tenantId: scope.tenantId },
+      where: {
+        id: parsed.data.id,
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
+        book: { code: scope.bookCode },
+      },
       select: {
         id: true,
         status: true,
@@ -405,6 +469,10 @@ export async function matchBankTransactionAction(
       };
     }
 
+    // Fast-path friendly check — a read-before-write, so it can't be the
+    // guarantee. The DB unique index on postedEntryId is the real backstop:
+    // two feed lines racing to match the SAME entry both pass this read,
+    // but only one updateMany succeeds; the loser hits P2002.
     const alreadyClaimed = await prisma.bankTransaction.findFirst({
       where: { tenantId: scope.tenantId, postedEntryId: entry.id },
       select: { id: true },
@@ -413,10 +481,32 @@ export async function matchBankTransactionAction(
       return { ok: false, error: "Another bank line already matched that entry." };
     }
 
-    await prisma.bankTransaction.update({
-      where: { id: txn.id },
-      data: { status: "MATCHED", postedEntry: { connect: { id: entry.id } } },
-    });
+    try {
+      // Atomic claim: only a still-FOR_REVIEW line in this scope flips, and
+      // the unique postedEntryId index rejects a second line pointing at the
+      // same entry. Both race outcomes resolve to "already handled".
+      const claimed = await prisma.bankTransaction.updateMany({
+        where: {
+          id: txn.id,
+          tenantId: scope.tenantId,
+          entityId: scope.entityId,
+          book: { code: scope.bookCode },
+          status: "FOR_REVIEW",
+        },
+        data: { status: "MATCHED", postedEntryId: entry.id },
+      });
+      if (claimed.count !== 1) {
+        return { ok: false, error: "This transaction was already handled." };
+      }
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
+        return { ok: false, error: "Another bank line already matched that entry." };
+      }
+      throw err;
+    }
 
     await logAuditEvent({
       eventType: "PRIVILEGED_ACTION",
