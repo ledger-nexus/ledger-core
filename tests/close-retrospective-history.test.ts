@@ -26,9 +26,48 @@ let tenantId: string;
 let entityId: string;
 let bookId: string;
 let userId: string;
+let calendarId: string;
 let periodIds: string[] = [];
 
 const createdTaskIds: string[] = [];
+
+/**
+ * Scrub residue from earlier runs of THIS suite before seeding.
+ *
+ * A killed vitest run (Ctrl-C, OOM, signal) skips afterAll and strands
+ * this suite's calendar + periods on the shared DB. Matching by the
+ * stable `crh` prefix — not by this run's SUFFIX — is what makes the
+ * cleanup self-healing. Also catches periods left by the pre-fix scheme,
+ * which parked them on the *shared* Northwind calendar and so polluted
+ * the ordinal band for every other suite.
+ */
+async function scrubStaleFixtures(scrubTenantId: string) {
+  const stalePeriods = await prisma.period.findMany({
+    where: { tenantId: scrubTenantId, code: { startsWith: "crh" } },
+    select: { id: true },
+  });
+  const stalePeriodIds = stalePeriods.map((p) => p.id);
+
+  // FK order: close-tasks → periods → calendar. Deleting a close-task
+  // cascades its append-only state-change rows (the trigger's
+  // pg_trigger_depth() carve-out permits the cascade).
+  if (stalePeriodIds.length > 0) {
+    await prisma.closeTask.deleteMany({
+      where: { periodId: { in: stalePeriodIds } },
+    });
+    await prisma.period.deleteMany({ where: { id: { in: stalePeriodIds } } });
+  }
+  try {
+    await prisma.fiscalCalendar.deleteMany({
+      where: { tenantId: scrubTenantId, code: { startsWith: "crh" } },
+    });
+  } catch {
+    // A sibling suite's `findFirst({ where: { entityId } })` may have
+    // parked its own period on a stale calendar, holding the FK. Harmless:
+    // ordinals are unique per calendar, so an orphan calendar can't
+    // collide with anything. Never let cleanup fail the suite.
+  }
+}
 
 beforeAll(async () => {
   tenantId = await getDefaultTenantId(prisma);
@@ -53,22 +92,47 @@ beforeAll(async () => {
   if (!book) throw new Error("Need US_GAAP book.");
   bookId = book.id;
 
-  const cal = await prisma.fiscalCalendar.findFirst({
-    where: { entityId },
+  await scrubStaleFixtures(tenantId);
+
+  // Mint a DEDICATED calendar for this suite rather than reusing the
+  // shared Northwind one — same fix as tests/close-retrospective.test.ts.
+  // The old "shared calendar + `600 + i + random(90)`" scheme drew three
+  // ordinals from ranges that OVERLAP each other (600..689, 601..690,
+  // 602..691), so a single run self-collided on (calendarId, ordinal)
+  // ~3.3% of the time — no concurrency needed — and stranded periods from
+  // failed runs ratcheted that higher on the persistent CI DB. A fresh
+  // calendar scopes ordinals to rows nobody else touches. It still hangs
+  // off the Northwind entity, so the (entity, book)-scoped retrospective
+  // query sees these periods exactly as before.
+  const cal = await prisma.fiscalCalendar.create({
+    data: {
+      tenantId,
+      entityId,
+      code: `${SUFFIX}-CAL`.slice(0, 32),
+      name: "Retrospective History Test Calendar",
+      periodFrequency: "MONTHLY",
+    },
     select: { id: true },
   });
-  if (!cal) throw new Error("Need a calendar.");
+  calendarId = cal.id;
 
-  // Three test periods.
-  for (let i = 0; i < 3; i++) {
+  // Three test periods: April, May, June 2026.
+  const periodSpecs = [
+    { starts: "2026-04-01", ends: "2026-04-30" },
+    { starts: "2026-05-01", ends: "2026-05-31" },
+    { starts: "2026-06-01", ends: "2026-06-30" },
+  ];
+  for (let i = 0; i < periodSpecs.length; i++) {
     const p = await prisma.period.create({
       data: {
         tenantId,
-        calendarId: cal.id,
+        calendarId,
         code: `${SUFFIX}-P${i}`.slice(0, 30),
-        ordinal: 600 + i + Math.floor(Math.random() * 90),
-        startsOn: new Date(`2026-0${i + 4}-01`),
-        endsOn: new Date(`2026-0${i + 4}-${i === 1 ? 31 : 30}`),
+        // Deterministic — collision-proof now that the calendar is
+        // dedicated to this suite.
+        ordinal: i + 1,
+        startsOn: new Date(periodSpecs[i].starts),
+        endsOn: new Date(periodSpecs[i].ends),
       },
       select: { id: true },
     });
@@ -82,12 +146,14 @@ afterAll(async () => {
   await prisma.closeTask.deleteMany({
     where: { id: { in: createdTaskIds } },
   });
-  for (const pid of periodIds) {
-    try {
-      await prisma.period.delete({ where: { id: pid } });
-    } catch {
-      /* leftover FKs from earlier failing runs */
-    }
+  await prisma.period.deleteMany({ where: { id: { in: periodIds } } });
+  try {
+    await prisma.fiscalCalendar.delete({ where: { id: calendarId } });
+  } catch {
+    // A sibling suite that resolves its calendar via
+    // `findFirst({ where: { entityId } })` can land on this one and park
+    // a period on it, holding the FK. Leave it; beforeAll's prefix scrub
+    // collects it on the next run.
   }
   await prisma.$disconnect();
 });

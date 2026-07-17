@@ -33,6 +33,13 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Branch:** `laws-of-ux-nav` (worktree; shared checkout untouched)
 - **Until:** PR merged
 
+### Session: crh-fixture-collision (Claude, 2026-07-16)
+
+- **Claiming:** `tests/close-retrospective-history.test.ts`
+- **Why:** P2002 flake on `(calendarId, ordinal)` — dedicated fiscal calendar + deterministic ordinals + `beforeAll` self-heal, mirroring `tests/close-retrospective.test.ts`
+- **Branch:** `fix/close-retrospective-history-fixture-collision` (worktree; shared checkout untouched)
+- **Until:** PR merged
+
 ---
 
 ## Recent completions
