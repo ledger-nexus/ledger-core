@@ -93,10 +93,19 @@ describe.skipIf(!HAS_DB)("ask-your-ledger tool executor", () => {
       await prisma.tenantMembership.deleteMany({ where: { tenantId: stale.id } });
       await prisma.tenant.delete({ where: { id: stale.id } });
     }
-    await prisma.user.deleteMany({ where: { email: USER_EMAIL } });
-
-    const user = await prisma.user.create({
-      data: { email: USER_EMAIL, displayName: "AskQ Test" },
+    // Reuse the fixture user rather than delete-and-recreate it. A hard
+    // DELETE on app_user makes Postgres run the audit_log FK's referential
+    // action, which the append-only rule pair (migration 0015) rewrites to
+    // NOTHING — the delete then fails with "referential integrity query ...
+    // gave unexpected result". That only bites on a DB where a prior run
+    // already left the row, so CI's fresh container passed while every
+    // rerun against the shared dev DB died in beforeAll. Upserting is
+    // idempotent and keeps the append-only control armed; the suite's audit
+    // trail is not under test here.
+    const user = await prisma.user.upsert({
+      where: { email: USER_EMAIL },
+      create: { email: USER_EMAIL, displayName: "AskQ Test" },
+      update: {},
     });
     const tenant = await prisma.tenant.create({
       data: { slug: TENANT_SLUG, name: "AskQ Test Tenant", ownerUserId: user.id },
