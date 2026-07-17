@@ -10,9 +10,8 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
-import { getCurrentTenant } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -22,13 +21,25 @@ import PeriodActions from "./period-actions";
 import SeedTemplatesButton from "./seed-templates-button";
 
 export default async function PeriodsPage() {
-  const scope = getScope();
+  // Tenant-verified scope. Raw getScope() would let a hand-edited
+  // lc-scope cookie name another tenant's entity code; getCurrentScope()
+  // resolves it against THIS tenant's entities and pre-resolves
+  // entityId + tenantId, so every query below is tenant-pinned.
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before viewing periods."
+      />
+    );
+  }
   const user = await getCurrentUser();
   const admin = isAdmin(user);
 
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
-  const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode },
+  // Resolve the entity by its tenant-verified id (for its display name).
+  const entity = await prisma.legalEntity.findUnique({
+    where: { id: scope.entityId },
     select: { id: true, code: true, name: true },
   });
   const book = await prisma.book.findUnique({
@@ -45,10 +56,16 @@ export default async function PeriodsPage() {
     );
   }
 
-  // Pull every period across every calendar. In v1 a company typically
-  // has ONE calendar (monthly 12-period); multi-calendar tenants are
-  // rare. We sort by startsOn DESC so the most recent month is on top.
+  // Periods for THIS entity's calendar(s). This previously had NO where
+  // clause — it loaded every period across every tenant (a cross-tenant
+  // leak). Scope it to the tenant + the resolved entity's calendars. In
+  // v1 a company typically has ONE calendar (monthly 12-period). Sorted
+  // startsOn DESC so the most recent month is on top.
   const periods = await prisma.period.findMany({
+    where: {
+      tenantId: scope.tenantId,
+      calendar: { entityId: scope.entityId },
+    },
     orderBy: { startsOn: "desc" },
     select: {
       id: true,
@@ -63,7 +80,7 @@ export default async function PeriodsPage() {
   // Per (entity, book) close rows. Map by periodId for O(1) lookup
   // when rendering the table.
   const closes = await prisma.periodClose.findMany({
-    where: { entityId: entity.id, bookId: book.id },
+    where: { tenantId: scope.tenantId, entityId: entity.id, bookId: book.id },
     select: { periodId: true, closedAt: true, closedBy: true },
   });
   const closeByPeriod = new Map(closes.map((c) => [c.periodId, c]));
@@ -73,7 +90,12 @@ export default async function PeriodsPage() {
   // a materialized view.
   const jeCounts = await prisma.journalEntry.groupBy({
     by: ["periodId"],
-    where: { entityId: entity.id, bookId: book.id, periodId: { not: null } },
+    where: {
+      tenantId: scope.tenantId,
+      entityId: entity.id,
+      bookId: book.id,
+      periodId: { not: null },
+    },
     _count: { _all: true },
   });
   const countByPeriod = new Map<string, number>();
@@ -85,17 +107,16 @@ export default async function PeriodsPage() {
   // are tenant-scoped (no entity/book), so we groupBy(status) by
   // periodId and aggregate in JS for the visible periods. One query
   // for all periods instead of N per-period queries.
-  const tenant = await getCurrentTenant();
   type TaskRollup = { total: number; done: number; pctDone: number };
   const taskRollupByPeriod = new Map<string, TaskRollup>();
   let templateCount = 0;
-  if (tenant) {
+  {
     const visiblePeriodIds = periods.map((p) => p.id);
     if (visiblePeriodIds.length > 0) {
       const rows = await prisma.closeTask.groupBy({
         by: ["periodId", "status"],
         where: {
-          tenantId: tenant.id,
+          tenantId: scope.tenantId,
           periodId: { in: visiblePeriodIds },
         },
         _count: { _all: true },
@@ -122,7 +143,7 @@ export default async function PeriodsPage() {
     // Surface "no templates seeded yet" so the operator sees the
     // first-run affordance.
     templateCount = await prisma.closeTaskTemplate.count({
-      where: { tenantId: tenant.id, active: true },
+      where: { tenantId: scope.tenantId, active: true },
     });
   }
 
