@@ -12,7 +12,7 @@ import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { listMyTenants } from "@/lib/auth/tenant";
+import { getCurrentTenant, listMyTenants } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -245,6 +245,60 @@ export default async function DashboardPage() {
   // Count of broken ties for the dashboard badge.
   const brokenTies = subledgerTies.filter((t) => t.status === "broken").length;
 
+  // ── Competitor-informed action rows (see docs/design/competitive-*.md) ──
+  //
+  // Bank lines waiting for review — the Xero lesson: retention lives on
+  // the daily reconciliation loop, not on reports. Zeigarnik: an open
+  // loop ("7 waiting") pulls the user back; inbox-zero reads as calm.
+  const forReviewCount = await prisma.bankTransaction.count({
+    where: {
+      entity: { code: scope.entityCode },
+      book: { code: scope.bookCode },
+      status: "FOR_REVIEW",
+    },
+  });
+
+  // Close progress — the Rillet lesson ("zero-day close"): the close is
+  // a progress bar, not a checklist. Goal-Gradient: visible x/y motion
+  // accelerates completion. Tenant pin is REQUIRED here: close tasks may
+  // be entity-null (tenant-wide), so without it another tenant's admin
+  // tasks would blend into the count.
+  let closeProgress: { periodCode: string; done: number; total: number } | null =
+    null;
+  const dashTenant = await getCurrentTenant();
+  if (dashTenant) {
+    const scopedTask = {
+      tenantId: dashTenant.id,
+      AND: [
+        { OR: [{ entity: { code: scope.entityCode } }, { entityId: null }] },
+        { OR: [{ book: { code: scope.bookCode } }, { bookId: null }] },
+      ],
+    };
+    const latestTask = await prisma.closeTask.findFirst({
+      where: scopedTask,
+      orderBy: { period: { startsOn: "desc" } },
+      select: { periodId: true, period: { select: { code: true } } },
+    });
+    if (latestTask) {
+      const [total, done] = await Promise.all([
+        prisma.closeTask.count({
+          where: { ...scopedTask, periodId: latestTask.periodId },
+        }),
+        prisma.closeTask.count({
+          where: {
+            ...scopedTask,
+            periodId: latestTask.periodId,
+            // WAIVED is a conscious "not this month" — complete for
+            // progress purposes, same as the close calendar treats it.
+            status: { in: ["DONE", "WAIVED"] },
+          },
+        }),
+      ]);
+      if (total > 0)
+        closeProgress = { periodCode: latestTask.period.code, done, total };
+    }
+  }
+
   // Compute "due today" count from the active recurring templates.
   // Pure client-side math — the runner uses the same helper.
   const today = new Date();
@@ -359,6 +413,38 @@ export default async function DashboardPage() {
             </span>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
+            <ActionRow
+              label="Bank lines to review"
+              count={forReviewCount}
+              href="/banking"
+              urgentAt={1}
+              urgentLabel="waiting in the feed"
+              emptyLabel="inbox zero"
+            />
+            {closeProgress && (
+              <Link
+                href="/close/tasks"
+                className="group flex items-center justify-between gap-3"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="text-sm text-ink-900 group-hover:underline">
+                    Close {closeProgress.periodCode}
+                  </span>
+                  <span className="text-xs text-ink-500">
+                    {closeProgress.done} of {closeProgress.total} tasks done
+                  </span>
+                </div>
+                {/* Goal-gradient: the bar itself, not just the fraction. */}
+                <div className="h-1.5 w-24 shrink-0 rounded-full bg-ink-100">
+                  <div
+                    className="h-1.5 rounded-full bg-ink-900"
+                    style={{
+                      width: `${Math.round((closeProgress.done / closeProgress.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </Link>
+            )}
             <ActionRow
               label="Open review notes"
               count={openNoteCount}
