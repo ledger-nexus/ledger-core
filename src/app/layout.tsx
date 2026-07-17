@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CommandPalette, CommandPaletteHint } from "@/components/nav/command-palette";
 import { Sidebar } from "@/components/nav/sidebar";
 import { BookSwitcher } from "@/components/nav/book-switcher";
 import { UserSwitcher } from "@/components/nav/user-switcher";
@@ -74,6 +75,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 </h1>
               </div>
               <div className="flex items-start gap-3">
+                <CommandPaletteHint />
                 <Link
                   href="/ask"
                   title="Ask your ledger — plain-English questions, read-only"
@@ -104,6 +106,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </header>
             <div className="flex-1 overflow-y-auto px-8 py-6">{children}</div>
           </main>
+          {/* Global ⌘K palette — mounted once, reachable from every page. */}
+          <CommandPalette isAdmin={isAdmin(currentUser)} reviewCount={reviewCount} />
         </div>
       </body>
     </html>

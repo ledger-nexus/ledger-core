@@ -52,110 +52,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
-
-interface NavItem {
-  href: string;
-  label: string;
-  hint?: string;
-}
-
-interface NavSection {
-  label: string;
-  /** Always visible — the Pareto set. */
-  items: NavItem[];
-  /** Behind a <details> disclosure. Full-featured installs still reach these. */
-  more?: NavItem[];
-}
-
-const sections: NavSection[] = [
-  {
-    label: "Overview",
-    items: [
-      { href: "/", label: "Dashboard" },
-      // Plain-English query surface, not a ledger page — an entry point,
-      // so it sits beside Dashboard rather than under a data group.
-      { href: "/ask", label: "Ask your ledger" },
-    ],
-  },
-  {
-    // Events that post to the ledger. Everything here either is a posting
-    // or is a template/queue that becomes one.
-    label: "Transactions",
-    items: [
-      { href: "/banking", label: "Bank transactions" },
-      { href: "/journal-entries", label: "Journal entries" },
-    ],
-    more: [
-      { href: "/journal-entries/paste", label: "Paste from Excel", hint: "bulk lines" },
-      { href: "/recurring-entries", label: "Recurring", hint: "templates" },
-      { href: "/ar", label: "Open AR" },
-      { href: "/ap", label: "Open AP" },
-    ],
-  },
-  {
-    // Standing records the postings point at. An account isn't something
-    // that happened — it's a noun transactions reference, so it doesn't
-    // belong in the list above.
-    label: "Master data",
-    items: [{ href: "/accounts", label: "Chart of accounts" }],
-    more: [
-      { href: "/import/netsuite", label: "Import from NetSuite", hint: "single / multi-sub" },
-    ],
-  },
-  {
-    // Cross-cutting controls that aren't a ledger surface. "Automations"
-    // is the governance view for everything acting on your behalf.
-    label: "Settings",
-    items: [{ href: "/automations", label: "Automations" }],
-  },
-  {
-    label: "Reports",
-    items: [
-      { href: "/reports/trial-balance", label: "Trial balance" },
-      { href: "/reports/income-statement", label: "Income statement" },
-      { href: "/reports/balance-sheet", label: "Balance sheet" },
-      { href: "/reports/cash-flow", label: "Cash flow" },
-    ],
-    more: [
-      { href: "/reports/book-tax-difference", label: "Book-tax difference", hint: "ASC 740" },
-      { href: "/reports/m3-detail", label: "M-3 detail", hint: "Form 1120" },
-      { href: "/reports/ar-aging", label: "AR aging" },
-      { href: "/reports/ap-aging", label: "AP aging" },
-      { href: "/reports/fx-revaluation", label: "FX revaluation", hint: "ASC 830" },
-      { href: "/reports/consolidation", label: "Consolidation", hint: "multi-entity" },
-    ],
-  },
-  {
-    label: "Close",
-    items: [
-      { href: "/periods", label: "Periods" },
-      { href: "/close/tasks", label: "Close tasks" },
-      { href: "/reports/month-end", label: "Month-end review" },
-    ],
-    more: [
-      { href: "/close", label: "Close dashboard", hint: "all pillars" },
-      { href: "/close/reconciliations", label: "Reconciliations", hint: "BS tie-out" },
-      { href: "/close/alerts", label: "Alerts", hint: "cross-pillar" },
-      { href: "/close/flux", label: "Flux analysis", hint: "variance" },
-      { href: "/close/retrospective", label: "Retrospective", hint: "trend" },
-    ],
-  },
-];
-
-const ADMIN_SECTION: NavSection = {
-  label: "Admin",
-  items: [
-    { href: "/admin/users", label: "Users" },
-    { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
-  ],
-  more: [
-    { href: "/admin/orphans", label: "Orphan records", hint: "ownership" },
-    { href: "/admin/notification-channels", label: "Slack channels", hint: "alerts" },
-  ],
-};
-
-/** The one action repeated most; isolated on purpose (Von Restorff). */
-const PRIMARY_ACTION: NavItem = { href: "/journal-entries/new", label: "New entry" };
+// The nav data lives in one place (catalog.ts) so the sidebar and the ⌘K
+// command palette can't drift. This file owns the rendering + the Laws-of-UX
+// rationale above; the catalog owns the destinations.
+import {
+  ADMIN_SECTION,
+  NAV_SECTIONS,
+  PRIMARY_ACTION,
+  type NavItem,
+} from "@/components/nav/catalog";
 
 function NavLink({
   item,
@@ -207,7 +112,7 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const activePath = currentPath ?? pathname;
-  const visibleSections = isAdmin ? [...sections, ADMIN_SECTION] : sections;
+  const visibleSections = isAdmin ? [...NAV_SECTIONS, ADMIN_SECTION] : NAV_SECTIONS;
   const actionActive = activePath === PRIMARY_ACTION.href;
 
   return (
