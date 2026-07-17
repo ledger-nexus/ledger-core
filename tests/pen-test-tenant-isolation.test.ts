@@ -246,6 +246,11 @@ afterAll(async () => {
   for (const tid of [tenantA?.id, tenantB?.id]) {
     if (!tid) continue;
     await prisma.bankTransaction.deleteMany({ where: { tenantId: tid } });
+    // Learned merchant→category rules FK to categoryAccountId, so they must
+    // go before the accounts below — the categorize happy-path test creates
+    // one, and a leaked account (translationCategory NULL, code startsWith
+    // "ACME") otherwise poisons the fx-translation-category dev-DB scan.
+    await prisma.bankRule.deleteMany({ where: { tenantId: tid } });
     await prisma.arApplication.deleteMany({ where: { openItem: { tenantId: tid } } });
     await prisma.apApplication.deleteMany({ where: { openItem: { tenantId: tid } } });
     await prisma.arOpenItem.deleteMany({ where: { tenantId: tid } });
