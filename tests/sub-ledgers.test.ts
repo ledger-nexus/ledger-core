@@ -12,10 +12,11 @@
 //
 // Now the suite mints a dedicated per-run tenant + entity (unique
 // suffix) and scopes every delete to that tenant. Entity codes are
-// only unique per tenant; the read helpers used here (openArBalance,
-// openApBalance, netBookValue, runDepreciation) filter by entity code
-// alone, so the per-run-unique code is what makes those lookups
-// deterministic. Reports take an explicit tenantId pin.
+// only unique per tenant, so every call that resolves one takes an
+// explicit tenantId pin: the posting engine, the reports, and the
+// AR/AP balance helpers (#260 added the trailing param). netBookValue
+// and runDepreciation still filter by entity code alone — the
+// per-run-unique code is what keeps those deterministic.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
@@ -351,7 +352,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
     });
     expect(item.id).toBeTruthy();
 
-    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP", tenantId);
     expect(openBal.equals(new Decimal(1_000))).toBe(true);
 
     // AR control account balance from the BS should match.
@@ -403,7 +404,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
     expect(applied.status).toBe("PARTIAL");
     expect(applied.remainingBalance.equals(new Decimal(600))).toBe(true);
 
-    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP", tenantId);
     const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-02-28"));
     const arRow = bs.assets.find((a) => a.code === "1200");
     expect(openBal.equals(arRow!.amount)).toBe(true);
@@ -450,7 +451,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
     expect(applied.status).toBe("APPLIED");
     expect(applied.remainingBalance.equals(new Decimal(0))).toBe(true);
 
-    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP", tenantId);
     expect(openBal.equals(new Decimal(0))).toBe(true);
   });
 
@@ -524,7 +525,7 @@ describe("AP sub-ledger: open-item lifecycle", () => {
     });
     expect(item.id).toBeTruthy();
 
-    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP", tenantId);
     const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-04-30"));
     const apRow = bs.liabilities.find((l) => l.code === "2000");
     expect(apRow).toBeDefined();
@@ -571,7 +572,7 @@ describe("AP sub-ledger: open-item lifecycle", () => {
     });
     expect(applied.status).toBe("APPLIED");
 
-    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP", tenantId);
     expect(openBal.equals(new Decimal(0))).toBe(true);
   });
 });
