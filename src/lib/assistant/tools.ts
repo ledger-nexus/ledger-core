@@ -150,16 +150,12 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "get_book_tax_difference",
     description:
-      "Compare this book against the tax book for a date range: book vs tax net income, total difference, and the permanent/temporary split (ASC 740 flavor). Use this for 'book vs tax', 'what are my book-tax differences', 'taxable income vs book income'.",
+      "Compare the current book against its tax counterpart for a date range: book vs tax net income, total difference, and the permanent/temporary split (ASC 740 flavor). The comparison book is fixed by the session (US_GAAP↔US_TAX) — you do not choose it. Use this for 'book vs tax', 'what are my book-tax differences', 'taxable income vs book income'.",
     input_schema: {
       type: "object",
       properties: {
         from: DATE_PROP,
         to: DATE_PROP,
-        taxBookCode: {
-          type: "string",
-          description: "The tax-basis book code. Defaults to US_TAX.",
-        },
       },
       required: ["from", "to"],
       additionalProperties: false,
@@ -554,29 +550,32 @@ export async function executeTool(
       const from = parseDate(String(input.from ?? ""));
       const to = parseDate(String(input.to ?? ""));
       if (!from || !to) return { error: "from and to must both be YYYY-MM-DD." };
-      const taxBookCode =
-        typeof input.taxBookCode === "string" && input.taxBookCode.trim()
-          ? input.taxBookCode.trim()
-          : "US_TAX";
-
-      // The comparison book is model-chosen, so never trust it directly:
-      // constrain it to a server-derived allowlist — the books this
-      // (tenant, entity) actually posts into. `Book` is a global platform
-      // table, so an unrestricted code would let the model name any book
-      // and read a second book beyond the one granted in the assistant
-      // scope. Bounding to books the entity uses keeps the read authorized.
-      const usedBooks = await prisma.journalEntry.findMany({
-        where: { tenantId: scope.tenantId, entity: { code: scope.entityCode } },
-        distinct: ["bookId"],
-        select: { book: { select: { code: true } } },
-      });
-      const allowed = new Set(usedBooks.map((b) => b.book.code));
-      if (!allowed.has(taxBookCode)) {
+      // The comparison book is SERVER-derived, never model-controlled. The
+      // session grants exactly ONE book, and "the entity has activity in
+      // book X" proves existence, NOT authorization — so we do not let the
+      // model (nor journal-entry activity) pick the second book. Book-tax
+      // difference compares the GAAP book against the TAX book, so the
+      // counterpart is fixed by the granted book; any `taxBookCode` the
+      // model supplies is ignored.
+      const COUNTERPART: Record<string, string> = {
+        US_GAAP: "US_TAX",
+        US_TAX: "US_GAAP",
+      };
+      const taxBookCode = COUNTERPART[scope.bookCode];
+      if (!taxBookCode) {
         return {
-          error:
-            `Book '${taxBookCode}' has no activity for this entity, so there's ` +
-            `nothing to compare. Books in use: ${[...allowed].sort().join(", ") || "none"}.`,
+          error: `Book-tax difference compares US_GAAP against US_TAX; the current book (${scope.bookCode}) has no defined tax counterpart.`,
         };
+      }
+      // Graceful guard if the platform book row isn't set up. This is book
+      // EXISTENCE (a global platform table), not activity — it does not
+      // authorize a wider read; the counterpart is already server-fixed.
+      const counterpart = await prisma.book.findUnique({
+        where: { code: taxBookCode },
+        select: { id: true },
+      });
+      if (!counterpart) {
+        return { error: `No ${taxBookCode} book is set up to compare against.` };
       }
 
       const btd = await getBookTaxDifference(prisma as PrismaClient, {

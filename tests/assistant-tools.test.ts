@@ -260,20 +260,22 @@ describe.skipIf(!HAS_DB)("ask-your-ledger tool executor", () => {
     expect(r.totalDelta).toBe("-300.00"); // book − tax
   });
 
-  it("get_book_tax_difference refuses a comparison book the entity never posts to", async () => {
-    // The comparison book is model-chosen and `Book` is a global table, so
-    // it must be bounded to a server-derived allowlist — the books this
-    // entity actually uses. ASKQ_ENT posts only to US_GAAP + US_TAX, so a
-    // request for IFRS is refused rather than reading a second book beyond
-    // the one granted in the assistant scope.
+  it("get_book_tax_difference IGNORES a model-supplied book (no widening)", async () => {
+    // The comparison book is SERVER-derived, not model-chosen: the session
+    // grants US_GAAP, so the counterpart is always US_TAX. Even when the
+    // model tries to widen to IFRS, the tool compares US_GAAP↔US_TAX and
+    // returns the same result — "the entity has IFRS activity" would prove
+    // existence, never authorization, so it can't influence the read.
     const r = (await executeTool(
       prisma,
       scope,
       "get_book_tax_difference",
       { from: "2026-01-01", to: "2026-12-31", taxBookCode: "IFRS" },
       AS_OF
-    )) as { error?: string };
-    expect(r.error).toMatch(/no activity/);
+    )) as { bookCode: string; taxBookCode: string; totalDelta: string };
+    expect(r.bookCode).toBe("US_GAAP");
+    expect(r.taxBookCode).toBe("US_TAX"); // NOT IFRS — model input ignored
+    expect(r.totalDelta).toBe("-300.00");
   });
 
   it("scopes reads to the granted tenant/entity — a foreign entity code is not honored", async () => {
