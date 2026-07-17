@@ -6,7 +6,10 @@ Running log of where this project is, what's next, and key decisions. Updated at
 
 ## Where we are
 
-**Last updated:** 2026-06-10
+**Last updated:** 2026-07-17
+
+**2026-07-17 — Codex external-review remediation (PRs #269/#270/#271):** closed all 8 findings from an AI code review of `main@0cb47d4`, each verified against source before fixing. Critical: the dashboard read the raw `lc-scope` cookie (`getScope()`) and fed unverified `entityCode` into report calls + ~12 Prisma queries — a cross-tenant read leak, now pinned to a tenant-verified `getCurrentScope()`. High/Med: the ask-your-ledger `get_book_tax_difference` tool accepted a model-chosen comparison book (now allowlisted to books the entity uses); bank-feed categorize/exclude/match were tenant-only (now entity+book pinned) with a categorize double-post race (now an atomic FOR_REVIEW claim) and a match claim race (now `postedEntryId @unique`, migration 0023). AGENTS.md's intentional exceptions (RLS Phase 1, shared `entityId=null` accounts, legacy `postJournalEntry` fallback) were preserved. **Deploy note:** migration 0023 needs `prisma db push` on prod + personal-books; it does not auto-deploy.
+
 
 **Current state:** **Multi-currency revaluation shipped (v1.25) — the deferred queue is empty.** Period-end ASC 830 / IAS 21 remeasurement of foreign-currency monetary balances at the CLOSE rate: `Account.isMonetary` + `resolveFxRate` (PR 1), `computeRevaluation` engine over GL + AR/AP open items (PR 2), `postRevaluation` posting the adjustment + an auto-reversal next period (PR 3), and `/reports/fx-revaluation` with a tenant-admin "Post revaluation" gate (PR 4). Posts `source=AI_APPROVED` behind human approval. Before this, the Slack notifier completed through v1.24 (immediate + daily-digest cadences).
 
