@@ -77,9 +77,14 @@ export default async function MonthEndPage({
     );
   }
 
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  // Phase 4b: entity code is unique only per [tenantId, code], so the
+  // lookup MUST pin the tenant. `scope` is already tenant-verified by
+  // resolveCurrentScope(), but a bare findFirst({ where: { code } })
+  // could still resolve a DIFFERENT tenant's entity when codes collide
+  // — the same cross-tenant read-leak class fixed on the dashboard in
+  // PR #269 (Codex #1).
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode },
+    where: { tenantId: scope.tenantId, code: scope.entityCode },
     select: { id: true, code: true, name: true },
   });
   const book = await prisma.book.findUnique({
