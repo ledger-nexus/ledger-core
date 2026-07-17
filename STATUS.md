@@ -32,6 +32,12 @@ _No active claims._
 
 ## Recent completions
 
+### Session month-end-tenant-pin · 2026-07-17 (commit `5c8a704`)
+- **Scope**: The follow-up flagged in the codex-findings block below (⚠️ #2). `src/app/reports/month-end/page.tsx` re-resolved the entity with an un-tenant-pinned `legalEntity.findFirst({ where: { code } })` after `resolveCurrentScope()` — entity codes are unique only per `(tenantId, code)` (Phase 4b), so a code collision could resolve a DIFFERENT tenant's entity, and `entity.id` feeds the periodClose lookups, the three report calls, and the recon rollup. Fixed to `where: { tenantId: scope.tenantId, code: scope.entityCode }` (Codex #1 dashboard class, PR #269).
+- **Swept siblings**: `src/app/reports/**/page.tsx` — month-end was the ONLY page with the un-pinned findFirst-by-code. The other 10 resolve via `getCurrentScope()` (tenant-verified) and pass `scope.tenantId` downstream; `ar-aging`/`ap-aging`'s secondary `arOpenItem`/`apOpenItem.findMany` already pin `tenantId` at the top level of `where`.
+- **Branch**: `claude/festive-ramanujan-730aa2` (PR against main)
+- **Outcome**: `npx tsc --noEmit` clean. No local DB suite / `db push` (this clone holds real books — ⛔; CI runs the suite). One-line UI read-path fix; no schema/product-behavior change.
+
 ### Session codex-findings · 2026-07-17 (PRs #269 / #270 / #271)
 - **Scope**: Remediated all 8 Codex review findings on `main@0cb47d4`, verified against code first (no finding taken on trust), across 3 merged PRs. **#269** (Critical dashboard cross-tenant leak + Low Decimal-sign): `page.tsx` now resolves `getCurrentScope()` and pins every read to `(tenantId, entityId)`; `netBookValue` / `checkSubledgerTies` / `findControlAccount` / `sumControlAccountBalance` gained an optional `tenantId`; month-end passes it too. **#270** (High assistant book-widening + Med activity tenant-pin + Low date round-trip): `get_book_tax_difference` bounds the comparison book to a server-derived allowlist of books the entity uses; `get_account_activity` pins `tenantId` directly; `parseDate` rejects calendar-invalid dates (2026-02-30). **#271** (High bank-feed cross-entity IDOR + High categorize TOCTOU + Med match race): categorize/exclude/match pin `entityId`+book; categorize/exclude use a conditional FOR_REVIEW `updateMany` claim; `postedEntryId` is now `@unique` (migration 0023) with match mapping P2002 → "already matched".
 - **Preserved (per AGENTS.md)**: RLS Phase 1 inert, shared `entityId=null` accounts, and the documented legacy `postJournalEntry` fallback — none touched.
