@@ -1,100 +1,117 @@
-// The assistant's read-only guarantee is capability-enforced, not just
-// conventional: readOnlyDb wraps a Prisma client so mutations throw. This
-// is DB-free — it drives a mock client, so it runs in every environment.
+// The assistant's read-only guarantee is capability-enforced by an ALLOWLIST:
+// only pure read delegate methods pass; every `$` client method and every
+// other delegate function is rejected. DB-free — drives a mock client, so it
+// runs everywhere.
 
 import { describe, it, expect } from "vitest";
 import { readOnlyDb, ReadOnlyViolationError } from "@/lib/assistant/read-only-db";
 
+const READ_METHODS = [
+  "findUnique",
+  "findUniqueOrThrow",
+  "findFirst",
+  "findFirstOrThrow",
+  "findMany",
+  "count",
+  "aggregate",
+  "groupBy",
+] as const;
+
 function mockPrisma() {
+  const ranReal = () => {
+    throw new Error("the real (non-read) method ran — the port did not block it");
+  };
   return {
     account: {
-      findMany: async () => [{ code: "1000" }],
+      // reads — allowlisted
+      findUnique: async () => ({ code: "1000" }),
+      findUniqueOrThrow: async () => ({ code: "1000" }),
       findFirst: async () => ({ code: "1000" }),
+      findFirstOrThrow: async () => ({ code: "1000" }),
+      findMany: async () => [{ code: "1000" }],
       count: async () => 1,
       aggregate: async () => ({ _sum: { debit: 0 } }),
       groupBy: async () => [],
-      // These must never actually run through the read-only port.
-      create: async () => {
-        throw new Error("real create ran");
-      },
-      update: async () => {
-        throw new Error("real update ran");
-      },
-      updateMany: async () => {
-        throw new Error("real updateMany ran");
-      },
-      delete: async () => {
-        throw new Error("real delete ran");
-      },
-      deleteMany: async () => {
-        throw new Error("real deleteMany ran");
-      },
-      upsert: async () => {
-        throw new Error("real upsert ran");
-      },
+      // writes + a hypothetical future method — must be blocked
+      create: ranReal,
+      update: ranReal,
+      updateMany: ranReal,
+      delete: ranReal,
+      deleteMany: ranReal,
+      upsert: ranReal,
+      someFutureMethod: ranReal,
+      // non-function metadata — passes through untouched
+      fields: { code: { name: "code" } },
     },
-    $queryRaw: async () => [{ n: 1 }],
-    $queryRawUnsafe: async () => {
-      throw new Error("real $queryRawUnsafe ran");
-    },
-    $executeRaw: async () => {
-      throw new Error("real $executeRaw ran");
-    },
-    $transaction: async () => {
-      throw new Error("real $transaction ran");
-    },
+    // Every `$` client method must be rejected, including $extends (which
+    // would otherwise hand back an UNWRAPPED, writable client) and the raw
+    // families in all their spellings.
+    $extends: (_ext?: unknown) => ({ account: { create: ranReal } }),
+    $transaction: ranReal,
+    $executeRaw: ranReal,
+    $executeRawUnsafe: ranReal,
+    $executeRawInternal: ranReal,
+    $queryRaw: ranReal,
+    $queryRawUnsafe: ranReal,
+    $queryRawTyped: ranReal,
+    $connect: ranReal,
   };
 }
 
-describe("readOnlyDb — capability-enforced read-only", () => {
-  it("passes model reads through unchanged", async () => {
+describe("readOnlyDb — allowlist-enforced read-only", () => {
+  it("passes every allowlisted read method through", async () => {
     const db = readOnlyDb(mockPrisma());
+    for (const m of READ_METHODS) {
+      // Each returns without throwing.
+      await (db.account[m] as () => Promise<unknown>)();
+    }
     expect(await db.account.findMany()).toEqual([{ code: "1000" }]);
-    expect(await db.account.findFirst()).toEqual({ code: "1000" });
     expect(await db.account.count()).toBe(1);
-    expect(await db.account.aggregate()).toEqual({ _sum: { debit: 0 } });
-    expect(await db.account.groupBy()).toEqual([]);
   });
 
-  it("blocks raw SQL — $queryRaw / $queryRawUnsafe throw (data-modifying CTE vector)", () => {
-    // A `query` can mutate via `WITH x AS (UPDATE ... RETURNING ...) SELECT`,
-    // so raw query methods are NOT a safe read boundary and must be blocked
-    // alongside $executeRaw.
+  it("passes non-function delegate metadata through (e.g. .fields)", () => {
     const db = readOnlyDb(mockPrisma());
-    expect(() => db.$queryRaw()).toThrow(ReadOnlyViolationError);
-    expect(() => db.$queryRawUnsafe()).toThrow(ReadOnlyViolationError);
+    expect(db.account.fields).toEqual({ code: { name: "code" } });
   });
 
-  it("throws on every model write method — never runs the real one", () => {
+  it("blocks $extends — no unwrapped, writable client escapes", () => {
     const db = readOnlyDb(mockPrisma());
-    for (const method of [
-      "create",
-      "update",
-      "updateMany",
-      "delete",
-      "deleteMany",
-      "upsert",
+    expect(() => db.$extends({})).toThrow(ReadOnlyViolationError);
+  });
+
+  it("blocks the whole raw-SQL family + $transaction (every spelling)", () => {
+    const db = readOnlyDb(mockPrisma());
+    for (const m of [
+      "$executeRaw",
+      "$executeRawUnsafe",
+      "$executeRawInternal",
+      "$queryRaw",
+      "$queryRawUnsafe",
+      "$queryRawTyped",
+      "$transaction",
+      "$connect",
     ] as const) {
-      expect(() => (db.account[method] as () => unknown)()).toThrow(
-        ReadOnlyViolationError
-      );
+      expect(() => (db[m] as () => unknown)()).toThrow(ReadOnlyViolationError);
     }
   });
 
-  it("throws on $executeRaw and $transaction", () => {
+  it("blocks model write methods", () => {
     const db = readOnlyDb(mockPrisma());
-    expect(() => db.$executeRaw()).toThrow(ReadOnlyViolationError);
-    expect(() => db.$transaction()).toThrow(ReadOnlyViolationError);
+    for (const m of ["create", "update", "updateMany", "delete", "deleteMany", "upsert"] as const) {
+      expect(() => (db.account[m] as () => unknown)()).toThrow(ReadOnlyViolationError);
+    }
   });
 
-  it("still passes typed model reads through (findMany/count unaffected)", async () => {
+  it("blocks an unknown/future delegate method (default-deny)", () => {
     const db = readOnlyDb(mockPrisma());
-    expect(await db.account.findMany()).toEqual([{ code: "1000" }]);
-    expect(await db.account.count()).toBe(1);
+    expect(() => (db.account.someFutureMethod as () => unknown)()).toThrow(
+      ReadOnlyViolationError
+    );
   });
 
   it("names the blocked op in the error", () => {
     const db = readOnlyDb(mockPrisma());
-    expect(() => db.account.create()).toThrow(/account\.create/);
+    expect(() => (db.account.create as () => unknown)()).toThrow(/account\.create/);
+    expect(() => db.$extends({})).toThrow(/\$extends/);
   });
 });
