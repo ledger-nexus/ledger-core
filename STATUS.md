@@ -33,13 +33,6 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Branch:** `laws-of-ux-nav` (worktree; shared checkout untouched)
 - **Until:** PR merged
 
-### Session askq-flake-triage · started 2026-07-16 21:30 · heartbeat 21:45
-
-- **Scope**: `tests/assistant-tools.test.ts`. The reported unscoped-entity flake was ALREADY fixed by #260 (`3c7804c`) — writes and reads both pin `scope.tenantId`. #260 introduced a NEW deterministic break: `beforeAll`'s `user.deleteMany` trips the audit_log append-only rule via the `actorUserId` FK, so every rerun against a reused DB dies (CI's fresh container hides it). Fix: upsert the fixture user
-- **Files / globs**: `tests/assistant-tools.test.ts`, `STATUS.md`
-- **Branch**: `claude/amazing-nightingale-a4e30f`
-- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/amazing-nightingale-a4e30f`
-
 ### Session po-collision-fix · started 2026-07-16 21:10 · heartbeat 21:25
 
 - **Scope**: fix PR #262's migration-ordinal collision — two `0017_` directories on the branch (`0017_po_allocation_columns` vs main's `0017_ns_iselimination_entity_column`); rename to `0022_`
@@ -50,6 +43,16 @@ than 60 minutes, other sessions may consider your claim stale.
 ---
 
 ## Recent completions
+
+### Session askq-flake-triage · 2026-07-16 (commit `4f6df08`)
+- **Scope**: `tests/assistant-tools.test.ts` — fixture user is now upserted instead of delete-and-recreated.
+- **Triage correction**: the reported flake (`expected '0.00' to be '24700.00'`, unscoped `legalEntity.findFirst` picking the wrong `ASKQ_ENT` twin) was ALREADY fixed by #260 (`3c7804c`, merged 19:13) — `post()`/`postFixtures()` pin `scope.tenantId` and the reads resolve on `tenantId` + `entity.code`, so writes and reads agree. The residue attribution in the brief was also wrong: `/Users/hosungson/personal-books/app` is a second clone of THIS repo whose only `.env` points at a different Neon DB (`ep-fancy-dream` vs our `ep-misty-resonance`), and its copy of the suite is byte-identical to ours — the `askq-test` tenant is this suite's own dedicated fixture, by design. The `default`-tenant `ASKQ_ENT` twin was created at 21:02 local, ~2h AFTER the `askq-test` one and AFTER #260 merged: stale residue from a pre-#260 run, not a live writer.
+- **Real bug found**: #260 introduced a deterministic `beforeAll` failure. `user.deleteMany` hard-deletes an `app_user`, which makes Postgres run the `audit_log_actorUserId_fkey` referential action; migration 0015's append-only rule rewrites it to NOTHING → `XX000 referential integrity query ... gave unexpected result`. A no-match `deleteMany` skips the FK check, so the FIRST run on a fresh DB passes (CI's service container) and EVERY rerun against the shared dev DB dies (1 passed / 12 skipped). Same class as the `tests/tenant-context.test.ts` flake noted at PROJECT_STATUS.md:189.
+- **Why upsert over `withAuditLogMutable`**: the helper DROPs the append-only rules DB-wide; on the shared dev DB that briefly disarms a control other concurrent suites assert. Upsert is idempotent and matches `tests/tenant-account-resolution.test.ts`, which reuses a fixture user rather than churning `app_user` rows.
+- **Considered and declined**: per-run unique tenant + entity code. With `tenantId` pinned on both sides it buys no correctness, and `Tenant` has no `createdAt`, so a `askq-test-*` prefix scrub couldn't be age-gated — it would delete a CONCURRENT checkout's tenant, making cross-session runs more hostile, not less.
+- **Note**: running the suite executes its own global `ASKQ_ENT` scrub, which removed both twins (incl. the `default`-tenant residue) during verification. That is the committed suite's designed behavior, not a manual delete; it recreates its fixtures each run.
+- **Branch**: `claude/amazing-nightingale-a4e30f` (PR against main)
+- **Outcome**: 13/13 on 3 consecutive runs incl. reruns against an already-dirtied DB (the failing condition); full `npm test` green — 130 files / 1076 tests / 0 failures; tsc clean. Test-hygiene only; no product change.
 
 ### Session po-upstream · 2026-07-16
 - **Scope**: upstream performance_obligation ASC 606 allocation columns (allocatedAmount, allocationMethod, fairValueMethod, quantity + 2 enums) from revenue-rec PR #17 into ledger-core's schema + migration 0022
