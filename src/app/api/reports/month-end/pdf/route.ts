@@ -35,9 +35,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
   }
 
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  // Resolve by the already-verified entityId from the session scope — never
+  // by code alone (a colliding code in another tenant would render their
+  // entity identity + period metadata).
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode },
+    where: { id: scope.entityId, tenantId: scope.tenantId },
     select: { id: true, code: true, name: true },
   });
   const book = await prisma.book.findUnique({
@@ -52,7 +54,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const allPeriods = await prisma.period.findMany({
-    where: { calendar: { entityId: entity.id } },
+    where: { tenantId: scope.tenantId, calendar: { entityId: entity.id } },
     orderBy: { startsOn: "desc" },
     select: { id: true, code: true, startsOn: true, endsOn: true },
   });

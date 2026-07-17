@@ -101,7 +101,11 @@ export default async function MonthEndPage({
   }
 
   // Resolve the period either from ?period= or the auto-selected default.
+  // Scoped to THIS tenant's entity calendar — an unfiltered findMany would
+  // return every tenant's periods (their codes + dates) and could feed a
+  // foreign period's dates into this tenant's reports.
   const allPeriods = await prisma.period.findMany({
+    where: { tenantId: scope.tenantId, calendar: { entityId: entity.id } },
     orderBy: { startsOn: "desc" },
     select: { id: true, code: true, startsOn: true, endsOn: true },
   });
@@ -147,18 +151,18 @@ export default async function MonthEndPage({
   const [tb, is, bs, subledgerTies, reconRollup] = await Promise.all([
     getTrialBalance(
       prisma,
-      { entityCode: entity.code, bookCode: book.code },
+      { entityCode: entity.code, bookCode: book.code, tenantId: scope.tenantId },
       selectedPeriod.endsOn
     ),
     getIncomeStatement(
       prisma,
-      { entityCode: entity.code, bookCode: book.code },
+      { entityCode: entity.code, bookCode: book.code, tenantId: scope.tenantId },
       selectedPeriod.startsOn,
       selectedPeriod.endsOn
     ),
     getBalanceSheet(
       prisma,
-      { entityCode: entity.code, bookCode: book.code },
+      { entityCode: entity.code, bookCode: book.code, tenantId: scope.tenantId },
       selectedPeriod.endsOn
     ),
     checkSubledgerTies(prisma, {
