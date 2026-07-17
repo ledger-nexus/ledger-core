@@ -455,6 +455,120 @@ describe("matchBankTransactionAction — auth + tenant scope", () => {
   });
 });
 
+describe("bank-feed — entity pin, atomic claim, posted-entry uniqueness (Codex #3/#4/#5)", () => {
+  const bookId = async () =>
+    (await prisma.book.findUniqueOrThrow({ where: { code: "US_GAAP" }, select: { id: true } })).id;
+  const cashAId = async () =>
+    (
+      await prisma.account.findFirstOrThrow({
+        where: { tenantId: tenantA.id, code: "1000", entityId: entityIdA },
+        select: { id: true },
+      })
+    ).id;
+  const mkLine = async (opts: {
+    entityId: string;
+    bankAccountId: string;
+    tag: string;
+    amount?: string;
+  }) =>
+    (
+      await prisma.bankTransaction.create({
+        data: {
+          tenantId: tenantA.id,
+          entityId: opts.entityId,
+          bookId: await bookId(),
+          bankAccountId: opts.bankAccountId,
+          postedDate: new Date("2026-05-21"),
+          description: `PEN ${opts.tag}`,
+          amount: opts.amount ?? "-15.0000",
+          dedupeHash: `pen-${opts.tag}-${SUFFIX}`,
+          status: "FOR_REVIEW",
+        },
+        select: { id: true },
+      })
+    ).id;
+
+  it("#3 refuses a sibling-entity line in the same tenant (pins entityId, not just tenantId)", async () => {
+    // A line imported under a DIFFERENT entity in the SAME tenant must not be
+    // categorizable while the session is scoped to ACME. Before the fix the
+    // load matched on {id, tenantId} only, so this line would load and its JE
+    // would post into the caller's (ACME) scope — cross-entity contamination.
+    const acme2 = await prisma.legalEntity.create({
+      data: { tenantId: tenantA.id, code: `ACME2-${SUFFIX}`, name: "ACME2 (A)", functionalCurrencyId: "USD" },
+    });
+    await prisma.account.create({
+      data: { tenantId: tenantA.id, entityId: acme2.id, code: "1000", name: "Cash2", type: "ASSET", normalBalance: "DEBIT", isBank: true },
+    });
+    const cash2 = await prisma.account.findFirstOrThrow({
+      where: { tenantId: tenantA.id, entityId: acme2.id, code: "1000" },
+      select: { id: true },
+    });
+    const foreign = await mkLine({ entityId: acme2.id, bankAccountId: cash2.id, tag: "acme2" });
+
+    signInAs(tenantA); // scoped to ACME (entityIdA), NOT ACME2
+    const fd = new FormData();
+    fd.set("id", foreign);
+    fd.set("categoryAccountCode", "6000");
+    const r = await categorizeBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/not found/i);
+    const still = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: foreign } });
+    expect(still.status).toBe("FOR_REVIEW"); // untouched
+  });
+
+  it("#4 categorizes once and refuses a re-submit (atomic FOR_REVIEW claim)", async () => {
+    const line = await mkLine({ entityId: entityIdA, bankAccountId: await cashAId(), tag: "happy" });
+    signInAs(tenantA);
+    const before = await prisma.journalEntry.count({ where: { tenantId: tenantA.id } });
+
+    const fd = new FormData();
+    fd.set("id", line);
+    fd.set("categoryAccountCode", "6000");
+    const first = await categorizeBankTransactionAction({}, fd);
+    expect(first.ok).toBe(true);
+    const mid = await prisma.journalEntry.count({ where: { tenantId: tenantA.id } });
+    expect(mid).toBe(before + 1); // exactly one JE posted
+    const posted = await prisma.bankTransaction.findUniqueOrThrow({
+      where: { id: line },
+      select: { status: true, postedEntryId: true },
+    });
+    expect(posted.status).toBe("CATEGORIZED");
+    expect(posted.postedEntryId).not.toBeNull();
+
+    // Re-submit (double-click / retry): the row is no longer FOR_REVIEW, so
+    // the conditional claim matches 0 rows and no second JE posts.
+    const second = await categorizeBankTransactionAction({}, fd);
+    expect(second.ok).toBe(false);
+    if (second.ok === false) expect(second.error).toMatch(/already/i);
+    expect(await prisma.journalEntry.count({ where: { tenantId: tenantA.id } })).toBe(mid);
+  });
+
+  it("#5 rejects a second bank line pointing at the same posted entry (unique index)", async () => {
+    // The DB backstop for the match race: two feed lines cannot both claim
+    // one entry. Nullable-unique → unclaimed lines (postedEntryId NULL) are
+    // unconstrained; a second NON-null link to the same entry fails P2002.
+    const cash = await cashAId();
+    const je = await postJournalEntry(prisma, {
+      tenantId: tenantA.id,
+      entityCode: "ACME",
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-05-22"),
+      memo: "unique-index target",
+      source: "MANUAL",
+      lines: [
+        { accountCode: "1000", credit: "5" },
+        { accountCode: "6000", debit: "5" },
+      ],
+    });
+    const l1 = await mkLine({ entityId: entityIdA, bankAccountId: cash, tag: "uniq1", amount: "-5.0000" });
+    const l2 = await mkLine({ entityId: entityIdA, bankAccountId: cash, tag: "uniq2", amount: "-5.0000" });
+    await prisma.bankTransaction.update({ where: { id: l1 }, data: { postedEntryId: je.id } });
+    await expect(
+      prisma.bankTransaction.update({ where: { id: l2 }, data: { postedEntryId: je.id } })
+    ).rejects.toMatchObject({ code: "P2002" });
+  });
+});
+
 describe("applyApPaymentAction — auth + tenant scope", () => {
   it("refuses an anonymous POST (was: anonymous AP payment)", async () => {
     signOut();
