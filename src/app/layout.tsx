@@ -22,14 +22,22 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const scope = getScope();
+  // The user switcher is the LOCAL-DEV auth stub (impersonate any seeded
+  // user). Under Clerk (production auth) it must not exist — and we must
+  // NOT fetch the global user list at all, or every tenant's user ids,
+  // names, and emails would be serialized into the client bundle. Only
+  // query it in dev-stub mode.
+  const clerkOn = isClerkEnabled();
   const [currentUser, currentTenant, users] = await Promise.all([
     getCurrentUser(),
     getCurrentTenant(),
-    prisma.user.findMany({
-      where: { isActive: true },
-      select: { id: true, email: true, displayName: true },
-      orderBy: { displayName: "asc" },
-    }),
+    clerkOn
+      ? Promise.resolve<{ id: string; email: string; displayName: string }[]>([])
+      : prisma.user.findMany({
+          where: { isActive: true },
+          select: { id: true, email: true, displayName: true },
+          orderBy: { displayName: "asc" },
+        }),
   ]);
   // Notifications are user-scoped — empty when there's no logged-in user.
   const notifications = currentUser
@@ -94,13 +102,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 {/* Each switcher owns its own Card so it can render
                     nothing at all when there's nothing to switch. */}
                 <TenantSwitcher />
-                <div className="w-56">
-                  <Card className="shadow-none">
-                    <CardContent className="px-3 py-2">
-                      <UserSwitcher currentUserId={currentUser?.id ?? null} options={users} />
-                    </CardContent>
-                  </Card>
-                </div>
+                {/* Dev-stub user switcher only — hidden entirely under Clerk,
+                    where impersonating another account is not a thing and the
+                    user list isn't fetched. */}
+                {!clerkOn && (
+                  <div className="w-56">
+                    <Card className="shadow-none">
+                      <CardContent className="px-3 py-2">
+                        <UserSwitcher currentUserId={currentUser?.id ?? null} options={users} />
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
                 <BookSwitcher scope={scope} />
               </div>
             </header>
