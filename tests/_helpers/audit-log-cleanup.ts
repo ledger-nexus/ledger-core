@@ -14,9 +14,19 @@
 // callback still re-arms the rules. Tests should NEVER skip the
 // finally block.
 //
-// Production code MUST NOT import this helper. It's gated to
-// NODE_ENV !== "production" to prevent that mistake. The test
-// runner sets NODE_ENV=test so this works in CI.
+// Production code MUST NOT import this helper. It's gated on TWO checks:
+//
+//   1. NODE_ENV !== "production" — blocks production code paths.
+//   2. assertDisposableTestDatabase() — NODE_ENV=test alone does NOT prove
+//      the CONNECTED database is disposable (a developer could run tests
+//      with NODE_ENV=test against a shared or staging DB). Because this
+//      helper suspends audit_log's append-only rules + parent FKs via DDL,
+//      it refuses to run unless the database is recognizably a throwaway
+//      test DB (loopback host, a "test"/"ephemeral" name, or the explicit
+//      AUDIT_LOG_DDL_ALLOW=1 opt-in). This protects real audit data.
+//
+// The test runner sets NODE_ENV=test; CI's DB (mini_ledger_test on
+// localhost) satisfies the DB guard on both the host and the name.
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 
@@ -24,6 +34,30 @@ const ROLE_GATE =
   process.env.NODE_ENV === "production"
     ? "Production code cannot use the audit-log cleanup escape hatch."
     : null;
+
+/**
+ * Refuse to run the DDL-based escape hatch unless the connected database is
+ * recognizably disposable. Read at call time (not module load) so it sees
+ * the DATABASE_URL the test process actually connected with.
+ */
+function assertDisposableTestDatabase(): void {
+  // Explicit operator opt-in for a throwaway DB whose name/host doesn't
+  // advertise itself (e.g. a personal Neon branch used only for tests).
+  if (process.env.AUDIT_LOG_DDL_ALLOW === "1") return;
+  const url = process.env.DATABASE_URL ?? "";
+  const host = /@([^/:]+)(?::\d+)?\//.exec(url)?.[1]?.toLowerCase() ?? "";
+  const onLoopback =
+    host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "postgres";
+  const dbName = url.split("/").pop()?.split("?")[0]?.toLowerCase() ?? "";
+  const nameLooksDisposable = dbName.includes("test") || dbName.includes("ephemeral");
+  if (onLoopback || nameLooksDisposable) return;
+  throw new Error(
+    `Refusing to suspend audit_log append-only protections: DATABASE_URL ` +
+      `(db "${dbName || "unset"}"${host ? ` on ${host}` : ""}) is not recognizably a ` +
+      `disposable test database. NODE_ENV=test alone does not prove the DB is ` +
+      `throwaway. If this IS a throwaway test DB, set AUDIT_LOG_DDL_ALLOW=1.`
+  );
+}
 
 /**
  * Run a cleanup callback with the audit-log append-only rules
@@ -40,6 +74,7 @@ export async function withAuditLogMutable<T>(
   cleanup: () => Promise<T>
 ): Promise<T> {
   if (ROLE_GATE) throw new Error(ROLE_GATE);
+  assertDisposableTestDatabase();
 
   await prisma.$executeRawUnsafe(
     `DROP RULE IF EXISTS audit_log_no_update ON "audit_log"`
@@ -79,6 +114,7 @@ export async function withAuditLogMutableTransaction<T>(
   cleanup: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
   if (ROLE_GATE) throw new Error(ROLE_GATE);
+  assertDisposableTestDatabase();
 
   return prisma.$transaction(
     async (tx) => {
