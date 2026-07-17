@@ -1,61 +1,50 @@
-// Read-only Prisma port for the assistant.
+// Read-only Prisma port for the assistant — ALLOWLIST design.
 //
-// The "ask your ledger" tools only ever read — but today that's a
-// CONVENTION (the tool executors happen not to call writes), not a
-// capability. Codex's review asked for the read-only guarantee to be
-// enforced, not assumed. This wraps a PrismaClient / TransactionClient in
-// a Proxy that makes every mutation physically unreachable: model write
-// methods (create/update/delete/upsert families), ALL raw SQL, and
-// interactive transactions throw. Reads via the typed model methods
-// (findMany/findFirst/findUnique/count/aggregate/groupBy) pass straight
-// through, so the deterministic report builders the tools call still work.
+// The "ask your ledger" tools only ever read. This wraps a PrismaClient /
+// TransactionClient in a Proxy that makes every mutation physically
+// unreachable, so the read-only contract is enforced by capability, not
+// convention. A future tool that tried `prisma.journalEntry.create(...)`
+// throws here instead of posting — the "AI suggests, humans approve, the
+// system posts" boundary.
 //
-// Raw SQL is blocked outright — including $queryRaw / $queryRawUnsafe, NOT
-// just $executeRaw. Postgres can mutate from a "read" via a data-modifying
-// CTE (`WITH x AS (UPDATE ... RETURNING ...) SELECT * FROM x`), so a
-// query method is not a safe read boundary. The assistant's report builders
-// use only the typed model API and never need raw SQL.
+// This is default-DENY, not a blacklist. An earlier blacklist version was
+// unsound: `$extends` returns an UNWRAPPED client (writes bypass the port
+// entirely), and raw-SQL variants keep appearing ($executeRawInternal,
+// $queryRawTyped, …). So instead:
 //
-// A future tool that tried `prisma.journalEntry.create(...)` would throw
-// here instead of silently posting to the ledger — the whole point of the
-// "AI suggests, humans approve, the system posts" boundary.
+//   1. EVERY root property beginning with `$` is rejected — $extends,
+//      $transaction, and the whole $execute*/$query* family, including any
+//      future one. The assistant's deterministic report builders need none.
+//   2. On a model delegate, ONLY the pure read methods below are callable;
+//      every other delegate function (writes today, anything new tomorrow)
+//      throws.
 
-/** Model-delegate methods that write. */
-const WRITE_METHODS = new Set([
-  "create",
-  "createMany",
-  "createManyAndReturn",
-  "update",
-  "updateMany",
-  "updateManyAndReturn",
-  "delete",
-  "deleteMany",
-  "upsert",
-]);
-
-/**
- * Top-level client methods that can write or run arbitrary SQL. Both the
- * $execute* AND the $query* raw families are blocked: a data-modifying CTE
- * makes `$queryRaw` a write vector, so "it's a query" is not a safe read.
- */
-const BLOCKED_ROOT = new Set([
-  "$executeRaw",
-  "$executeRawUnsafe",
-  "$queryRaw",
-  "$queryRawUnsafe",
-  "$transaction",
+/** The ONLY delegate methods the assistant may call — pure reads. */
+const READ_METHODS = new Set([
+  "findUnique",
+  "findUniqueOrThrow",
+  "findFirst",
+  "findFirstOrThrow",
+  "findMany",
+  "count",
+  "aggregate",
+  "groupBy",
 ]);
 
 export class ReadOnlyViolationError extends Error {
   constructor(op: string) {
     super(
-      `Read-only assistant DB: '${op}' is a mutation and is not permitted. ` +
-        `The assistant may only read; posting flows through postJournalEntry ` +
-        `after human approval.`
+      `Read-only assistant DB: '${op}' is not an allowed read and is not ` +
+        `permitted. The assistant may only read via ${[...READ_METHODS].join(", ")}; ` +
+        `posting flows through postJournalEntry after human approval.`
     );
     this.name = "ReadOnlyViolationError";
   }
 }
+
+const throwing = (op: string) => () => {
+  throw new ReadOnlyViolationError(op);
+};
 
 /**
  * Wrap a Prisma client so the assistant cannot mutate. Returns the same
@@ -64,37 +53,36 @@ export class ReadOnlyViolationError extends Error {
 export function readOnlyDb<T extends object>(db: T): T {
   return new Proxy(db, {
     get(target, prop) {
-      const key = typeof prop === "string" ? prop : "";
-
-      // Block raw execution + interactive transactions at the root.
-      if (BLOCKED_ROOT.has(key)) {
-        return () => {
-          throw new ReadOnlyViolationError(key);
-        };
+      // Reject ALL client-level `$` methods outright ($extends, $transaction,
+      // $executeRaw*, $queryRaw*, $executeRawInternal, $queryRawTyped, and any
+      // future addition). Default-deny is what makes this robust.
+      if (typeof prop === "string" && prop.startsWith("$")) {
+        return throwing(prop);
       }
 
       const value = Reflect.get(target, prop) as unknown;
 
-      // Model delegates (prisma.account, prisma.journalEntry, …) are
-      // objects, not functions, and don't start with `$`/`_`. Wrap them so
-      // their write methods throw while reads pass through.
+      // Model delegates (prisma.account, prisma.journalEntry, …) are non-`$`
+      // objects. Wrap each so only allowlisted read methods are callable and
+      // any other function throws. Non-string keys (symbols) and internal
+      // (`_`-prefixed) props pass through untouched — Prisma's machinery needs
+      // them and they are not a delegate write surface.
       if (
         value &&
         typeof value === "object" &&
-        key &&
-        !key.startsWith("$") &&
-        !key.startsWith("_")
+        typeof prop === "string" &&
+        !prop.startsWith("_")
       ) {
         return new Proxy(value as object, {
           get(model, method) {
-            const m = typeof method === "string" ? method : "";
-            if (WRITE_METHODS.has(m)) {
-              return () => {
-                throw new ReadOnlyViolationError(`${key}.${m}`);
-              };
-            }
             const fn = Reflect.get(model, method) as unknown;
-            return typeof fn === "function" ? fn.bind(model) : fn;
+            if (typeof fn !== "function") return fn; // fields metadata, etc.
+            if (typeof method === "string" && READ_METHODS.has(method)) {
+              return fn.bind(model);
+            }
+            return throwing(
+              typeof method === "string" ? `${prop}.${method}` : prop
+            );
           },
         });
       }
