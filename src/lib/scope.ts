@@ -80,12 +80,30 @@ export const SCOPE_COOKIE_NAME = COOKIE_NAME;
  * platform-level (US_GAAP, IFRS, etc.) so it doesn't need verification,
  * but entityCode is tenant-scoped after Phase 4b and MUST be checked.
  */
-export interface CurrentScope {
+/**
+ * A tenant-VERIFIED scope. `tenantId` and `entityId` have been resolved and
+ * confirmed to belong to the current session's tenant (via getCurrentScope
+ * / resolveCurrentScope); `entityCode`/`bookCode` are presentation
+ * attributes, NOT authorization keys.
+ *
+ * This is the type tenant-facing data services should require in their
+ * signature: accepting an `AuthorizedLedgerScope` is the type-level proof
+ * that the caller resolved the scope through the verified path rather than
+ * reading a raw cookie. It makes "queried with an unverified scope" an
+ * unrepresentable state at the service boundary.
+ */
+export interface AuthorizedLedgerScope {
   tenantId: string;
   entityId: string;
   entityCode: string;
   bookCode: string;
 }
+
+/**
+ * @deprecated Prefer `AuthorizedLedgerScope` — same shape, clearer intent.
+ * Retained as an alias so existing imports keep compiling.
+ */
+export type CurrentScope = AuthorizedLedgerScope;
 
 /**
  * Resolve the request's scope against the current tenant's entities.
