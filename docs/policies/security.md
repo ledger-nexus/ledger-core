@@ -107,7 +107,7 @@ multiple sub-policies. Each one is a single source of truth.
 | Artifact | What it does | Sub-policies that reference it |
 |---|---|---|
 | `src/lib/soc2/index.ts` | SOC 2 helper module — `assertTenantScope`, `constantTimeEqual`, `redactPii`, `sanitizeError`, `auditedMutation`, etc. | access-control, change-management, data-classification, DSR |
-| `src/lib/auth/policy.ts` | 16-permission catalog × 4 roles — single source of truth for "what can a role do?" | access-control |
+| `src/lib/auth/current-user.ts`, `src/lib/auth/tenant.ts` | Auth + per-tenant role checks (`isAdmin` / `isTenantAdmin` / `requireAdmin`). A centralized `policy.ts` permission catalog is **planned, not built** (access-control v2.1, deficiency #29). | access-control |
 | `src/lib/audit/log.ts` | `logAuditEvent` + `auditPrivilegedAction` + `auditedMutation` | change-management, access-control, incident-response, DSR, retention |
 | `src/lib/db/encrypted-fields-extension.ts` | Prisma client extension — transparent AES-256-GCM encryption + HMAC search hashes | data-classification, DSR, business-continuity (key-loss scenario) |
 | `src/lib/retention/policies.ts` | Declarative retention registry walked by `/api/cron/retention` | data-classification, retention, change-management |
