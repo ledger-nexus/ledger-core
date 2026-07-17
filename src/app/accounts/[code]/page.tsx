@@ -17,6 +17,7 @@ import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatMoney, formatDate, moneyClass } from "@/lib/utils/format";
 import EditAccountForm from "./edit-account-form";
@@ -249,6 +250,11 @@ export default async function AccountDetailPage({
                       {line.description || line.entry.memo}
                       {line.party?.displayName && (
                         <span className="ml-1 text-ink-500">· {line.party.displayName}</span>
+                      )}
+                      {line.entry.source !== "MANUAL" && (
+                        <span className="ml-2 inline-flex align-middle">
+                          <SourceBadge source={line.entry.source} />
+                        </span>
                       )}
                     </TD>
                     <TD className="amount-cell text-right">

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Sidebar } from "@/components/nav/sidebar";
 import { BookSwitcher } from "@/components/nav/book-switcher";
 import { UserSwitcher } from "@/components/nav/user-switcher";
@@ -33,6 +34,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const notifications = currentUser
     ? await getRecentNotifications(prisma, currentUser.id)
     : { unread: [], recentRead: [], unreadCount: 0 };
+  // Bank-feed pull for the sidebar badge — the one number worth ambient
+  // chrome space (the daily loop). Cheap: leading columns of the
+  // (tenantId, entityId, bookId, bankAccountId, status) index.
+  const reviewCount = currentTenant
+    ? await prisma.bankTransaction.count({
+        where: {
+          tenantId: currentTenant.id,
+          entity: { code: scope.entityCode },
+          book: { code: scope.bookCode },
+          status: "FOR_REVIEW",
+        },
+      })
+    : 0;
   // Conditionally wrap the app in ClerkProvider. We can't statically
   // import ClerkProvider at module scope because Clerk would try to
   // evaluate publishable key from env at build time even when unused.
@@ -43,7 +57,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <div className="grid min-h-screen grid-cols-[260px_1fr] bg-ink-50">
           <aside className="border-r border-ink-200 bg-white">
-            <Sidebar isAdmin={isAdmin(currentUser)} />
+            <Sidebar isAdmin={isAdmin(currentUser)} reviewCount={reviewCount} />
           </aside>
           <main className="flex flex-col">
             <header className="flex items-center justify-between border-b border-ink-200 bg-white px-8 py-3">
@@ -60,6 +74,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 </h1>
               </div>
               <div className="flex items-start gap-3">
+                <Link
+                  href="/ask"
+                  title="Ask your ledger — plain-English questions, read-only"
+                  className="flex h-9 items-center gap-1.5 rounded-md border border-ink-300 bg-white px-3 text-sm font-medium text-ink-900 transition-colors hover:border-ink-900 hover:bg-ink-50"
+                >
+                  <span aria-hidden="true">✦</span>
+                  <span>Ask</span>
+                </Link>
                 {currentUser && (
                   <NotificationBell
                     unread={notifications.unread}

@@ -157,7 +157,16 @@ const ADMIN_SECTION: NavSection = {
 /** The one action repeated most; isolated on purpose (Von Restorff). */
 const PRIMARY_ACTION: NavItem = { href: "/journal-entries/new", label: "New entry" };
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({
+  item,
+  active,
+  count,
+}: {
+  item: NavItem;
+  active: boolean;
+  /** Optional live count pill (e.g. bank lines awaiting review). */
+  count?: number;
+}) {
   return (
     <Link
       href={item.href}
@@ -168,6 +177,16 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
       )}
     >
       <span>{item.label}</span>
+      {count != null && count > 0 && (
+        <span
+          className={cn(
+            "ml-auto rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
+            active ? "bg-white text-ink-900" : "bg-amber-100 text-amber-900"
+          )}
+        >
+          {count}
+        </span>
+      )}
       {item.hint && (
         <span className="text-[10px] uppercase tracking-wide opacity-70">{item.hint}</span>
       )}
@@ -179,9 +198,12 @@ export function Sidebar({
   /** Test/override hook. Normal renders resolve the route themselves. */
   currentPath,
   isAdmin = false,
+  reviewCount = 0,
 }: {
   currentPath?: string;
   isAdmin?: boolean;
+  /** Bank lines awaiting review — Zeigarnik pull on the daily loop. */
+  reviewCount?: number;
 }) {
   const pathname = usePathname();
   const activePath = currentPath ?? pathname;
@@ -213,7 +235,11 @@ export function Sidebar({
               <ul className="flex flex-col gap-0.5">
                 {section.items.map((item) => (
                   <li key={item.href}>
-                    <NavLink item={item} active={activePath === item.href} />
+                    <NavLink
+                      item={item}
+                      active={activePath === item.href}
+                      count={item.href === "/banking" ? reviewCount : undefined}
+                    />
                   </li>
                 ))}
               </ul>

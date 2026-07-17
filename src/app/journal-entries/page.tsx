@@ -17,6 +17,7 @@ import { tenantScopeOrNone } from "@/lib/db-sentinels";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate, formatMoney } from "@/lib/utils/format";
@@ -221,7 +222,7 @@ export default async function JournalEntriesPage({
                         )}
                       </TD>
                       <TD>
-                        <Badge tone="neutral">{entry.source}</Badge>
+                        <SourceBadge source={entry.source} />
                       </TD>
                       <TD>
                         {entry.sourceSystem ? (
