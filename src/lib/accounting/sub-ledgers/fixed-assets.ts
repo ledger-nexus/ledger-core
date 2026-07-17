@@ -486,10 +486,15 @@ export async function disposeFixedAsset(
 export async function netBookValue(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  // Tenant pin — entity codes are unique only per tenant, so a UI/API
+  // caller MUST pass this or a colliding entity code in another tenant
+  // could sum that tenant's assets. Optional for substrate scripts.
+  tenantId?: string
 ): Promise<{ totalGross: Decimal; totalAccumDep: Decimal; nbv: Decimal }> {
   const assets = await prisma.fixedAsset.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       status: { in: ["IN_SERVICE", "IDLE"] },
     },

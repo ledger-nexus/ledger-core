@@ -157,6 +157,7 @@ export default async function MonthEndPage({
       selectedPeriod.endsOn
     ),
     checkSubledgerTies(prisma, {
+      tenantId: scope.tenantId,
       entityCode: entity.code,
       bookCode: book.code,
       asOf: selectedPeriod.endsOn,
