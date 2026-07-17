@@ -1,4 +1,4 @@
--- 0017 — performance_obligation ASC 606 allocation columns (upstreamed)
+-- 0022 — performance_obligation ASC 606 allocation columns (upstreamed)
 --
 -- Upstreams four columns + two enums that revenue-rec added via its
 -- PR #17 (prisma/sql/2026-06-04-po-schema-additions.sql in that repo)
