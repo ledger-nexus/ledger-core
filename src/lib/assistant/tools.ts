@@ -23,6 +23,10 @@ import {
   getIncomeStatement,
   getBalanceSheet,
 } from "@/lib/accounting/reports";
+import { getCashFlowStatement } from "@/lib/accounting/reports/cash-flow";
+import { getBookTaxDifference } from "@/lib/accounting/reports/book-tax-difference";
+import { arAging, openArBalance } from "@/lib/accounting/sub-ledgers/ar";
+import { apAging, openApBalance } from "@/lib/accounting/sub-ledgers/ap";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -109,6 +113,55 @@ export const TOOL_DEFS: ToolDef[] = [
         to: DATE_PROP,
       },
       required: ["accountCode"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_cash_flow",
+    description:
+      "Return the indirect-method cash flow statement for a date range: net income, operating / investing / financing cash flow, and the net change in cash. Use this for 'where did my cash go', 'how much cash did I generate', 'why is my cash down when I made money'.",
+    input_schema: {
+      type: "object",
+      properties: { from: DATE_PROP, to: DATE_PROP },
+      required: ["from", "to"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_ar_aging",
+    description:
+      "Return accounts-receivable aging buckets (current, 1-30, 31-60, 61-90, over 90 days) with totals as of a date. Use this for 'who owes me money', 'how much AR is overdue', 'what receivables are outstanding'.",
+    input_schema: {
+      type: "object",
+      properties: { asOf: DATE_PROP },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_ap_aging",
+    description:
+      "Return accounts-payable aging buckets (current, 1-30, 31-60, 61-90, over 90 days) with totals as of a date. Use this for 'what bills do I owe', 'how much AP is overdue', 'what do I need to pay'.",
+    input_schema: {
+      type: "object",
+      properties: { asOf: DATE_PROP },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_book_tax_difference",
+    description:
+      "Compare this book against the tax book for a date range: book vs tax net income, total difference, and the permanent/temporary split (ASC 740 flavor). Use this for 'book vs tax', 'what are my book-tax differences', 'taxable income vs book income'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        from: DATE_PROP,
+        to: DATE_PROP,
+        taxBookCode: {
+          type: "string",
+          description: "The tax-basis book code. Defaults to US_TAX.",
+        },
+      },
+      required: ["from", "to"],
       additionalProperties: false,
     },
   },
@@ -409,6 +462,114 @@ export async function executeTool(
           source: e.source,
         })),
         truncated: entries.length > MAX,
+      };
+    }
+
+    case "get_cash_flow": {
+      const from = parseDate(String(input.from ?? ""));
+      const to = parseDate(String(input.to ?? ""));
+      if (!from || !to) return { error: "from and to must both be YYYY-MM-DD." };
+      const cf = await getCashFlowStatement(
+        prisma as PrismaClient,
+        reportScope,
+        from,
+        endOfDay(to)
+      );
+      const line = (l: { accountName: string; cashImpact: Decimal }) => ({
+        name: l.accountName,
+        cashImpact: money(l.cashImpact),
+      });
+      return {
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
+        currency: "USD",
+        netIncome: money(cf.netIncome),
+        operatingCashFlow: money(cf.operatingCashFlow),
+        investingCashFlow: money(cf.investingCashFlow),
+        financingCashFlow: money(cf.financingCashFlow),
+        netCashFlow: money(cf.netCashFlow),
+        beginningCash: money(cf.beginningCash),
+        endingCash: money(cf.endingCash),
+        reconciles: cf.reconciles,
+        nonCashAddBacks: cf.nonCashAddBacks.map(line),
+        workingCapitalChanges: cf.workingCapitalChanges.map(line),
+        investingItems: cf.investingItems.map(line),
+        financingItems: cf.financingItems.map(line),
+      };
+    }
+
+    case "get_ar_aging":
+    case "get_ap_aging": {
+      const asOf = input.asOf ? parseDate(String(input.asOf)) : endOfDay(now);
+      if (!asOf) return { error: "asOf must be YYYY-MM-DD." };
+      const isAr = name === "get_ar_aging";
+      const [buckets, total] = await Promise.all([
+        (isAr ? arAging : apAging)(
+          prisma as PrismaClient,
+          scope.entityCode,
+          scope.bookCode,
+          asOf,
+          scope.tenantId
+        ),
+        (isAr ? openArBalance : openApBalance)(
+          prisma as PrismaClient,
+          scope.entityCode,
+          scope.bookCode,
+          scope.tenantId
+        ),
+      ]);
+      return {
+        asOf: asOf.toISOString().slice(0, 10),
+        currency: "USD",
+        kind: isAr ? "receivables (owed to you)" : "payables (you owe)",
+        totalOpen: money(total),
+        buckets: buckets.map((b) => ({
+          bucket: b.bucket,
+          total: money(b.totalBalance),
+          items: b.itemCount,
+        })),
+      };
+    }
+
+    case "get_book_tax_difference": {
+      const from = parseDate(String(input.from ?? ""));
+      const to = parseDate(String(input.to ?? ""));
+      if (!from || !to) return { error: "from and to must both be YYYY-MM-DD." };
+      const taxBookCode =
+        typeof input.taxBookCode === "string" && input.taxBookCode.trim()
+          ? input.taxBookCode.trim()
+          : "US_TAX";
+      const btd = await getBookTaxDifference(prisma as PrismaClient, {
+        entityCode: scope.entityCode,
+        fromBookCode: scope.bookCode,
+        toBookCode: taxBookCode,
+        periodStart: from,
+        periodEnd: endOfDay(to),
+        tenantId: scope.tenantId,
+      });
+      const row = (r: {
+        accountCode: string;
+        accountName: string;
+        delta: Decimal;
+        classification: string;
+      }) => ({
+        code: r.accountCode,
+        name: r.accountName,
+        delta: money(r.delta),
+        classification: r.classification,
+      });
+      return {
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
+        currency: "USD",
+        bookCode: scope.bookCode,
+        taxBookCode,
+        bookNetIncome: money(btd.bookNetIncome),
+        taxNetIncome: money(btd.taxNetIncome),
+        totalDelta: money(btd.totalDelta),
+        permanentDeltaTotal: money(btd.permanentDeltaTotal),
+        temporaryDeltaTotal: money(btd.temporaryDeltaTotal),
+        pnlDifferences: btd.pnlRows.filter((r) => !r.delta.isZero()).map(row),
       };
     }
 

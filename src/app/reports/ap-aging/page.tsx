@@ -76,10 +76,11 @@ export default async function ApAgingPage({
   const sortDir: SortDir = searchParams.dir === "desc" ? "desc" : "asc";
 
   const [buckets, total, items] = await Promise.all([
-    apAging(prisma, scope.entityCode, scope.bookCode, asOfDate),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
+    apAging(prisma, scope.entityCode, scope.bookCode, asOfDate, scope.tenantId),
+    openApBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.apOpenItem.findMany({
       where: {
+        tenantId: scope.tenantId,
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },

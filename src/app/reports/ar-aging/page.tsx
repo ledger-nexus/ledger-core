@@ -80,10 +80,11 @@ export default async function ArAgingPage({
   const sortDir: SortDir = searchParams.dir === "desc" ? "desc" : "asc";
 
   const [buckets, total, items] = await Promise.all([
-    arAging(prisma, scope.entityCode, scope.bookCode, new Date(asOf)),
-    openArBalance(prisma, scope.entityCode, scope.bookCode),
+    arAging(prisma, scope.entityCode, scope.bookCode, new Date(asOf), scope.tenantId),
+    openArBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.arOpenItem.findMany({
       where: {
+        tenantId: scope.tenantId,
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },

@@ -418,10 +418,15 @@ export async function estimateBadDebtAllowance(
 export async function openArBalance(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  // Tenant pin — entity codes are only unique per tenant; UI/API callers
+  // MUST pass this (deficiency #16 pattern, closed for reports, was still
+  // open here). Optional for legacy substrate scripts.
+  tenantId?: string
 ): Promise<Decimal> {
   const rows = await prisma.arOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
@@ -442,10 +447,13 @@ export async function arAging(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,
-  asOf: Date
+  asOf: Date,
+  // Tenant pin — see openArBalance. Same cross-tenant same-code hole.
+  tenantId?: string
 ): Promise<ArAgingBucket[]> {
   const items = await prisma.arOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
