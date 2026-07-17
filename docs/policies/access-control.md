@@ -1,8 +1,18 @@
 # Access control policy
 
-**Version:** 2.0 · **Effective date:** 2026-06-03 · **Owner:** Founder (sole maintainer)
-**Last reviewed:** 2026-06-03
-**Prior version:** 1.0 (pre-Clerk, pre-RBAC, pre-tenant-scoped-membership)
+**Version:** 2.1 · **Effective date:** 2026-07-17 · **Owner:** Founder (sole maintainer)
+**Last reviewed:** 2026-07-17
+**Prior versions:** 2.0 (2026-06-03, described a target RBAC ahead of the code); 1.0 (pre-Clerk)
+
+> **2026-07-17 reconciliation (v2.1):** v2.0 documented a centralized
+> permission layer (`src/lib/auth/policy.ts` + `requirePermission()` + 16
+> `canX` helpers), a four-role hierarchy including a read-only `VIEWER`,
+> and an `assertTenantScope()` helper — **none of which exist in code.**
+> The Authorization section below now describes what is actually
+> implemented (three roles; per-action `isAdmin`/`isTenantAdmin` checks;
+> per-query `tenantId` scoping) and flags the centralized layer + `VIEWER`
+> as planned (control-deficiency-log #29). This closes a documentation
+> drift that would otherwise be an audit finding.
 
 This is the SOC 2 CC6.1/CC6.2/CC6.3 anchor document. Every rule
 below is **either enforced in code or has a documented compensating
@@ -27,56 +37,78 @@ every row points at a file path.
 
 ## Authorization
 
-**Per-tenant role-based access control.** Every tenant has its own
-4-role hierarchy + 16 named permissions. The policy module is the
-single source of truth.
+**Per-tenant role-based access.** Every tenant carries its own membership
+roles on `TenantMembership.role`. Authorization is enforced **per Server
+Action / page** by explicit role checks — there is no single policy
+module today (see "Enforcement model"). "User is signed in" is necessary
+but NEVER sufficient.
 
-### Role hierarchy
+### Role hierarchy (implemented)
 
 ```
-OWNER > ADMIN > MEMBER > VIEWER
+OWNER > ADMIN > MEMBER
 ```
 
 | Role | Typical use case | Source-of-truth |
 |---|---|---|
-| `OWNER` | Founder / CFO of the tenant. One per tenant (enforced). Transfer flow via `/admin/tenant`. | `TenantMembership.role` |
-| `ADMIN` | Controller / accounting manager. Can manage memberships, close/reopen periods, run admin reset. | `TenantMembership.role` |
+| `OWNER` | Founder / CFO of the tenant. One per tenant (enforced). | `TenantMembership.role` (enum `TenantRole`, `prisma/schema.prisma`) |
+| `ADMIN` | Controller / accounting manager. Manage memberships, close/reopen periods, admin surfaces. | `TenantMembership.role` |
 | `MEMBER` | Bookkeeper / accountant. Post JEs, run reports, view all tenant data. | `TenantMembership.role` |
-| `VIEWER` | Read-only auditor or auditing CPA. No write actions. | `TenantMembership.role` |
 
-### Permission catalog (16 named permissions)
+> **Planned — NOT implemented (do not represent as a live control):**
+> a read-only **`VIEWER`** role (auditor / auditing CPA) and a
+> **centralized permission layer** — `requirePermission()` + a named
+> `canX` catalog in `src/lib/auth/policy.ts`. Neither exists: the
+> `TenantRole` enum is the three roles above and there is no `policy.ts`.
+> `src/lib/auth/tenant.ts` carries the standing note that the global
+> `isAdmin` "retires and callers move to [`isTenantAdmin`]" once "per-tenant
+> RBAC lands." Tracked as **control-deficiency-log #29**.
 
-All in `src/lib/auth/policy.ts`. Each Server Action calls the matching
-`canX(role)` helper. Hard-coded role-string comparisons are forbidden
-(`/soc2-check` scans for them).
+### Enforcement model (what actually gates each action)
 
-| Permission | Min role | Server Action examples |
+Every privileged path runs, in order:
+
+1. `requireCurrentUser()` — authenticated. Clerk in prod; an HMAC dev
+   stub gated to `NODE_ENV !== "production"`. `src/lib/auth/current-user.ts`.
+2. `requireCurrentScope()` / `requireCurrentTenant()` — resolves tenant +
+   (entity, book) from the session, never from client input.
+   `src/lib/scope.ts`, `src/lib/auth/tenant.ts`.
+3. A role check where the action is privileged:
+   - `isTenantAdmin(tenant)` → `OWNER | ADMIN`, per-tenant. `src/lib/auth/tenant.ts`.
+   - `isAdmin(user)` / `requireAdmin()` — global admin (email allowlist
+     today), retiring in favour of `isTenantAdmin` when the permission
+     layer lands. `src/lib/auth/current-user.ts`.
+
+Cross-tenant data access is closed by pinning **every** customer-data
+query to the session-derived `tenantId` (resolved by `getCurrentScope()`),
+not by a post-fetch helper — there is no `assertTenantScope()`. The
+`tests/pen-test-tenant-isolation.ts` suite exercises attempted bypass
+(forged `lc-scope` cookie, cross-tenant id). See `docs/SOC2_CONTROL_MATRIX.md`
+CC6.1.
+
+### Intended permission map (design target for the planned policy layer)
+
+The table is the **target** for the centralized layer and records which
+role SHOULD gate each capability. Today each is enforced by the inline
+check in the listed surface — NOT by a `canX(role)` helper. When the
+policy layer lands (#29), these become named permissions.
+
+| Capability | Min role (target) | Enforced today at |
 |---|---|---|
-| `canViewReports` | VIEWER | every `/reports/*` page |
-| `canPostJournalEntries` | MEMBER | `/journal-entries/new`, all import paths |
-| `canManageMemberships` | ADMIN | `/admin/team` invite + revoke |
-| `canClosePeriod` | ADMIN | `/periods` close/reopen |
-| `canReopenPeriod` | ADMIN | `/periods` reopen (separate gate so it can tighten to OWNER later) |
-| `canExportAuditLog` | ADMIN | `/admin/audit-log` CSV download |
-| `canRunAdminReset` | OWNER | `/admin/reset` (irreversible — owner-only) |
-| `canTransferOwnership` | OWNER | `/admin/tenant` owner-transfer flow |
-| `canEraseUserData` | OWNER | DSR erasure Server Action (irreversible — owner-only per `docs/policies/data-subject-requests.md`) |
-| `canExportUserData` | ADMIN | DSR export Server Action (or self) |
-| `canManageBilling` | OWNER | Stripe billing dashboard |
-| `canManageConfig` | ADMIN | `Tenant.monthlyAiSpendCapUsd`, `jeApprovalMinAmount`, `requireJeApproval` |
-| `canApproveJournalEntry` | ADMIN | JE approval queue |
-| `canSubmitJournalEntryForApproval` | MEMBER | JE submit-for-approval |
-| `canRunRetentionPurge` | (system only — `CRON_SECRET`) | `/api/cron/retention` |
-| `canPostInternalEvent` | (system only — `INTERNAL_API_TOKEN`) | `/api/internal/*` |
+| View reports | MEMBER (VIEWER once it lands) | `/reports/*` — tenant membership required |
+| Post journal entries | MEMBER | `/journal-entries/new`, import paths — `requireCurrentUser` + scope |
+| Manage memberships | ADMIN | admin surfaces — `isTenantAdmin` |
+| Close / reopen period | ADMIN | `/periods` close/reopen actions — admin-gated |
+| Export audit log | ADMIN | `/admin/audit-log` — admin-gated |
+| Erase user data (DSR) | OWNER | DSR erasure Server Action — owner-gated |
+| Approve journal entry | ADMIN | JE approval queue — admin-gated |
+| Run retention purge | system (`CRON_SECRET`) | `/api/cron/*` — timing-safe token |
+| Post internal event | system (`INTERNAL_API_TOKEN`) | `/api/internal/*` — timing-safe token |
 
-**Non-negotiables:**
-- "User is signed in" is necessary but NEVER sufficient. Every Server
-  Action calls `requirePermission(...)` after `requireCurrentUser()` +
-  `requireCurrentTenant()`. The pen-test-tenant-isolation suite covers
-  attempted bypass.
-- Cross-tenant data access is impossible: every customer-data query
-  carries `tenantId`; `assertTenantScope()` from `@/lib/soc2`
-  enforces post-fetch. See `docs/SOC2_CONTROL_MATRIX.md` CC6.1.
+> The v2.0 draft mapped capabilities to admin routes that don't exist
+> (`/admin/team`, `/admin/reset`, `/admin/tenant`, `/admin/access-review`).
+> The live admin surfaces are `/admin/users`, `/admin/audit-log`,
+> `/admin/orphans`, and `/admin/notification-channels`.
 
 ## Provisioning
 
@@ -208,8 +240,8 @@ Postgres's DDL log).
 |---|---|
 | "Show me your auth provider" | This file → "Authentication"; `src/lib/auth/clerk.ts` |
 | "Show me MFA enforcement" | This file → "Authentication"; documented Partial in risk-register #20 |
-| "Show me your roles and what each can do" | This file → "Authorization"; `src/lib/auth/policy.ts` |
-| "Show me the permission gate for a specific Server Action" | The Server Action file calls `requirePermission(...)` against a named helper from `policy.ts` |
+| "Show me your roles and what each can do" | This file → "Authorization"; enum `TenantRole` in `prisma/schema.prisma`; `isTenantAdmin` in `src/lib/auth/tenant.ts` |
+| "Show me the permission gate for a specific Server Action" | The Server Action calls `requireCurrentUser()` + `requireCurrentScope()`, then a role check (`isTenantAdmin` / `requireAdmin`) for privileged actions — see "Enforcement model". (A centralized `requirePermission()` is planned, #29.) |
 | "Show me an offboarding that you performed" | `audit_log` rows with `eventType=LIFECYCLE` `action=user.offboarded` |
 | "Show me your service token rotation history" | This file → "Service tokens" table; `audit_log` rows with `action=token.rotated` |
 | "Show me an access review" | `docs/policies/access-review-{YYYY-Q}.md` (one per quarter); `audit_log` row of completion |
