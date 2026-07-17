@@ -18,6 +18,7 @@ import {
   executeTool,
   type AssistantScope,
 } from "./tools";
+import { readOnlyDb } from "./read-only-db";
 
 const MODEL = "claude-opus-4-8";
 // Each tool round-trip is one step; a handful is plenty for "look up the
@@ -106,13 +107,16 @@ export async function askLedger(args: {
         };
       }
 
-      // Execute every requested tool and return all results in ONE user turn.
+      // Execute every requested tool through a READ-ONLY view of the DB, so
+      // the assistant's read-only contract is enforced by capability, not
+      // convention — a tool that attempted a write would throw, never post.
+      const roDb = readOnlyDb(args.prisma);
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
         consulted.add(block.name);
         const result = await executeTool(
-          args.prisma,
+          roDb,
           args.scope,
           block.name,
           (block.input ?? {}) as Record<string, unknown>,
