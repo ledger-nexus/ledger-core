@@ -11,8 +11,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -32,10 +31,9 @@ export default async function AccountDetailPage({
 }: {
   params: { code: string };
 }) {
-  const tenant = await getCurrentTenant();
-  if (!tenant) return notFound();
+  const scope = await getCurrentScope();
+  if (!scope) return notFound();
   const user = await getCurrentUser();
-  const scope = getScope();
   const canEdit = isAdmin(user);
 
   // Try entity-specific first, fall back to shared. Mirrors how the
@@ -43,7 +41,7 @@ export default async function AccountDetailPage({
   const account =
     (await prisma.account.findFirst({
       where: {
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         code: params.code,
         entity: { code: scope.entityCode },
       },
@@ -55,7 +53,7 @@ export default async function AccountDetailPage({
     })) ??
     (await prisma.account.findFirst({
       where: {
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         code: params.code,
         entityId: null,
       },
@@ -71,7 +69,7 @@ export default async function AccountDetailPage({
   // Candidate parents: same scope, same type, not the account itself.
   const candidates = await prisma.account.findMany({
     where: {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       active: true,
       type: account.type,
       id: { not: account.id },

@@ -9,8 +9,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,12 +31,11 @@ const LEVEL_LABEL: Record<GovernanceLevel, string> = {
 };
 
 export default async function AutomationsPage() {
-  const tenant = await getCurrentTenant();
-  if (!tenant) return notFound();
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  if (!scope) return notFound();
 
   const statuses = await resolveAutomationStatuses(prisma, {
-    tenantId: tenant.id,
+    tenantId: scope.tenantId,
     entityCode: scope.entityCode,
     bookCode: scope.bookCode,
   });

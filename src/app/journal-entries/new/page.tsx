@@ -11,7 +11,8 @@
 import { notFound } from "next/navigation";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
+import { EmptyState } from "@/components/ui/empty-state";
 import { NewEntryForm } from "./new-entry-form";
 
 export default async function NewEntryPage({
@@ -19,10 +20,21 @@ export default async function NewEntryPage({
 }: {
   searchParams: { duplicate?: string };
 }) {
-  const scope = getScope();
+  // Tenant-verified scope — the account/party dropdowns and the duplicate
+  // source below must be scoped to the caller's tenant, never a raw cookie.
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity before posting an entry."
+      />
+    );
+  }
   const [accounts, parties] = await Promise.all([
     prisma.account.findMany({
       where: {
+        tenantId: scope.tenantId,
         active: true,
         OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
       },
@@ -31,6 +43,7 @@ export default async function NewEntryPage({
     }),
     prisma.party.findMany({
       where: {
+        tenantId: scope.tenantId,
         OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
       },
       orderBy: { code: "asc" },
@@ -38,11 +51,11 @@ export default async function NewEntryPage({
     }),
   ]);
 
-  // Resolve the duplicate-source JE, if any. We don't enforce that the
-  // duplicate source belongs to the active scope — the user may have
-  // landed here from a JE in a different (entity, book) view, and forcing
-  // a scope match would lose information. The form still POSTs to the
-  // CURRENT scope.
+  // Resolve the duplicate-source JE, if any. It MUST belong to the
+  // caller's tenant — findUnique by id alone let `?duplicate=<any JE id>`
+  // read another tenant's entry (memo, lines, account/party codes). We
+  // don't force an (entity, book) match within the tenant (the user may
+  // duplicate across their own books), but the tenant boundary is hard.
   let initialLines: Array<{
     accountCode: string;
     side: "DEBIT" | "CREDIT";
@@ -52,8 +65,8 @@ export default async function NewEntryPage({
   }> | undefined;
   let initialMemo: string | undefined;
   if (searchParams.duplicate) {
-    const source = await prisma.journalEntry.findUnique({
-      where: { id: searchParams.duplicate },
+    const source = await prisma.journalEntry.findFirst({
+      where: { id: searchParams.duplicate, tenantId: scope.tenantId },
       include: {
         lines: {
           include: {

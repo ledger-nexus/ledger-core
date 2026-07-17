@@ -16,9 +16,7 @@
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
-import { tenantScopeOrNone } from "@/lib/db-sentinels";
+import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -32,12 +30,19 @@ export default async function CloseDashboardPage({
 }: {
   searchParams: { period?: string };
 }) {
-  const scope = getScope();
-  const tenant = await getCurrentTenant();
-  const tenantFilter = tenantScopeOrNone(tenant?.id);
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="Scope not found"
+        description="Sign in and select a tenant with at least one entity to view the close dashboard."
+      />
+    );
+  }
+  const tenantFilter = { tenantId: scope.tenantId };
 
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode, ...(tenant ? { tenantId: tenant.id } : {}) },
+    where: { tenantId: scope.tenantId, code: scope.entityCode },
     select: { id: true, code: true, name: true },
   });
   const book = await prisma.book.findUnique({
@@ -45,11 +50,11 @@ export default async function CloseDashboardPage({
     select: { id: true, code: true, name: true },
   });
 
-  if (!tenant || !entity || !book) {
+  if (!entity || !book) {
     return (
       <EmptyState
         title="Scope not found"
-        description={`Could not resolve entity / book / tenant. Switch scope from the sidebar.`}
+        description={`Could not resolve entity / book. Switch scope from the sidebar.`}
       />
     );
   }
@@ -100,23 +105,23 @@ export default async function CloseDashboardPage({
   // ── Three rollups in parallel ────────────────────────────────────────
   const [reconRollup, taskRollup, fluxRollup, taskBlockers] = await Promise.all([
     getReconciliationRollup(prisma, {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       entityId: entity.id,
       bookId: book.id,
       periodId: selectedPeriod.id,
     }),
     getCloseTaskRollup(prisma, {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       periodId: selectedPeriod.id,
     }),
     getFluxRollup(prisma, {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       entityId: entity.id,
       bookId: book.id,
       toPeriodId: selectedPeriod.id,
     }),
     checkRequiredTasksComplete(prisma, {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       periodId: selectedPeriod.id,
     }),
   ]);
@@ -141,7 +146,7 @@ export default async function CloseDashboardPage({
   today.setHours(0, 0, 0, 0);
   const overdueTasks = await prisma.closeTask.findMany({
     where: {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       periodId: selectedPeriod.id,
       dueAt: { lt: today },
       status: { notIn: ["DONE", "WAIVED"] },
