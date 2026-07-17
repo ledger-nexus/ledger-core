@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session month-end-tenant-pin · started 2026-07-17 · heartbeat 2026-07-17
+- **Scope**: Pin the un-tenant-scoped `legalEntity.findFirst({ where: { code } })` in the month-end report page to `(tenantId, code)` — same cross-tenant read-leak class as Codex #1 (dashboard, PR #269). Follow-up flagged in the codex-findings completion block.
+- **Files / globs**: `src/app/reports/month-end/page.tsx`, `STATUS.md`
+- **Branch**: `claude/festive-ramanujan-730aa2`
+- **Working dir**: `/Users/hosungson/personal-books/app/.claude/worktrees/festive-ramanujan-730aa2`
 
 ---
 
