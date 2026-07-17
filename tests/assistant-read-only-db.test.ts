@@ -34,6 +34,9 @@ function mockPrisma() {
       },
     },
     $queryRaw: async () => [{ n: 1 }],
+    $queryRawUnsafe: async () => {
+      throw new Error("real $queryRawUnsafe ran");
+    },
     $executeRaw: async () => {
       throw new Error("real $executeRaw ran");
     },
@@ -53,9 +56,13 @@ describe("readOnlyDb — capability-enforced read-only", () => {
     expect(await db.account.groupBy()).toEqual([]);
   });
 
-  it("passes $queryRaw (read) through", async () => {
+  it("blocks raw SQL — $queryRaw / $queryRawUnsafe throw (data-modifying CTE vector)", () => {
+    // A `query` can mutate via `WITH x AS (UPDATE ... RETURNING ...) SELECT`,
+    // so raw query methods are NOT a safe read boundary and must be blocked
+    // alongside $executeRaw.
     const db = readOnlyDb(mockPrisma());
-    expect(await db.$queryRaw()).toEqual([{ n: 1 }]);
+    expect(() => db.$queryRaw()).toThrow(ReadOnlyViolationError);
+    expect(() => db.$queryRawUnsafe()).toThrow(ReadOnlyViolationError);
   });
 
   it("throws on every model write method — never runs the real one", () => {
@@ -78,6 +85,12 @@ describe("readOnlyDb — capability-enforced read-only", () => {
     const db = readOnlyDb(mockPrisma());
     expect(() => db.$executeRaw()).toThrow(ReadOnlyViolationError);
     expect(() => db.$transaction()).toThrow(ReadOnlyViolationError);
+  });
+
+  it("still passes typed model reads through (findMany/count unaffected)", async () => {
+    const db = readOnlyDb(mockPrisma());
+    expect(await db.account.findMany()).toEqual([{ code: "1000" }]);
+    expect(await db.account.count()).toBe(1);
   });
 
   it("names the blocked op in the error", () => {

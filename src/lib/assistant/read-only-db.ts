@@ -5,10 +5,16 @@
 // capability. Codex's review asked for the read-only guarantee to be
 // enforced, not assumed. This wraps a PrismaClient / TransactionClient in
 // a Proxy that makes every mutation physically unreachable: model write
-// methods (create/update/delete/upsert families), raw execution, and
-// interactive transactions throw. Reads (findMany/findFirst/findUnique/
-// count/aggregate/groupBy and $queryRaw) pass straight through, so the
-// deterministic report builders the tools call still work unchanged.
+// methods (create/update/delete/upsert families), ALL raw SQL, and
+// interactive transactions throw. Reads via the typed model methods
+// (findMany/findFirst/findUnique/count/aggregate/groupBy) pass straight
+// through, so the deterministic report builders the tools call still work.
+//
+// Raw SQL is blocked outright — including $queryRaw / $queryRawUnsafe, NOT
+// just $executeRaw. Postgres can mutate from a "read" via a data-modifying
+// CTE (`WITH x AS (UPDATE ... RETURNING ...) SELECT * FROM x`), so a
+// query method is not a safe read boundary. The assistant's report builders
+// use only the typed model API and never need raw SQL.
 //
 // A future tool that tried `prisma.journalEntry.create(...)` would throw
 // here instead of silently posting to the ledger — the whole point of the
@@ -27,10 +33,16 @@ const WRITE_METHODS = new Set([
   "upsert",
 ]);
 
-/** Top-level client methods that can write or run arbitrary SQL. */
+/**
+ * Top-level client methods that can write or run arbitrary SQL. Both the
+ * $execute* AND the $query* raw families are blocked: a data-modifying CTE
+ * makes `$queryRaw` a write vector, so "it's a query" is not a safe read.
+ */
 const BLOCKED_ROOT = new Set([
   "$executeRaw",
   "$executeRawUnsafe",
+  "$queryRaw",
+  "$queryRawUnsafe",
   "$transaction",
 ]);
 
