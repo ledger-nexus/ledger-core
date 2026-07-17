@@ -37,6 +37,11 @@ than 60 minutes, other sessions may consider your claim stale.
 
 ## Recent completions
 
+### Session po-upstream · 2026-07-16
+- **Scope**: upstream performance_obligation ASC 606 allocation columns (allocatedAmount, allocationMethod, fairValueMethod, quantity + 2 enums) from revenue-rec PR #17 into ledger-core's schema + migration 0017
+- **Branch**: schema/upstream-po-allocation-columns (worktree .claude/worktrees/po-upstream)
+- **Outcome**: schema-only; DB already has the columns; verified via prisma migrate diff (PO statements gone)
+
 ### Session ask-widen · 2026-07-16
 - **Scope**: /ask tool widening (cash flow, AR/AP aging, book-tax difference — 4 new read-only tools) + tenant pin on arAging/apAging/openArBalance/openApBalance (pre-tenancy signatures, deficiency-#16 class) threaded through aging pages/CSV routes + PROJECT_STATUS v1.26 catch-up entry.
 - **Branch**: `wt-ask-widen` (PR against main)
