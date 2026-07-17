@@ -33,13 +33,6 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Branch:** `laws-of-ux-nav` (worktree; shared checkout untouched)
 - **Until:** PR merged
 
-### Session po-collision-fix · started 2026-07-16 21:10 · heartbeat 21:25
-
-- **Scope**: fix PR #262's migration-ordinal collision — two `0017_` directories on the branch (`0017_po_allocation_columns` vs main's `0017_ns_iselimination_entity_column`); rename to `0022_`
-- **Files / globs**: `prisma/migrations/0022_po_allocation_columns/**`, `STATUS.md`
-- **Branch**: `schema/upstream-po-allocation-columns` (PR #262)
-- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/po-upstream`
-
 ---
 
 ## Recent completions
@@ -53,6 +46,15 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Note**: running the suite executes its own global `ASKQ_ENT` scrub, which removed both twins (incl. the `default`-tenant residue) during verification. That is the committed suite's designed behavior, not a manual delete; it recreates its fixtures each run.
 - **Branch**: `claude/amazing-nightingale-a4e30f` (PR against main)
 - **Outcome**: 13/13 on 3 consecutive runs incl. reruns against an already-dirtied DB (the failing condition); full `npm test` green — 130 files / 1076 tests / 0 failures; tsc clean. Test-hygiene only; no product change.
+
+### Session subledger-fixture-isolation · 2026-07-16 (commit `5a1c8d3`)
+- **Scope**: Replaced `tests/sub-ledgers.test.ts`'s TABLE-WIDE `deleteMany()` cleanup (journalLine / journalEntry / all AR/AP/FA/lease/rev-contract tables, no `where`) with a per-run tenant (`subledger-<suffix>`) + entity (`SUBLEDGER_<suffix>`), entity-scoped chart/calendar/parties, tenant-scoped deletes, `tenantId` pins on the posting/report/sub-ledger-balance calls, and a self-healing prefix scrub in `beforeAll`. This is the same global-wipe hygiene issue the `ask-widen` session hit below (`reconciliation_match` FK) and filed a chip for.
+- **Branch**: `fix/sub-ledgers-tenant-scoped-fixtures` (pushed; PR #264 open against main)
+- **Outcome**: 9/9 over 4 consecutive runs incl. one against injected killed-run residue (scrub collected it all); zero `subledger-` rows left behind; tsc clean; full `npm test` green with the change. Test-hygiene only — no product/schema change. **Found en route**: `tests/assistant-tools.test.ts` (pre-#260) could write and read different `ASKQ_ENT` entities — its `post()` helper calls `postJournalEntry` with no `tenantId` (unscoped `findFirst`) while its reads pin a tenant; with two `ASKQ_ENT` rows on the shared DB (tenants `default` + `askq-test`) that silently yields `0.00`/`undefined`. #260's dedicated-tenant refactor covers the suite; the unscoped-`findFirst` hazard in `postJournalEntry` itself remains for any caller that omits `tenantId`.
+### Session po-collision-fix · 2026-07-16 (commit `b72ebde`, merged via #262)
+- **Scope**: PR #262 shipped `prisma/migrations/0017_po_allocation_columns` while main already had `0017_ns_iselimination_entity_column` — two directories on the same ordinal. Main was at 0021, so 0017 was never free. Renamed to `0022_po_allocation_columns` (ordinal only; SQL body untouched, still `IF NOT EXISTS`-guarded).
+- **Branch**: `schema/upstream-po-allocation-columns` (merged as `837f170`)
+- **Outcome**: main has no duplicate ordinals; #262 went `CONFLICTING` → `MERGEABLE` and merged with all 5 checks green (test 2m16s). Note: a concurrent session rebased this branch mid-flight; the rename was re-applied on top of their rebase rather than force-pushed over it — both approaches produced an identical `schema.prisma` (`c34071fd…`).
 
 ### Session po-upstream · 2026-07-16
 - **Scope**: upstream performance_obligation ASC 606 allocation columns (allocatedAmount, allocationMethod, fairValueMethod, quantity + 2 enums) from revenue-rec PR #17 into ledger-core's schema + migration 0022

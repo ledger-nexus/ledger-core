@@ -1,13 +1,28 @@
 // Sub-ledger lifecycle + multi-book divergence + book-tax-diff invariants.
 //
-// Run with: pnpm test (or: pnpm test tests/sub-ledgers.test.ts)
+// Run with: npm test -- tests/sub-ledgers.test.ts
+//
+// Fixture isolation: this suite used to reset state with TABLE-WIDE
+// deleteMany() calls (no where clause) in beforeEach. On the shared,
+// persistent dev DB that destroyed every other suite's and session's
+// fixtures, and it failed live (2026-07-16) with
+// `reconciliation_match_journalLineId_fkey` when the recon companion
+// repo held references to journal lines the global wipe tried to
+// delete — all 9 tests died at cleanup, not on the logic under test.
+//
+// Now the suite mints a dedicated per-run tenant + entity (unique
+// suffix) and scopes every delete to that tenant. Entity codes are
+// only unique per tenant, so every call that resolves one takes an
+// explicit tenantId pin: the posting engine, the reports, and the
+// AR/AP balance helpers (#260 added the trailing param). netBookValue
+// and runDepreciation still filter by entity code alone — the
+// per-run-unique code is what keeps those deterministic.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
-import { getTrialBalance, getBalanceSheet } from "../src/lib/accounting/reports";
+import { getBalanceSheet } from "../src/lib/accounting/reports";
 import {
   openArItem,
   applyArPayment,
@@ -25,37 +40,143 @@ import {
 } from "../src/lib/accounting/sub-ledgers/fixed-assets";
 import { getBookTaxDifference } from "../src/lib/accounting/reports/book-tax-difference";
 import { CHART_OF_ACCOUNTS } from "../src/lib/db/chart-of-accounts";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
-const ENTITY = "SUBLEDGER_TEST";
 
-async function clearAll() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.fixedAssetBookAttributes.deleteMany();
-  await prisma.fixedAsset.deleteMany();
-  await prisma.leaseBookAttributes.deleteMany();
-  await prisma.lease.deleteMany();
-  await prisma.revenueContractBookAttributes.deleteMany();
-  await prisma.performanceObligation.deleteMany();
-  await prisma.revenueContract.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+// Per-run unique suffix. The STABLE prefixes (tenant slug "subledger-",
+// entity code "SUBLEDGER_") are what the self-healing scrub keys on —
+// see scrubStaleFixtures.
+const SUFFIX = Date.now().toString(36) + Math.floor(Math.random() * 9999);
+const ENTITY = `SUBLEDGER_${SUFFIX.toUpperCase()}`;
+const TENANT_SLUG = `subledger-${SUFFIX}`;
+
+let tenantId: string;
+let entityId: string;
+
+// (entity, book) scopes. tenantId is stamped on in beforeAll; the posting
+// engine validates it against the entity and reports use it to pin their
+// account scans.
+const GAAP: { entityCode: string; bookCode: string; tenantId?: string } = {
+  entityCode: ENTITY,
+  bookCode: "US_GAAP",
+};
+const TAX: { entityCode: string; bookCode: string; tenantId?: string } = {
+  entityCode: ENTITY,
+  bookCode: "US_TAX",
+};
+
+/**
+ * Self-healing scrub — remove residue stranded by killed runs.
+ *
+ * A killed vitest run (Ctrl-C, OOM, signal) skips afterAll and strands
+ * this suite's tenant/entity on the shared persistent DB. Keying on the
+ * STABLE prefixes — not this run's suffix — is what makes the cleanup
+ * self-healing. It also collects what the pre-refactor suite shape left
+ * behind: a "SUBLEDGER_TEST" entity (with its JEs, sub-ledger items,
+ * parties, calendar) parked under the DEFAULT tenant. Default-tenant
+ * shared-chart accounts (entityId=null) are deliberately NOT touched —
+ * they're shared infrastructure other suites rely on.
+ *
+ * Best effort: the caller wraps this in try/catch. Residue can never
+ * collide with this run's unique-suffix fixtures, so a failed scrub
+ * (e.g. a companion repo's FK still holding an old journal line) must
+ * not fail the suite.
+ */
+async function scrubStaleFixtures() {
+  const staleTenants = await prisma.tenant.findMany({
+    where: { slug: { startsWith: "subledger-" } },
+    select: { id: true },
+  });
+  const staleEntities = await prisma.legalEntity.findMany({
+    where: { code: { startsWith: "SUBLEDGER_" } },
+    select: { id: true },
+  });
+  const tenantIds = staleTenants.map((t) => t.id);
+  const entityIds = staleEntities.map((e) => e.id);
+  if (tenantIds.length === 0 && entityIds.length === 0) return;
+
+  // Rows keyed by either a stale tenant or a stale entity (the old
+  // suite shape lived under the default tenant, so tenantId alone
+  // would miss it).
+  const staleScope = [
+    { tenantId: { in: tenantIds } },
+    { entityId: { in: entityIds } },
+  ];
+
+  // FK order: applications → open items → FA book attrs → assets →
+  // JE lines → JE headers → record events → party roles → parties →
+  // periods → calendars → accounts (stale tenants only) → entities →
+  // audit rows → tenants.
+  await prisma.arApplication.deleteMany({
+    where: {
+      OR: [
+        { tenantId: { in: tenantIds } },
+        { openItem: { entityId: { in: entityIds } } },
+      ],
+    },
+  });
+  await prisma.apApplication.deleteMany({
+    where: {
+      OR: [
+        { tenantId: { in: tenantIds } },
+        { openItem: { entityId: { in: entityIds } } },
+      ],
+    },
+  });
+  await prisma.arOpenItem.deleteMany({ where: { OR: staleScope } });
+  await prisma.apOpenItem.deleteMany({ where: { OR: staleScope } });
+  await prisma.fixedAssetBookAttributes.deleteMany({
+    where: { asset: { OR: staleScope } },
+  });
+  await prisma.fixedAsset.deleteMany({ where: { OR: staleScope } });
+  await prisma.journalLine.deleteMany({
+    where: {
+      OR: [
+        { tenantId: { in: tenantIds } },
+        { entry: { entityId: { in: entityIds } } },
+      ],
+    },
+  });
+  await prisma.journalEntry.deleteMany({ where: { OR: staleScope } });
+  await prisma.recordEvent.deleteMany({
+    where: { tenantId: { in: tenantIds } },
+  });
+  await prisma.partyRole.deleteMany({ where: { party: { OR: staleScope } } });
+  await prisma.party.deleteMany({ where: { OR: staleScope } });
+  await prisma.period.deleteMany({
+    where: {
+      OR: [
+        { tenantId: { in: tenantIds } },
+        { calendar: { entityId: { in: entityIds } } },
+      ],
+    },
+  });
+  await prisma.fiscalCalendar.deleteMany({ where: { OR: staleScope } });
+  // Accounts only for stale-prefix tenants — never the default tenant's
+  // shared chart.
+  await prisma.account.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  await prisma.legalEntity.deleteMany({
+    where: {
+      OR: [{ id: { in: entityIds } }, { tenantId: { in: tenantIds } }],
+    },
+  });
+  if (tenantIds.length > 0) {
+    await withAuditLogMutable(prisma, async () => {
+      await prisma.auditLog.deleteMany({
+        where: { tenantId: { in: tenantIds } },
+      });
+    });
+    await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
+  }
 }
 
-async function seedMasterData() {
+beforeAll(async () => {
+  // Shared reference rows — global, upsert-only, never deleted here.
   await prisma.currency.upsert({
     where: { code: "USD" },
     create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
     update: {},
-  });
-  const tenantId = await getDefaultTenantId(prisma);
-  const entity = await prisma.legalEntity.upsert({
-    where: { tenantId_code: { tenantId, code: ENTITY } },
-    create: { tenantId, code: ENTITY, name: "Sub-ledger Test Co.", functionalCurrencyId: "USD" },
-    update: { tenantId },
   });
   for (const b of [
     { code: "US_GAAP", name: "US GAAP", basis: "US_GAAP" as const },
@@ -68,87 +189,139 @@ async function seedMasterData() {
       update: {},
     });
   }
-  const calendar = await prisma.fiscalCalendar.upsert({
-    where: { entityId_code: { entityId: entity.id, code: "STANDARD_2026" } },
-    create: {
-      tenantId: tenantId,
-      entityId: entity.id,
+
+  // Reuse the seeded Northwind admin as tenant owner (same pattern as
+  // tests/tenant-account-resolution.test.ts).
+  const owner = await prisma.user.findUnique({
+    where: { email: "controller@northwind.test" },
+    select: { id: true },
+  });
+  if (!owner) throw new Error("Run Northwind seed first.");
+
+  try {
+    await scrubStaleFixtures();
+  } catch (err) {
+    console.warn("sub-ledgers: stale-fixture scrub failed (non-fatal)", err);
+  }
+
+  const tenant = await prisma.tenant.create({
+    data: {
+      slug: TENANT_SLUG,
+      name: "Sub-ledger Test Tenant",
+      ownerUserId: owner.id,
+    },
+  });
+  tenantId = tenant.id;
+  GAAP.tenantId = tenantId;
+  TAX.tenantId = tenantId;
+
+  const entity = await prisma.legalEntity.create({
+    data: {
+      tenantId,
+      code: ENTITY,
+      name: "Sub-ledger Test Co.",
+      functionalCurrencyId: "USD",
+    },
+  });
+  entityId = entity.id;
+
+  const calendar = await prisma.fiscalCalendar.create({
+    data: {
+      tenantId,
+      entityId,
       code: "STANDARD_2026",
       name: "2026",
       periodFrequency: "MONTHLY",
     },
-    update: {},
   });
-  for (let m = 1; m <= 12; m++) {
-    const code = `2026-${String(m).padStart(2, "0")}`;
-    await prisma.period.upsert({
-      where: { calendarId_code: { calendarId: calendar.id, code } },
-      create: {
-        tenantId: tenantId,
+  await prisma.period.createMany({
+    data: Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      return {
+        tenantId,
         calendarId: calendar.id,
-        code,
+        code: `2026-${String(m).padStart(2, "0")}`,
         ordinal: m,
         startsOn: new Date(Date.UTC(2026, m - 1, 1)),
         endsOn: new Date(Date.UTC(2026, m, 0)),
-      },
-      update: {},
-    });
-  }
-  // Prisma 5.22 rejects null in compound unique-key upsert. Use
-  // findFirst + create to upsert shared-chart accounts (entityId=null).
-  for (const a of CHART_OF_ACCOUNTS) {
-    const existing = await prisma.account.findFirst({
-      where: { entityId: null, code: a.code },
-      select: { id: true },
-    });
-    if (existing) continue;
-    await prisma.account.create({
-      data: {
-        tenantId: tenantId,
-        code: a.code,
-        name: a.name,
-        type: a.type,
-        normalBalance: a.normalBalance,
-        isContra: a.isContra ?? false,
-        isControlAccount: a.isControlAccount ?? false,
-        isBank: a.isBank ?? false,
-        isMonetary: a.isMonetary ?? false,
-        subtype: a.subtype,
-      },
-    });
-  }
+      };
+    }),
+  });
+
+  // Entity-scoped chart. Unlike the shared chart (entityId=null, where
+  // Postgres's NULL != NULL lets same-code duplicates coexist across
+  // tenants), [entityId, code] actually enforces uniqueness here, and
+  // nothing bleeds into other tenants' account scans.
+  await prisma.account.createMany({
+    data: CHART_OF_ACCOUNTS.map((a) => ({
+      tenantId,
+      entityId,
+      code: a.code,
+      name: a.name,
+      type: a.type,
+      normalBalance: a.normalBalance,
+      isContra: a.isContra ?? false,
+      isControlAccount: a.isControlAccount ?? false,
+      isBank: a.isBank ?? false,
+      isMonetary: a.isMonetary ?? false,
+      subtype: a.subtype,
+    })),
+  });
+
   // Parties used by sub-ledger lifecycle tests.
   for (const p of [
     { code: "CUSTOMER_X", displayName: "Customer X", role: "CUSTOMER" as const },
     { code: "VENDOR_Y", displayName: "Vendor Y", role: "VENDOR" as const },
   ]) {
-    const party = await prisma.party.upsert({
-      where: { entityId_code: { entityId: entity.id, code: p.code } },
-      create: { tenantId, entityId: entity.id, code: p.code, displayName: p.displayName },
-      update: { tenantId },
+    const party = await prisma.party.create({
+      data: { tenantId, entityId, code: p.code, displayName: p.displayName },
     });
-    await prisma.partyRole.upsert({
-      where: { partyId_role: { partyId: party.id, role: p.role } },
-      create: { tenantId, partyId: party.id, role: p.role },
-      update: { tenantId },
+    await prisma.partyRole.create({
+      data: { tenantId, partyId: party.id, role: p.role },
     });
   }
-}
-
-beforeAll(async () => {
-  await seedMasterData();
 });
 
 afterAll(async () => {
-  await prisma.$disconnect();
+  try {
+    if (tenantId) {
+      await clearSuiteLedger();
+      await prisma.recordEvent.deleteMany({ where: { tenantId } });
+      await prisma.partyRole.deleteMany({ where: { tenantId } });
+      await prisma.party.deleteMany({ where: { tenantId } });
+      await prisma.period.deleteMany({ where: { tenantId } });
+      await prisma.fiscalCalendar.deleteMany({ where: { tenantId } });
+      await prisma.account.deleteMany({ where: { tenantId } });
+      await prisma.legalEntity.deleteMany({ where: { tenantId } });
+      await withAuditLogMutable(prisma, async () => {
+        await prisma.auditLog.deleteMany({ where: { tenantId } });
+      });
+      await prisma.tenant.deleteMany({ where: { id: tenantId } });
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
 });
+
+// Reset transactional state between tests — scoped to THIS run's tenant,
+// never table-wide. FK order: applications reference open items + JEs;
+// open items reference JEs; FA book attributes hang off assets.
+async function clearSuiteLedger() {
+  await prisma.arApplication.deleteMany({ where: { tenantId } });
+  await prisma.apApplication.deleteMany({ where: { tenantId } });
+  await prisma.arOpenItem.deleteMany({ where: { tenantId } });
+  await prisma.apOpenItem.deleteMany({ where: { tenantId } });
+  await prisma.fixedAssetBookAttributes.deleteMany({
+    where: { asset: { tenantId } },
+  });
+  await prisma.fixedAsset.deleteMany({ where: { tenantId } });
+  await prisma.journalLine.deleteMany({ where: { tenantId } });
+  await prisma.journalEntry.deleteMany({ where: { tenantId } });
+}
 
 beforeEach(async () => {
-  await clearAll();
+  await clearSuiteLedger();
 });
-
-const GAAP = { entityCode: ENTITY, bookCode: "US_GAAP" };
-const TAX = { entityCode: ENTITY, bookCode: "US_TAX" };
 
 // =========================================================================
 // AR open-item lifecycle
@@ -179,7 +352,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
     });
     expect(item.id).toBeTruthy();
 
-    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP", tenantId);
     expect(openBal.equals(new Decimal(1_000))).toBe(true);
 
     // AR control account balance from the BS should match.
@@ -231,7 +404,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
     expect(applied.status).toBe("PARTIAL");
     expect(applied.remainingBalance.equals(new Decimal(600))).toBe(true);
 
-    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP", tenantId);
     const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-02-28"));
     const arRow = bs.assets.find((a) => a.code === "1200");
     expect(openBal.equals(arRow!.amount)).toBe(true);
@@ -278,7 +451,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
     expect(applied.status).toBe("APPLIED");
     expect(applied.remainingBalance.equals(new Decimal(0))).toBe(true);
 
-    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openArBalance(prisma, ENTITY, "US_GAAP", tenantId);
     expect(openBal.equals(new Decimal(0))).toBe(true);
   });
 
@@ -352,7 +525,7 @@ describe("AP sub-ledger: open-item lifecycle", () => {
     });
     expect(item.id).toBeTruthy();
 
-    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP", tenantId);
     const bs = await getBalanceSheet(prisma, GAAP, new Date("2026-04-30"));
     const apRow = bs.liabilities.find((l) => l.code === "2000");
     expect(apRow).toBeDefined();
@@ -399,7 +572,7 @@ describe("AP sub-ledger: open-item lifecycle", () => {
     });
     expect(applied.status).toBe("APPLIED");
 
-    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP");
+    const openBal = await openApBalance(prisma, ENTITY, "US_GAAP", tenantId);
     expect(openBal.equals(new Decimal(0))).toBe(true);
   });
 });
@@ -433,7 +606,7 @@ describe("Fixed assets: divergent depreciation across books", () => {
     });
 
     await createFixedAsset(prisma, {
-      tenantId: await getDefaultTenantId(prisma),
+      tenantId,
       entityCode: ENTITY,
       code: "A1",
       description: "Test asset",
@@ -496,7 +669,7 @@ describe("Fixed assets: divergent depreciation across books", () => {
       ],
     });
     await createFixedAsset(prisma, {
-      tenantId: await getDefaultTenantId(prisma),
+      tenantId,
       entityCode: ENTITY,
       code: "A2",
       description: "Test",
@@ -573,7 +746,7 @@ describe("Book-tax-difference report", () => {
       ],
     });
     await createFixedAsset(prisma, {
-      tenantId: await getDefaultTenantId(prisma),
+      tenantId,
       entityCode: ENTITY,
       code: "A3",
       description: "Test",
@@ -619,6 +792,7 @@ describe("Book-tax-difference report", () => {
       toBookCode: "US_TAX",
       periodStart: new Date("2026-01-01"),
       periodEnd: new Date("2026-06-30"),
+      tenantId,
     });
 
     // Depreciation expense delta: GAAP $2,000 (=12000/36*6) vs TAX $1,200 (=12000/60*6).
