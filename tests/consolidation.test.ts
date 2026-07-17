@@ -11,7 +11,7 @@ import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getConsolidatedTrialBalance } from "../src/lib/accounting/reports/consolidation";
 import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../src/lib/db/chart-of-accounts";
-import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const PARENT = "CONS_TEST_PARENT";
@@ -407,8 +407,8 @@ describe("Consolidation: account metadata is tenant-scoped", () => {
     await prisma.tenant.delete({ where: { id: otherTenantId } });
     // app_user hard-deletes trip the audit_log append-only RULE's
     // referential-integrity check — needs the mutable window.
-    await withAuditLogMutable(prisma, async () => {
-      await prisma.user.delete({ where: { id: otherOwnerUserId } });
+    await withAuditLogMutableTransaction(prisma, async (tx) => {
+      await tx.user.delete({ where: { id: otherOwnerUserId } });
     });
   });
 

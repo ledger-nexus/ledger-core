@@ -32,7 +32,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { GET } from "@/app/api/reports/trial-balance/csv/route";
-import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -80,18 +80,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await withAuditLogMutable(prisma, async () => {
-    await prisma.auditLog.deleteMany({
-    where: { tenantId: tenant.id },
-  });
-  });
   await prisma.legalEntity.deleteMany({
     where: { tenantId: tenant.id },
   });
-  await prisma.tenantMembership.deleteMany({
-    where: { tenantId: tenant.id },
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.auditLog.deleteMany({ where: { tenantId: tenant.id } });
+    await tx.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
+    await tx.tenant.delete({ where: { id: tenant.id } });
   });
-  await prisma.tenant.delete({ where: { id: tenant.id } });
   await prisma.$disconnect();
 });
 
