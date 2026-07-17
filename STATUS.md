@@ -33,9 +33,9 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Branch:** `laws-of-ux-nav` (worktree; shared checkout untouched)
 - **Until:** PR merged
 
-### Session askq-flake-triage · started 2026-07-16 21:30 · heartbeat 21:30
+### Session askq-flake-triage · started 2026-07-16 21:30 · heartbeat 21:45
 
-- **Scope**: triage the reported `tests/assistant-tools.test.ts` nondeterminism (unscoped entity resolution). Finding so far: the requested fix already merged in #260 (`3c7804c`); verifying whether any flake remains before changing anything
+- **Scope**: `tests/assistant-tools.test.ts`. The reported unscoped-entity flake was ALREADY fixed by #260 (`3c7804c`) — writes and reads both pin `scope.tenantId`. #260 introduced a NEW deterministic break: `beforeAll`'s `user.deleteMany` trips the audit_log append-only rule via the `actorUserId` FK, so every rerun against a reused DB dies (CI's fresh container hides it). Fix: upsert the fixture user
 - **Files / globs**: `tests/assistant-tools.test.ts`, `STATUS.md`
 - **Branch**: `claude/amazing-nightingale-a4e30f`
 - **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/amazing-nightingale-a4e30f`
