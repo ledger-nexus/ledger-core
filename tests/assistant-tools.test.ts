@@ -260,6 +260,22 @@ describe.skipIf(!HAS_DB)("ask-your-ledger tool executor", () => {
     expect(r.totalDelta).toBe("-300.00"); // book − tax
   });
 
+  it("get_book_tax_difference refuses a comparison book the entity never posts to", async () => {
+    // The comparison book is model-chosen and `Book` is a global table, so
+    // it must be bounded to a server-derived allowlist — the books this
+    // entity actually uses. ASKQ_ENT posts only to US_GAAP + US_TAX, so a
+    // request for IFRS is refused rather than reading a second book beyond
+    // the one granted in the assistant scope.
+    const r = (await executeTool(
+      prisma,
+      scope,
+      "get_book_tax_difference",
+      { from: "2026-01-01", to: "2026-12-31", taxBookCode: "IFRS" },
+      AS_OF
+    )) as { error?: string };
+    expect(r.error).toMatch(/no activity/);
+  });
+
   it("scopes reads to the granted tenant/entity — a foreign entity code is not honored", async () => {
     // The scope is server-derived; the executor must only read ASKQ_ENT.
     // Confirm it never returns another entity's accounts by asking for a
@@ -280,6 +296,20 @@ describe.skipIf(!HAS_DB)("ask-your-ledger tool executor", () => {
       scope,
       "get_income_statement",
       { from: "not-a-date", to: "2026-12-31" },
+      AS_OF
+    )) as { error?: string };
+    expect(r.error).toMatch(/YYYY-MM-DD/);
+  });
+
+  it("rejects a calendar-invalid date JS would silently normalize", async () => {
+    // 2026-02-30 passes a naive YYYY-MM-DD regex, but `new Date()` rolls it
+    // forward to Mar 2. The round-trip check must reject it so the report
+    // window is never silently shifted to a day the user didn't ask for.
+    const r = (await executeTool(
+      prisma,
+      scope,
+      "get_income_statement",
+      { from: "2026-02-30", to: "2026-12-31" },
       AS_OF
     )) as { error?: string };
     expect(r.error).toMatch(/YYYY-MM-DD/);
