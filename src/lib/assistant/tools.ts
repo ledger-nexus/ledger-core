@@ -190,9 +190,22 @@ export const TOOL_DEFS: ToolDef[] = [
 // recover from, never a thrown 500.
 
 function parseDate(s: string): Date | null {
-  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  if (typeof s !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
   const d = new Date(`${s}T00:00:00.000Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
+  if (Number.isNaN(d.getTime())) return null;
+  // Reject dates JS silently normalized: `new Date("2026-02-30…")` rolls
+  // forward to Mar 2 rather than failing, so a nonexistent day would quietly
+  // shift the report window. Round-trip the y/m/d and require an exact match.
+  if (
+    d.getUTCFullYear() !== Number(m[1]) ||
+    d.getUTCMonth() + 1 !== Number(m[2]) ||
+    d.getUTCDate() !== Number(m[3])
+  ) {
+    return null;
+  }
+  return d;
 }
 
 /** End-of-day UTC, so an `asOf` date includes everything posted that day. */
@@ -350,8 +363,14 @@ export async function executeTool(
 
       const lines = await prisma.journalLine.findMany({
         where: {
+          // accountId already pins the tenant (the account was resolved
+          // under scope.tenantId), but constrain the line and its entry
+          // to the tenant directly too — defense-in-depth so this read can
+          // never widen past the caller's tenant.
+          tenantId: scope.tenantId,
           accountId: account.id,
           entry: {
+            tenantId: scope.tenantId,
             entity: { code: scope.entityCode },
             book: { code: scope.bookCode },
             ...(from || to ? { documentDate } : {}),
@@ -539,6 +558,27 @@ export async function executeTool(
         typeof input.taxBookCode === "string" && input.taxBookCode.trim()
           ? input.taxBookCode.trim()
           : "US_TAX";
+
+      // The comparison book is model-chosen, so never trust it directly:
+      // constrain it to a server-derived allowlist — the books this
+      // (tenant, entity) actually posts into. `Book` is a global platform
+      // table, so an unrestricted code would let the model name any book
+      // and read a second book beyond the one granted in the assistant
+      // scope. Bounding to books the entity uses keeps the read authorized.
+      const usedBooks = await prisma.journalEntry.findMany({
+        where: { tenantId: scope.tenantId, entity: { code: scope.entityCode } },
+        distinct: ["bookId"],
+        select: { book: { select: { code: true } } },
+      });
+      const allowed = new Set(usedBooks.map((b) => b.book.code));
+      if (!allowed.has(taxBookCode)) {
+        return {
+          error:
+            `Book '${taxBookCode}' has no activity for this entity, so there's ` +
+            `nothing to compare. Books in use: ${[...allowed].sort().join(", ") || "none"}.`,
+        };
+      }
+
       const btd = await getBookTaxDifference(prisma as PrismaClient, {
         entityCode: scope.entityCode,
         fromBookCode: scope.bookCode,
