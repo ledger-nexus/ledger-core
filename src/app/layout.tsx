@@ -6,7 +6,7 @@ import { BookSwitcher } from "@/components/nav/book-switcher";
 import { UserSwitcher } from "@/components/nav/user-switcher";
 import { NotificationBell } from "@/components/nav/notification-bell";
 import { TenantSwitcher } from "@/components/nav/tenant-switcher";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope, DEFAULT_SCOPE } from "@/lib/scope";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { isClerkEnabled } from "@/lib/auth/clerk";
@@ -21,14 +21,13 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const scope = getScope();
   // The user switcher is the LOCAL-DEV auth stub (impersonate any seeded
   // user). Under Clerk (production auth) it must not exist — and we must
   // NOT fetch the global user list at all, or every tenant's user ids,
   // names, and emails would be serialized into the client bundle. Only
   // query it in dev-stub mode.
   const clerkOn = isClerkEnabled();
-  const [currentUser, currentTenant, users] = await Promise.all([
+  const [currentUser, currentTenant, users, resolvedScope] = await Promise.all([
     getCurrentUser(),
     getCurrentTenant(),
     clerkOn
@@ -38,7 +37,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           select: { id: true, email: true, displayName: true },
           orderBy: { displayName: "asc" },
         }),
+    getCurrentScope(),
   ]);
+  // Chrome (header label + book switcher) falls back to the seed default
+  // when there's no resolved scope (signed out / mid-onboarding). This
+  // replaces the raw getScope() cookie read — display only; every data
+  // read is tenant-pinned on resolvedScope below.
+  const scope = resolvedScope ?? DEFAULT_SCOPE;
   // Notifications are user-scoped — empty when there's no logged-in user.
   const notifications = currentUser
     ? await getRecentNotifications(prisma, currentUser.id)
@@ -46,12 +51,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Bank-feed pull for the sidebar badge — the one number worth ambient
   // chrome space (the daily loop). Cheap: leading columns of the
   // (tenantId, entityId, bookId, bankAccountId, status) index.
-  const reviewCount = currentTenant
+  const reviewCount = resolvedScope
     ? await prisma.bankTransaction.count({
         where: {
-          tenantId: currentTenant.id,
-          entity: { code: scope.entityCode },
-          book: { code: scope.bookCode },
+          tenantId: resolvedScope.tenantId,
+          entityId: resolvedScope.entityId,
+          book: { code: resolvedScope.bookCode },
           status: "FOR_REVIEW",
         },
       })
