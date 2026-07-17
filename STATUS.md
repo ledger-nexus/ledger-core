@@ -33,6 +33,13 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Branch:** `laws-of-ux-nav` (worktree; shared checkout untouched)
 - **Until:** PR merged
 
+### Session askq-flake-triage · started 2026-07-16 21:30 · heartbeat 21:30
+
+- **Scope**: triage the reported `tests/assistant-tools.test.ts` nondeterminism (unscoped entity resolution). Finding so far: the requested fix already merged in #260 (`3c7804c`); verifying whether any flake remains before changing anything
+- **Files / globs**: `tests/assistant-tools.test.ts`, `STATUS.md`
+- **Branch**: `claude/amazing-nightingale-a4e30f`
+- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/amazing-nightingale-a4e30f`
+
 ### Session po-collision-fix · started 2026-07-16 21:10 · heartbeat 21:25
 
 - **Scope**: fix PR #262's migration-ordinal collision — two `0017_` directories on the branch (`0017_po_allocation_columns` vs main's `0017_ns_iselimination_entity_column`); rename to `0022_`
