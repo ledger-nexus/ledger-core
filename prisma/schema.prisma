@@ -1304,6 +1304,14 @@ model FixedAsset {
 
   bookAttributes FixedAssetBookAttributes[]
 
+  // User attribution (DSR evidence). Set by the Server Action that creates
+  // the asset (manual UI flow) / flips it on disposal; NetSuite imports and
+  // pre-2026-06-05 rows leave them null — no human actor. Columns were
+  // applied to the shared DB by fa-amort's reviewed raw SQL
+  // (fa-amort prisma/sql/2026-06-05-attribution-schema.sql).
+  createdBy  String? @db.Uuid
+  disposedBy String? @db.Uuid
+
   sourceSystem     String?
   sourceRecordType String?
   sourceRecordId   String?
@@ -1317,6 +1325,10 @@ model FixedAsset {
   @@unique([entityId, code])
   @@index([entityId, status])
   @@index([tenantId])
+  // Physical index names are lowercase-folded — the 2026-06-05 raw SQL left
+  // them unquoted. The maps pin the actual names so migrate diff stays clean.
+  @@index([createdBy], map: "fixed_asset_createdby_idx")
+  @@index([disposedBy], map: "fixed_asset_disposedby_idx")
   @@map("fixed_asset")
 }
 
@@ -1347,8 +1359,18 @@ model FixedAssetBookAttributes {
   depreciationExpenseAccountCode String // e.g. "8000" Depreciation Expense
   accumDepreciationAccountCode   String // e.g. "1510" Accum Dep contra-asset
 
+  // User attribution (DSR evidence). Set by the Server Action that runs
+  // depreciation through a given date; NetSuite-imported rows leave both
+  // null. Applied to the shared DB by fa-amort's reviewed raw SQL
+  // (fa-amort prisma/sql/2026-06-05-attribution-schema.sql).
+  lastRunBy String?   @db.Uuid
+  lastRunAt DateTime?
+
   @@id([assetId, bookId])
   @@index([bookId, lastDepreciatedThrough])
+  // Lowercase physical name (unquoted in the 2026-06-05 raw SQL); the map
+  // pins it so migrate diff stays clean.
+  @@index([lastRunBy], map: "fab_lastrunby_idx")
   @@map("fixed_asset_book_attributes")
 }
 
