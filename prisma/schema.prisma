@@ -687,6 +687,16 @@ model JournalEntry {
   reversalOf   JournalEntry?  @relation("Reversal", fields: [reversalOfId], references: [id])
   reversedBy   JournalEntry[] @relation("Reversal")
 
+  // Correction lineage — a supplemental reclassification / correcting entry
+  // that fixes the classification of an earlier POSTED entry WITHOUT negating
+  // it. Unlike a reversal (which flips the source to REVERSED), the source of
+  // a correction stays POSTED: the correction is an additional adjusting entry,
+  // and this link records "this entry corrects that one" so the audit trail and
+  // the balance-change lineage view can follow it. Mirrors reversalOf.
+  correctionOfId String?        @db.Uuid
+  correctionOf   JournalEntry?  @relation("Correction", fields: [correctionOfId], references: [id])
+  corrections    JournalEntry[] @relation("Correction")
+
   // Lineage — non-negotiable per spec. Populated on every ERP import.
   sourceSystem     String? // "QBO", "NETSUITE", "INTACCT", ...
   sourceRecordType String? // "Invoice", "Bill", "JournalEntry", ...
