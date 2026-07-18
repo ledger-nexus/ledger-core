@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session docs-documents-corrections-spec · 2026-07-17
+- **Scope**: Docs-only. Added `docs/spec/documents-and-corrections-arc.md` — a scoping doc for Codex's roadmap items #1 (native transaction documents) + #2 (correction/reversal workflows), verified against the code and the locked `docs/universal-schema.md` before writing.
+- **Key finding**: the canon splits the arc across layers — corrections operate on `JournalEntry` (Layer 1, fits ledger-core), but Layer-4 document tables are assigned to **consumer repos** (build order line 168), NOT the substrate. So "build native documents in the engine" collides with a locked decision; documents are blocked on a repo-placement call. Corrections half is the recommended build (first slice: `correctionOfId` self-link + correcting-entry/reclass action).
+- **Files**: `docs/spec/documents-and-corrections-arc.md` (new), `STATUS.md` (this entry).
+- **Branch**: `docs/documents-corrections-arc-spec` (PR against main)
+- **Outcome**: docs-only; no code, schema, or DB change. No suite run needed.
+
 ### Session month-end-tenant-pin · 2026-07-17 (commit `5c8a704`)
 - **Scope**: The follow-up flagged in the codex-findings block below (⚠️ #2). `src/app/reports/month-end/page.tsx` re-resolved the entity with an un-tenant-pinned `legalEntity.findFirst({ where: { code } })` after `resolveCurrentScope()` — entity codes are unique only per `(tenantId, code)` (Phase 4b), so a code collision could resolve a DIFFERENT tenant's entity, and `entity.id` feeds the periodClose lookups, the three report calls, and the recon rollup. Fixed to `where: { tenantId: scope.tenantId, code: scope.entityCode }` (Codex #1 dashboard class, PR #269).
 - **Swept siblings**: `src/app/reports/**/page.tsx` — month-end was the ONLY page with the un-pinned findFirst-by-code. The other 10 resolve via `getCurrentScope()` (tenant-verified) and pass `scope.tenantId` downstream; `ar-aging`/`ap-aging`'s secondary `arOpenItem`/`apOpenItem.findMany` already pin `tenantId` at the top level of `where`.
