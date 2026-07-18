@@ -80,6 +80,10 @@ beforeEach(async () => {
   await prisma.journalEntry.deleteMany({
     where: { entity: { code: ENTITY_CODE } },
   });
+  // Reopen-log rows are keyed by denormalized code (no relation).
+  await prisma.periodReopenLog.deleteMany({
+    where: { entityCode: ENTITY_CODE },
+  });
 });
 
 async function seedMasterData() {
@@ -246,6 +250,7 @@ describe("closePeriodAction + reopenPeriodAction", () => {
       entityCode: ENTITY_CODE,
       bookCode: BOOK_GAAP,
       periodCode: "2026-05",
+      reason: "audit correction — reclass omitted",
     });
     expect(reopen.ok).toBe(true);
     expect(reopen.wasAlreadyOpen).toBe(false);
@@ -260,9 +265,54 @@ describe("closePeriodAction + reopenPeriodAction", () => {
       entityCode: ENTITY_CODE,
       bookCode: BOOK_GAAP,
       periodCode: "2026-05",
+      reason: "reopen idempotency check",
     });
     expect(r.ok).toBe(true);
     expect(r.wasAlreadyOpen).toBe(true);
+  });
+
+  it("reopen REQUIRES a reason — an empty reason is refused and the period stays closed", async () => {
+    setAdminCookie();
+    await closePeriodAction({
+      entityCode: ENTITY_CODE,
+      bookCode: BOOK_GAAP,
+      periodCode: "2026-05",
+    });
+    const r = await reopenPeriodAction({
+      entityCode: ENTITY_CODE,
+      bookCode: BOOK_GAAP,
+      periodCode: "2026-05",
+      reason: "   ",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/reason/i);
+    // Refused → the close-lock is untouched, so posting is still blocked.
+    await expect(postSampleEntry(BOOK_GAAP)).rejects.toBeInstanceOf(PeriodClosedError);
+  });
+
+  it("reopen records an immutable PeriodReopenLog row with the reason + reopenedBy", async () => {
+    setAdminCookie();
+    await closePeriodAction({
+      entityCode: ENTITY_CODE,
+      bookCode: BOOK_GAAP,
+      periodCode: "2026-05",
+    });
+    const reason = "May reclass posted after close";
+    const r = await reopenPeriodAction({
+      entityCode: ENTITY_CODE,
+      bookCode: BOOK_GAAP,
+      periodCode: "2026-05",
+      reason,
+    });
+    expect(r.ok).toBe(true);
+
+    const log = await prisma.periodReopenLog.findFirst({
+      where: { entityCode: ENTITY_CODE, bookCode: BOOK_GAAP, periodCode: "2026-05" },
+      orderBy: { reopenedAt: "desc" },
+    });
+    expect(log).not.toBeNull();
+    expect(log!.reason).toBe(reason);
+    expect(log!.reopenedBy).toBe(ADMIN_EMAIL);
   });
 
   it("per-book independence: closing US_GAAP does NOT close US_TAX", async () => {

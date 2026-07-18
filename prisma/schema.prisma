@@ -356,6 +356,32 @@ model PeriodClose {
   @@map("period_close")
 }
 
+// Append-only reopen history. PeriodClose is binary — a row exists (closed) or
+// it doesn't (open) — so deleting it on reopen erases the fact that a period was
+// ever reopened, and why. This log preserves each reopen as an immutable fact:
+// who, when, and the REQUIRED reason. Tamper-evident capture also lives in
+// audit_log (DB-RULE append-only); this table is the queryable domain
+// projection ("show every reopen of 2026-05 with reasons"). Columns are
+// denormalized (codes + reopenedBy email, no FK relations) so a row survives
+// deletion of its period/entity — the same survival rationale as
+// audit_log.actorEmail. Insert-only by application convention.
+model PeriodReopenLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @db.Uuid
+  entityId   String   @db.Uuid
+  bookId     String   @db.Uuid
+  entityCode String
+  bookCode   String
+  periodCode String
+  reason     String
+  reopenedBy String? // admin email; denormalized for trail survival
+  reopenedAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([entityId, bookId, periodCode])
+  @@map("period_reopen_log")
+}
+
 model Currency {
   // ISO 4217 code is the primary key — these are stable.
   code     String  @id // "USD", "EUR", "JPY"
