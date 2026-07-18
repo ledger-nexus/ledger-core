@@ -246,6 +246,12 @@ export interface ReopenPeriodInput {
   entityCode: string;
   bookCode: string;
   periodCode: string;
+  /**
+   * Why the period is being reopened. REQUIRED — a reopen resurrects posting
+   * on books that may already have been reported to stakeholders, so the
+   * reason is recorded as an immutable fact (PeriodReopenLog + audit metadata).
+   */
+  reason: string;
 }
 
 export interface ReopenPeriodState {
@@ -262,6 +268,14 @@ export async function reopenPeriodAction(
 
     if (!input.entityCode || !input.bookCode || !input.periodCode) {
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
+    }
+
+    // A reopen must always carry a stated reason — this is the whole point of
+    // the reopen-with-reason control. Gate before any lookup so an empty reason
+    // never reaches the delete.
+    const reason = input.reason?.trim();
+    if (!reason) {
+      return { ok: false, message: "A reason is required to reopen a closed period." };
     }
 
     // Phase 4b: see closePeriodAction above; findFirst by code.
@@ -310,17 +324,36 @@ export async function reopenPeriodAction(
       };
     }
 
-    await prisma.periodClose.delete({ where: { id: existing.id } });
+    // Remove the close-lock AND record the reopen as an immutable fact in one
+    // transaction — the period is never reopened without a durable, reasoned
+    // history row. Codes + reopenedBy are denormalized so the log survives a
+    // later period/entity deletion (same rationale as audit_log.actorEmail).
+    await prisma.$transaction([
+      prisma.periodClose.delete({ where: { id: existing.id } }),
+      prisma.periodReopenLog.create({
+        data: {
+          tenantId: entity.tenantId,
+          entityId: entity.id,
+          bookId: book.id,
+          entityCode: input.entityCode,
+          bookCode: input.bookCode,
+          periodCode: input.periodCode,
+          reason,
+          reopenedBy: admin.email,
+        },
+      }),
+    ]);
 
     // SOC 2 CC5/CC6: reopen is a SIGNIFICANT privileged action (it
     // re-opens books that may have been used for stakeholder reporting).
-    // Capture even more aggressively than close.
+    // Capture even more aggressively than close — including the reason.
     await auditPrivilegedAction({
       actor: admin,
       action: "reopen-period",
       resource: "Period",
       resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
       tenantId: entity.tenantId,
+      metadata: { reason },
     });
 
     revalidatePath("/periods");

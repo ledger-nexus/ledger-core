@@ -44,6 +44,16 @@ _No active claims._
 - **Files**: `docs/spec/documents-and-corrections-arc.md` (new), `STATUS.md` (this entry).
 - **Branch**: `docs/documents-corrections-arc-spec` (PR against main)
 - **Outcome**: docs-only; no code, schema, or DB change. No suite run needed.
+### Session period-reopen-reason · 2026-07-17
+- **Scope**: Documents & Corrections arc, Half A / A3 (scope doc `docs/spec/documents-and-corrections-arc.md`, PR #288). `reopenPeriodAction` now REQUIRES a reason (empty → refused before the delete) + records each reopen in a new append-only-by-convention `period_reopen_log` table (migration 0025; denormalized codes + reason + reopenedBy + reopenedAt, NO FK relations so a row survives period/entity deletion — audit_log.actorEmail rationale). Close-lock delete + log insert in one `$transaction`; reason also in reopen audit metadata. UI collects reason via prompt.
+- **Contract change**: `ReopenPeriodInput.reason` is now required. Only caller was `periods/period-actions.tsx` (updated); existing reopen contract tests updated to pass a reason (mechanics assertions unchanged) + new empty-reason-refused + log-row-written tests.
+- **Files**: `prisma/schema.prisma` (+PeriodReopenLog), `prisma/schema.prisma.sha256`, `prisma/migrations/0025_period_reopen_log/migration.sql` (new), `src/app/actions/period-close.ts`, `src/app/periods/period-actions.tsx`, `tests/period-close-action.test.ts`, `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `feat/period-reopen-reason` (PR against main)
+- **Outcome**: tsc clean; prisma validate + generate clean; schema-fingerprint green. ⛔ NO local DB run (real books here) — tests run in CI's ephemeral Postgres. **Deploy**: migration 0025 needs `prisma db push` on personal-books + any prod. May trivially conflict with reclassify PR #289 on PROJECT_STATUS.md (keep both).
+
+### Session je-reclassify-correction · 2026-07-17
+- **Scope**: First code slice of the Documents & Corrections arc (Half A). Adds `JournalEntry.correctionOfId` + `reclassifyJournalEntryAction`. See PR #289.
+- **Branch**: `feat/je-reclassify-correction` (PR against main) — OPEN.
 
 ### Session month-end-tenant-pin · 2026-07-17 (commit `5c8a704`)
 - **Scope**: The follow-up flagged in the codex-findings block below (⚠️ #2). `src/app/reports/month-end/page.tsx` re-resolved the entity with an un-tenant-pinned `legalEntity.findFirst({ where: { code } })` after `resolveCurrentScope()` — entity codes are unique only per `(tenantId, code)` (Phase 4b), so a code collision could resolve a DIFFERENT tenant's entity, and `entity.id` feeds the periodClose lookups, the three report calls, and the recon rollup. Fixed to `where: { tenantId: scope.tenantId, code: scope.entityCode }` (Codex #1 dashboard class, PR #269).

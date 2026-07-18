@@ -46,13 +46,25 @@ export default function PeriodActions({
   }
 
   function handleReopen() {
-    const ok = window.confirm(
-      `Reopen period ${periodCode} on ${entityCode} / ${bookCode}?\n\nReopening allows new posts (and reversals of existing JEs) against this period. Only do this if stakeholder reports for this period have NOT yet been finalized.`
+    // A reopen must carry a reason — it's recorded in the audit trail and the
+    // reopen history. Collect it up front; empty/cancel aborts.
+    const reason = window.prompt(
+      `Reopen period ${periodCode} on ${entityCode} / ${bookCode}?\n\nReopening allows new posts (and reversals of existing JEs) against this period. Only do this if stakeholder reports for this period have NOT yet been finalized.\n\nEnter a reason (required — recorded in the audit trail):`
     );
-    if (!ok) return;
+    if (reason === null) return; // cancelled
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setError("A reason is required to reopen a period.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
-      const r = await reopenPeriodAction({ entityCode, bookCode, periodCode });
+      const r = await reopenPeriodAction({
+        entityCode,
+        bookCode,
+        periodCode,
+        reason: trimmed,
+      });
       if (!r.ok) setError(r.message ?? "Reopen failed");
     });
   }
