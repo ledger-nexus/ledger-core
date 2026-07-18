@@ -24,6 +24,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
+import { withPeriodReopenLogMutable } from "./_helpers/audit-log-cleanup";
 // next/headers' cookies() only works inside a Next.js request scope.
 // Mock it with a simple in-memory store so the auth stub + the Server
 // Action's revalidatePath calls can run in vitest. Must be hoisted
@@ -80,10 +81,11 @@ beforeEach(async () => {
   await prisma.journalEntry.deleteMany({
     where: { entity: { code: ENTITY_CODE } },
   });
-  // Reopen-log rows are keyed by denormalized code (no relation).
-  await prisma.periodReopenLog.deleteMany({
-    where: { entityCode: ENTITY_CODE },
-  });
+  // Reopen-log rows are append-only (RULE-enforced) — a plain deleteMany
+  // no-ops, so suspend the rules to clear this suite's residue between runs.
+  await withPeriodReopenLogMutable(prisma, () =>
+    prisma.periodReopenLog.deleteMany({ where: { entityCode: ENTITY_CODE } })
+  );
 });
 
 async function seedMasterData() {

@@ -162,3 +162,39 @@ export async function withAuditLogMutableTransaction<T>(
     { maxWait: 10_000, timeout: 30_000 }
   );
 }
+
+/**
+ * Run a cleanup callback with the period_reopen_log append-only rules
+ * temporarily disabled, so a test can DELETE the reopen-log rows it created.
+ * Mirrors withAuditLogMutable — period_reopen_log has no FK relations, so no
+ * constraint suspension is needed. The rules are re-armed on return even if
+ * the callback throws. Gated on NODE_ENV + the disposable-DB check exactly
+ * like the audit_log helpers: this suspends a SOC 2 control, so it must never
+ * touch a real database.
+ */
+export async function withPeriodReopenLogMutable<T>(
+  prisma: PrismaClient,
+  cleanup: () => Promise<T>
+): Promise<T> {
+  if (ROLE_GATE) throw new Error(ROLE_GATE);
+  assertDisposableTestDatabase();
+
+  await prisma.$executeRawUnsafe(
+    `DROP RULE IF EXISTS period_reopen_log_no_update ON "period_reopen_log"`
+  );
+  await prisma.$executeRawUnsafe(
+    `DROP RULE IF EXISTS period_reopen_log_no_delete ON "period_reopen_log"`
+  );
+
+  try {
+    return await cleanup();
+  } finally {
+    // Re-arm even on cleanup error so the next test run still has the rules.
+    await prisma.$executeRawUnsafe(
+      `CREATE RULE period_reopen_log_no_update AS ON UPDATE TO "period_reopen_log" DO INSTEAD NOTHING`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE RULE period_reopen_log_no_delete AS ON DELETE TO "period_reopen_log" DO INSTEAD NOTHING`
+    );
+  }
+}

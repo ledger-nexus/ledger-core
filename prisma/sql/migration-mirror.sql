@@ -192,3 +192,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS "ap_open_item_lineage_uniq"
   WHERE "sourceSystem" IS NOT NULL
     AND "sourceRecordType" IS NOT NULL
     AND "sourceRecordId" IS NOT NULL;
+
+-- ════════════════════════════════════════════════════════════════════
+-- 7. period_reopen_log append-only enforcement (SOC 2 CC5/CC7.2)
+--    period_reopen_log records every period reopen as an immutable fact
+--    (who / when / reason). App discipline is insert-only; these RULEs are
+--    the AUDITABLE PROOF that the reopen history cannot be silently edited,
+--    even by a privileged user running arbitrary SQL. Same RULE→NOTHING
+--    mechanism and rationale as audit_log (section 4 / audit-log-append-only.sql):
+--    UPDATE and DELETE become silent no-ops; INSERT stays unrestricted.
+--    Partial unique / triggers can't be expressed in schema.prisma, so
+--    `db push` never creates these — this mirror entry is what CI and
+--    post-reset restores rely on.
+--    Numbered migration: prisma/migrations/0026_period_reopen_log_append_only/.
+--    Keep this block, that migration, and the withPeriodReopenLogMutable
+--    re-arm statements (tests/_helpers/audit-log-cleanup.ts) in sync.
+--    Idempotent: drops existing rules first so re-applying is safe.
+--    Rollback: DROP RULE IF EXISTS period_reopen_log_no_update ON "period_reopen_log";
+--              DROP RULE IF EXISTS period_reopen_log_no_delete ON "period_reopen_log";
+-- ════════════════════════════════════════════════════════════════════
+
+DROP RULE IF EXISTS period_reopen_log_no_update ON "period_reopen_log";
+DROP RULE IF EXISTS period_reopen_log_no_delete ON "period_reopen_log";
+
+CREATE RULE period_reopen_log_no_update AS
+  ON UPDATE TO "period_reopen_log"
+  DO INSTEAD NOTHING;
+
+CREATE RULE period_reopen_log_no_delete AS
+  ON DELETE TO "period_reopen_log"
+  DO INSTEAD NOTHING;
