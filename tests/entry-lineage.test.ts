@@ -17,6 +17,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { getEntryLineage } from "@/lib/accounting/lineage";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -98,8 +99,17 @@ afterAll(async () => {
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
   await prisma.legalEntity.deleteMany({ where: { id: entityId } });
-  await prisma.tenant.delete({ where: { id: tenantId } });
-  await prisma.user.delete({ where: { id: userId } });
+  // Hard-deleting an app_user runs the audit_log_actorUserId_fkey referential
+  // check, which the append-only audit_log RULE rewrites → XX000. Suspend the
+  // rules for the tenant/user teardown (same window the reverse/reclassify
+  // teardowns use), even though this suite writes no audit rows.
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.auditLog.deleteMany({
+      where: { OR: [{ tenantId }, { actorUserId: userId }] },
+    });
+    await tx.tenant.delete({ where: { id: tenantId } });
+    await tx.user.delete({ where: { id: userId } });
+  });
   await prisma.$disconnect();
 });
 
