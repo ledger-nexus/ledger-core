@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { formatDate, formatMoney } from "@/lib/utils/format";
+import { getEntryLineage } from "@/lib/accounting/lineage";
 import ReverseButton from "./reverse-button";
 import NotesCard from "./notes-card";
 
@@ -33,8 +34,6 @@ export default async function JournalEntryDetailPage({
       entity: { select: { code: true } },
       book: { select: { code: true } },
       currency: { select: { code: true } },
-      reversalOf: { select: { id: true, entryNumber: true } },
-      reversedBy: { select: { id: true, entryNumber: true } },
       lines: {
         include: {
           account: { select: { code: true, name: true } },
@@ -61,6 +60,13 @@ export default async function JournalEntryDetailPage({
   if (!entry) {
     notFound();
   }
+
+  // Correction / reversal lineage — what this entry reverses or corrects, and
+  // what reverses or corrects it. Scoped to the entry's own tenant.
+  const lineage = await getEntryLineage(prisma, {
+    tenantId: entry.tenantId,
+    entryId: entry.id,
+  });
 
   const totalDebit = entry.lines.reduce(
     (acc, l) => acc.plus(new Decimal(l.debit.toString())),
@@ -109,7 +115,7 @@ export default async function JournalEntryDetailPage({
               id={entry.id}
               entryNumber={entry.entryNumber}
               status={entry.status}
-              reversedByEntryNumber={entry.reversedBy[0]?.entryNumber}
+              reversedByEntryNumber={lineage?.reversedBy[0]?.entryNumber}
             />
             <a href={`/api/journal-entries/${entry.id}/csv`} download>
               <Button size="sm" variant="ghost">
@@ -130,35 +136,17 @@ export default async function JournalEntryDetailPage({
           <Field label="Source record ID" value={entry.sourceRecordId} className="font-mono" />
         )}
         {entry.mappingVersion && <Field label="Mapping version" value={entry.mappingVersion} />}
-        {entry.reversalOf && (
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
-              Reverses
-            </div>
-            <div className="mt-0.5 text-sm">
-              <Link
-                href={`/journal-entries/${entry.reversalOf.id}`}
-                className="font-mono text-link hover:underline"
-              >
-                {entry.reversalOf.entryNumber}
-              </Link>
-            </div>
-          </div>
+        {lineage?.reverses && (
+          <LineageField label="Reverses" nodes={[lineage.reverses]} />
         )}
-        {entry.reversedBy.length > 0 && (
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
-              Reversed by
-            </div>
-            <div className="mt-0.5 text-sm">
-              <Link
-                href={`/journal-entries/${entry.reversedBy[0].id}`}
-                className="font-mono text-link hover:underline"
-              >
-                {entry.reversedBy[0].entryNumber}
-              </Link>
-            </div>
-          </div>
+        {lineage && lineage.reversedBy.length > 0 && (
+          <LineageField label="Reversed by" nodes={lineage.reversedBy} />
+        )}
+        {lineage?.corrects && (
+          <LineageField label="Corrects" nodes={[lineage.corrects]} />
+        )}
+        {lineage && lineage.correctedBy.length > 0 && (
+          <LineageField label="Corrected by" nodes={lineage.correctedBy} />
         )}
       </div>
 
@@ -261,6 +249,33 @@ function Field({ label, value, className }: { label: string; value: string; clas
     <div>
       <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">{label}</div>
       <div className={`mt-0.5 text-sm text-ink-800 ${className ?? ""}`}>{value}</div>
+    </div>
+  );
+}
+
+// Renders one lineage relationship (Reverses / Reversed by / Corrects /
+// Corrected by) as a labeled list of links to the related entries.
+function LineageField({
+  label,
+  nodes,
+}: {
+  label: string;
+  nodes: { id: string; entryNumber: string }[];
+}) {
+  return (
+    <div>
+      <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">{label}</div>
+      <div className="mt-0.5 flex flex-col gap-0.5 text-sm">
+        {nodes.map((n) => (
+          <Link
+            key={n.id}
+            href={`/journal-entries/${n.id}`}
+            className="font-mono text-link hover:underline"
+          >
+            {n.entryNumber}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

@@ -32,6 +32,12 @@ _No active claims._
 
 ## Recent completions
 
+### Session entry-lineage-view · 2026-07-17
+- **Scope**: Documents & Corrections arc, Half A / A4 (scope doc `docs/spec/documents-and-corrections-arc.md`, PR #288). `getEntryLineage(db, {tenantId, entryId})` (`src/lib/accounting/lineage.ts`) — tenant-scoped resolver returning an entry's reversal + correction lineage in both directions (reverses/reversedBy via reversalOfId, corrects/correctedBy via correctionOfId). JE detail page renders a unified related-entries display from it (corrections alongside reversals; ReverseButton fed from the same source). Read-only, NO schema change.
+- **Files**: `src/lib/accounting/lineage.ts` (new), `tests/entry-lineage.test.ts` (new), `src/app/journal-entries/[id]/page.tsx`, `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `feat/entry-lineage-view` — ⚠️ STACKED on `feat/je-reclassify-correction` (#289), because it walks `correctionOfId` which only exists there. PR base = that branch; retarget to main after #289 merges.
+- **Outcome**: tsc clean; ⛔ NO local DB run (real books) — resolver tests run in CI's ephemeral Postgres. Page is server-rendered (typechecked; visual browser-deferred). May trivially conflict with #290 on PROJECT_STATUS.md.
+
 ### Session je-reclassify-correction · 2026-07-17
 - **Scope**: First code slice of the Documents & Corrections arc (Half A, scoped in `docs/spec/documents-and-corrections-arc.md`, PR #288). Adds `JournalEntry.correctionOfId` (nullable self-link mirroring `reversalOfId`; migration 0024, additive/nullable/no-backfill/not-mirror-DDL) + `reclassifyJournalEntryAction` — moves an amount from one GL account to another via a balanced correcting entry through `postJournalEntry`, links `correctionOfId`, leaves the source POSTED (a correction supplements, it does NOT negate). Direction derived from the source's net on the from-account (no direction input; proves the account was in the source; per-correction bound to what the source booked — cumulative over-reclass is a documented v1 limit). Tenant-scoped lookup + privileged-action audit.
 - **Files**: `prisma/schema.prisma` (+correctionOfId), `prisma/schema.prisma.sha256` (refreshed), `prisma/migrations/0024_journal_entry_correction_of/migration.sql` (new), `src/app/actions/reclassify-journal-entry.ts` (new), `tests/reclassify-journal-entry.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`.
