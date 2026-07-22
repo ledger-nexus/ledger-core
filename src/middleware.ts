@@ -88,10 +88,12 @@ function buildCspHeader(nonce: string): string {
   // every styled component — too invasive for now.
   const policy = [
     `default-src 'self'`,
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    // unsafe-eval is required by some Clerk + Stripe widgets in dev.
-    // We omit it in production; if a widget breaks, narrow it down
-    // and add a specific exception rather than blanket-allow.
+    // Dev needs 'unsafe-eval' in script-src (NOT script-src-elem — eval()
+    // is governed by script-src): Next dev serves eval-wrapped modules, so
+    // without it every page loads but never hydrates. Prod stays strict.
+    process.env.NODE_ENV === "production"
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`,
     process.env.NODE_ENV === "production"
       ? null
       : `script-src-elem 'self' 'nonce-${nonce}' 'unsafe-inline' 'unsafe-eval'`,
