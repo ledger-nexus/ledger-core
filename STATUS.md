@@ -26,12 +26,7 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session csp-dev-unsafe-eval · started 2026-07-22 · heartbeat 2026-07-22
-
-- **Scope**: extract the dev-CSP hydration fix from `feat/flowkit-graft` into its own PR — `'unsafe-eval'` belongs in `script-src` (not just `script-src-elem`) in non-production, since `eval()` is governed by `script-src`; without it `next dev` pages load but never hydrate. Prod policy unchanged.
-- **Files / globs**: `src/middleware.ts` (buildCspHeader only), `tests/csp-nonce.test.ts`, `STATUS.md`
-- **Branch**: `fix/csp-dev-script-src-unsafe-eval` (PR against main)
-- **Working dir**: `/Users/hosungson/Code/ledger-core-csp-fix` (worktree)
+_No active claims._
 
 ---
 
@@ -109,6 +104,10 @@ than 60 minutes, other sessions may consider your claim stale.
 - **Files**: `prisma/schema.prisma` (+Commodity, +CommodityPrice, +2 Tenant backrefs), `prisma/schema.prisma.sha256`, `prisma/migrations/0029_commodity_price/migration.sql` (new), `src/lib/accounting/commodity-price.ts` (new), `tests/commodity-price.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`.
 - **Branch**: `feat/commodity-price` (PR against main — independent of #296/#297/#298).
 - **Outcome**: prisma validate + generate clean; tsc exit 0; fingerprint green. ⛔ NO local DB run (real books) — CI runs the suite. **Deploy**: migration 0029 needs `prisma db push` on personal-books + any prod. Consumers (holdings valuation) are follow-ups.
+### Session csp-dev-unsafe-eval · 2026-07-22
+- **Scope**: extracted the dev-CSP hydration fix from `feat/flowkit-graft` into its own PR — `'unsafe-eval'` moved into the non-production `script-src` directive (eval() is governed by `script-src`, not `script-src-elem`); prod policy byte-identical. `src/middleware.ts` (buildCspHeader) + regression tests in `tests/csp-nonce.test.ts`.
+- **Branch**: `fix/csp-dev-script-src-unsafe-eval` (PR against main)
+- **Outcome**: csp-nonce suite 11/11 (dev-branch test verified to fail pre-fix); tsc exit 0; live dev run hydrates (`window.next` object, zero console errors); `next build && next start` smoke: prod CSP strict (no unsafe-eval), `/sign-in` hydrates, `/` fail-closes 503 without Clerk keys. DB-free change — no local DB suites run.
 
 ### Session entry-lineage-view · 2026-07-17
 - **Scope**: Documents & Corrections arc, Half A / A4 (scope doc `docs/spec/documents-and-corrections-arc.md`, PR #288). `getEntryLineage(db, {tenantId, entryId})` (`src/lib/accounting/lineage.ts`) — tenant-scoped resolver returning an entry's reversal + correction lineage in both directions (reverses/reversedBy via reversalOfId, corrects/correctedBy via correctionOfId). JE detail page renders a unified related-entries display from it (corrections alongside reversals; ReverseButton fed from the same source). Read-only, NO schema change.
