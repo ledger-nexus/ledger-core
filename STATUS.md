@@ -26,7 +26,12 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session csp-dev-unsafe-eval · started 2026-07-22 · heartbeat 2026-07-22
+
+- **Scope**: extract the dev-CSP hydration fix from `feat/flowkit-graft` into its own PR — `'unsafe-eval'` belongs in `script-src` (not just `script-src-elem`) in non-production, since `eval()` is governed by `script-src`; without it `next dev` pages load but never hydrate. Prod policy unchanged.
+- **Files / globs**: `src/middleware.ts` (buildCspHeader only), `tests/csp-nonce.test.ts`, `STATUS.md`
+- **Branch**: `fix/csp-dev-script-src-unsafe-eval` (PR against main)
+- **Working dir**: `/Users/hosungson/Code/ledger-core-csp-fix` (worktree)
 
 ---
 
