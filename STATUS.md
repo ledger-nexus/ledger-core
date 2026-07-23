@@ -190,6 +190,10 @@ _No active claims._
 - **Scope**: Fixed the intermittent P2002 on `(calendarId, ordinal)` in `tests/close-retrospective-history.test.ts` — dedicated per-run fiscal calendar + deterministic ordinals 1..3 + self-healing `crh`-prefix scrub in `beforeAll`, mirroring the sibling `tests/close-retrospective.test.ts`. Root cause was NOT concurrent workers (vitest pins `singleFork: true`): the three random ordinal draws came from overlapping ranges, self-colliding ~3.26% per run (~1 in 31), compounded by residue stranded on the shared Northwind calendar by killed runs.
 - **Branch**: `fix/close-retrospective-history-fixture-collision` (pushed; PR #259 open against main)
 - **Outcome**: 6/6 green over 6 consecutive runs incl. one against injected residue (scrub collected it all); 31/31 across the five calendar-interacting suites; suite passes in full `npm test`. Test-hygiene only — no product/schema change.
+### Session 2026-07-15-sbom-npm-fix · 2026-07-15 (PR #242)
+- **Scope**: Fixed the always-red SBOM workflow (`.github/workflows/sbom.yml`) — it set up pnpm (`pnpm/action-setup`, `cache: pnpm`, `pnpm install --frozen-lockfile`) but the repo is npm-only, so all 25 runs since 2026-06-12 failed in ~15s ("lock file is not found ... pnpm-lock.yaml"). Switched to `cache: npm` + `npm ci`, mirroring ci.yml. SBOM gen step (`@cyclonedx/cyclonedx-npm`) was already npm-correct.
+- **Branch**: `claude/bold-curie-961bd4` (pushed; PR #242 open against main)
+- **Outcome**: Verified green via `workflow_dispatch` on the branch (run 29466230891, success) — real 104 KB SBOM artifact uploaded, 90-day retention. Non-blocking Node 20→24 deprecation annotation noted (repo-wide, out of scope).
 
 ### Session 2026-06-11-report-tenant-scope · 2026-06-11
 - **Scope**: Deficiency #16 — tenant-scoped the remaining unscoped account scans in report modules (IS, BS via `entityTenantId`; cash-flow, BTD, M-3 via resolve-entity-first) + 5 poisoned-shared-account regression tests (`tests/report-tenant-scoping.test.ts`, verified to fail pre-fix) + deficiency #16 → Closed. BTD finding: its subtype scan read the ENTIRE account table across all tenants.
