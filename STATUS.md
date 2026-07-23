@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session holdings-trade-form · 2026-07-18
+- **Scope**: Beancount adoption ④ part 4b — the UI I had deferred. `src/app/holdings/trade-form.tsx` (client component) calls the gated `recordCommodityTradeAction`; gain/loss fields render only for SELL; errors show the substrate's own message. Wired into `/holdings`. Nav: Holdings added to **Transactions → `more`** (beside Open AR/AP — third open-item sub-ledger view; kept out of the Pareto `items` set deliberately).
+- **Files**: `src/app/holdings/trade-form.tsx` (new), `src/app/holdings/page.tsx`, `src/components/nav/catalog.ts`, `PROJECT_STATUS.md`, `STATUS.md`. NO schema/migration/fingerprint change; no new server logic (action + reader already tested).
+- **Branch**: `feat/holdings-trade-form` (PR against main).
+- **Outcome**: tsc exit 0; CI's **production build** covers the App Router client/server boundary. ⚠️ VISUAL still unverified from this clone (real books; in-app browser can't drive React forms) — Chris's real browser is the check. No deploy action.
+
+
 ### Session holdings-and-trade-action · 2026-07-18
 - **Scope**: Beancount adoption slice ④ / part 4 — completes the lots arc. `recordCommodityTradeAction` (gated Server Action: auth + session-derived scope + `auditPrivilegedAction`, wrapping the part-3 domain commands) + `getHoldings()` (open lots rolled up per commodity: units, cost basis, weighted-avg cost, mark-to-market via commodity-price ③; unpriced → nulls, never an invented mark) + read-only `/holdings` page. NO schema change.
 - **Why the action matters**: part 3's commands were intentionally left unreachable/un-audited; this is the control that makes trades user-reachable AND attributable ("AI suggests, humans approve, the system posts").
