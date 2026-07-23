@@ -73,6 +73,8 @@ model Tenant {
   periods                   Period[]
   periodCloses              PeriodClose[]
   balanceAssertions         BalanceAssertion[]
+  commodities               Commodity[]
+  commodityPrices           CommodityPrice[]
   parties                   Party[]
   partyRoles                PartyRole[]
   items                     Item[]
@@ -484,6 +486,67 @@ model FxRate {
   @@unique([fromCurrencyId, toCurrencyId, asOf, rateType])
   @@index([asOf])
   @@map("fx_rate")
+}
+
+// Commodity — a tradeable instrument that is NOT a currency: a stock, ETF,
+// fund, crypto asset, etc. Currency is ISO-4217-keyed and global ("these are
+// stable"); a commodity is tenant master data like Item / Party, so it carries
+// tenantId and is unique per (tenant, symbol). Keeping the two apart is
+// deliberate — a security price is unrepresentable in FxRate (which is
+// currency->currency), and pushing securities into Currency would pollute
+// Layer-2 master data. See docs/spec/beancount-adoption-study.md (item 3).
+//
+// This is an ADDITIVE Layer-2 extension: nothing here changes Currency, FxRate
+// or the posting path. It establishes the seam that mark-to-market / holdings
+// valuation and per-commodity balance assertions can build on later.
+model Commodity {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  // Beancount-style symbol: "AAPL", "BTC", "VTSAX". Not an ISO currency.
+  symbol     String
+  name       String
+  // Free-form for v1 ("EQUITY", "CRYPTO", "FUND", ...). A typed enum can come
+  // later once the set stabilises.
+  assetClass String?
+  active     Boolean  @default(true)
+
+  prices CommodityPrice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, symbol])
+  @@index([tenantId])
+  @@map("commodity")
+}
+
+// A price point: the value of ONE unit of a commodity, quoted in a currency,
+// on a date. Mirrors FxRate (the currency-pair price DB) but for commodities.
+// Resolution is on-or-before (see getCommodityPrice), the same convention as
+// resolveFxRate. Last write for a given (commodity, currency, date) wins —
+// matching Beancount's "the last price declaration on a day is retained".
+//
+// currencyId is a plain code column (no relation) to avoid a Currency backref,
+// matching ar_open_item.currencyId.
+model CommodityPrice {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  commodityId String    @db.Uuid
+  commodity   Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  currencyId  String
+  asOf        DateTime  @db.Date
+  price       Decimal   @db.Decimal(20, 10)
+  // Provenance: "MANUAL", "IMPORT:<system>", etc. Optional.
+  source      String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([commodityId, currencyId, asOf])
+  @@index([tenantId])
+  @@index([commodityId, currencyId, asOf])
+  @@map("commodity_price")
 }
 
 enum FxRateType {
