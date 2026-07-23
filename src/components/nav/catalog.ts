@@ -46,6 +46,10 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/recurring-entries", label: "Recurring", hint: "templates" },
       { href: "/ar", label: "Open AR" },
       { href: "/ap", label: "Open AP" },
+      // The third open-item sub-ledger view: positions still held, with the
+      // cost basis behind them. Sits with AR/AP rather than in the Pareto set
+      // because most installs never hold securities.
+      { href: "/holdings", label: "Holdings", hint: "investments" },
     ],
   },
   {

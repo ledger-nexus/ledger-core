@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatMoney } from "@/lib/utils/format";
+import TradeForm from "./trade-form";
 
 export default async function HoldingsPage() {
   const scope = await getCurrentScope();
@@ -43,6 +44,8 @@ export default async function HoldingsPage() {
           Open positions for {scope.entityCode} · {scope.bookCode}, valued at cost basis.
         </p>
       </div>
+
+      <TradeForm />
 
       {holdings.length === 0 ? (
         <EmptyState
