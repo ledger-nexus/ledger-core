@@ -34,6 +34,8 @@ import {
   UnknownBookError,
   PeriodClosedError,
   AccountBookScopeError,
+  AccountCurrencyNotAllowedError,
+  AccountNotOpenError,
   TenantScopeMismatchError,
   EntityMissingTenantError,
 } from "./types";
@@ -212,15 +214,38 @@ export async function postJournalEntry(
       active: true,
       OR: [{ entityId: null }, { entityId: entity.id }],
     },
-    select: { id: true, code: true, entityId: true, bookScope: true },
+    select: {
+      id: true,
+      code: true,
+      entityId: true,
+      bookScope: true,
+      allowedCurrencies: true,
+      openedOn: true,
+      closedOn: true,
+    },
   });
 
   // Build code -> account map. Prefer entity-specific over shared if both exist.
-  const codeToAccount = new Map<string, { id: string; bookScope: string[] }>();
+  const codeToAccount = new Map<
+    string,
+    {
+      id: string;
+      bookScope: string[];
+      allowedCurrencies: string[];
+      openedOn: Date | null;
+      closedOn: Date | null;
+    }
+  >();
   for (const a of accounts) {
     const existing = codeToAccount.get(a.code);
     if (!existing || (a.entityId !== null && existing && a.entityId === entity.id)) {
-      codeToAccount.set(a.code, { id: a.id, bookScope: a.bookScope });
+      codeToAccount.set(a.code, {
+        id: a.id,
+        bookScope: a.bookScope,
+        allowedCurrencies: a.allowedCurrencies,
+        openedOn: a.openedOn,
+        closedOn: a.closedOn,
+      });
     }
   }
 
@@ -229,6 +254,32 @@ export async function postJournalEntry(
     if (!acct) throw new UnknownAccountError(line.accountCode);
     if (acct.bookScope.length > 0 && !acct.bookScope.includes(book.code)) {
       throw new AccountBookScopeError(line.accountCode, book.code);
+    }
+    // Commodity constraint. Empty = unconstrained, so this is inert for any
+    // account that hasn't opted in.
+    if (
+      acct.allowedCurrencies.length > 0 &&
+      !acct.allowedCurrencies.includes(currencyCode)
+    ) {
+      throw new AccountCurrencyNotAllowedError(
+        line.accountCode,
+        currencyCode,
+        acct.allowedCurrencies
+      );
+    }
+    // Dated lifecycle, checked against the DOCUMENT date (the date the
+    // transaction is dated, which is also what resolves the period) rather than
+    // the posting date. Boundaries inclusive; null = unbounded.
+    if (
+      (acct.openedOn && input.documentDate < acct.openedOn) ||
+      (acct.closedOn && input.documentDate > acct.closedOn)
+    ) {
+      throw new AccountNotOpenError(
+        line.accountCode,
+        input.documentDate,
+        acct.openedOn,
+        acct.closedOn
+      );
     }
   }
 
