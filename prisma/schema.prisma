@@ -72,6 +72,7 @@ model Tenant {
   fiscalCalendars           FiscalCalendar[]
   periods                   Period[]
   periodCloses              PeriodClose[]
+  balanceAssertions         BalanceAssertion[]
   parties                   Party[]
   partyRoles                PartyRole[]
   items                     Item[]
@@ -215,6 +216,7 @@ model LegalEntity {
   parties          Party[]
   items            Item[]
   periodCloses     PeriodClose[]
+  balanceAssertions BalanceAssertion[]
   fixedAssets      FixedAsset[]
   leases           Lease[]
   revenueContracts RevenueContract[]
@@ -252,6 +254,7 @@ model Book {
 
   journalEntries                JournalEntry[]
   periodCloses                  PeriodClose[]
+  balanceAssertions             BalanceAssertion[]
   postingRules                  PostingRule[]
   fixedAssetBookAttributes      FixedAssetBookAttributes[]
   leaseBookAttributes           LeaseBookAttributes[]
@@ -380,6 +383,70 @@ model PeriodReopenLog {
   @@index([tenantId])
   @@index([entityId, bookId, periodCode])
   @@map("period_reopen_log")
+}
+
+// Balance assertion — "this account held exactly this much on this date."
+//
+// postJournalEntry enforces correctness at the moment of WRITE (debits =
+// credits, account validity, period close). An assertion enforces correctness
+// ACROSS TIME: it catches silent drift — a double-posted import, a missed
+// reversal, a mapper regression — on the date it first appears, instead of at
+// period close. Cheap and machine-checked, so it can run continuously (e.g.
+// after every bank-feed import).
+//
+// This does NOT duplicate Reconciliation. Reconciliation is the periodic,
+// human, attested control (glBalance vs supportingBalance + sign-off); an
+// assertion is a continuous tripwire. They are complementary — keep both.
+//
+// asOf semantics: END of day — the observed balance includes every entry with
+// documentDate <= asOf, matching getTrialBalance. (Beancount, the source of
+// this idea, asserts at the START of the date. The divergence is deliberate;
+// mixing the two silently answers the wrong question.)
+//
+// expectedAmount is stated on the account's NORMAL side, matching
+// TrialBalanceRow.balance. tolerance null => derived from Currency.decimals
+// (one unit of the last decimal place: 0.01 USD, 1 JPY).
+model BalanceAssertion {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+  accountId String     @db.Uuid
+  account   Account    @relation(fields: [accountId], references: [id])
+
+  // v1 asserts in the book's reporting currency. Plain column (no relation),
+  // matching ar_open_item / ap_open_item. Carried explicitly so per-commodity
+  // assertions remain expressible once a commodity/price layer exists.
+  currencyId String
+
+  asOf           DateTime @db.Date
+  expectedAmount Decimal  @db.Decimal(20, 4)
+  tolerance      Decimal? @db.Decimal(20, 4)
+
+  // Result cache. The assertion itself is the durable fact; these are a
+  // recomputable snapshot of the last check so a UI can render without
+  // re-running the whole sweep.
+  lastCheckedAt      DateTime?
+  lastObservedAmount Decimal?        @db.Decimal(20, 4)
+  lastStatus         AssertionStatus @default(UNCHECKED)
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, bookId, accountId, currencyId, asOf])
+  @@index([tenantId])
+  @@index([entityId, bookId, asOf])
+  @@map("balance_assertion")
+}
+
+enum AssertionStatus {
+  UNCHECKED
+  PASS
+  FAIL
 }
 
 model Currency {
@@ -596,6 +663,7 @@ model Account {
 
   lines                   JournalLine[]
   reconciliations         Reconciliation[]
+  balanceAssertions       BalanceAssertion[]
   bankFeedTransactions    BankTransaction[] @relation("BankTxnBankAccount")
   categorizedTransactions BankTransaction[] @relation("BankTxnCategory")
   bankRuleCategories      BankRule[]        @relation("BankRuleCategory")

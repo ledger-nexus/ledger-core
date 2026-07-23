@@ -46,6 +46,13 @@ _No active claims._
 - **Files**: `src/lib/accounting/inventory.ts` (new), `tests/inventory-booking.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`. NO schema/migration/fingerprint change.
 - **Branch**: `feat/inventory-booking-engine` (PR against main — independent).
 - **Outcome**: tsc exit 0; 16/16 local + CI. No deploy action.
+### Session balance-assertions · 2026-07-18
+- **Scope**: Beancount adoption slice ① (study: `docs/spec/beancount-adoption-study.md`, PR #295). New `BalanceAssertion` model + `AssertionStatus` enum (migration 0027, additive) + `checkBalanceAssertions()` in `src/lib/accounting/balance-assertions.ts`. Enforces correctness ACROSS TIME (drift no single write would reject) vs `postJournalEntry`'s at-write enforcement. Complementary to `Reconciliation` (periodic human attested control), NOT a replacement.
+- **Design**: reuses `getTrialBalance` (one TB per distinct asOf, so N assertions on a date = one query) instead of a second balance query path; default tolerance from `Currency.decimals`; `expectedAmount` on the account's NORMAL side; result cache (`lastStatus`/`lastObservedAmount`/`lastCheckedAt`) refreshed only when `persist` is set. Relations to tenant/entity/book/account (PeriodClose shape); `currencyId` plain per ar/ap_open_item precedent.
+- **Decisions taken on Chris's "do it"** (both were open questions in the study; both reversible, both documented loudly): **advisory-only** (no posting/close gate) and **END-of-day asOf** (`documentDate <= asOf`, matching getTrialBalance — Beancount asserts at the START of the date).
+- **Files**: `prisma/schema.prisma` (+BalanceAssertion, +AssertionStatus, 4 backrefs), `prisma/schema.prisma.sha256`, `prisma/migrations/0027_balance_assertion/migration.sql` (new), `src/lib/accounting/balance-assertions.ts` (new), `tests/balance-assertions.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `feat/balance-assertions` (PR against main)
+- **Outcome**: `prisma validate` + generate clean; tsc exit 0; schema-fingerprint green. ⛔ NO local DB run (real books) — tests run in CI's ephemeral Postgres. **Deploy**: migration 0027 needs `prisma db push` on personal-books + any prod.
 
 ### Session entry-lineage-view · 2026-07-17
 - **Scope**: Documents & Corrections arc, Half A / A4 (scope doc `docs/spec/documents-and-corrections-arc.md`, PR #288). `getEntryLineage(db, {tenantId, entryId})` (`src/lib/accounting/lineage.ts`) — tenant-scoped resolver returning an entry's reversal + correction lineage in both directions (reverses/reversedBy via reversalOfId, corrects/correctedBy via correctionOfId). JE detail page renders a unified related-entries display from it (corrections alongside reversals; ReverseButton fed from the same source). Read-only, NO schema change.
