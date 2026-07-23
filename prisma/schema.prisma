@@ -75,6 +75,7 @@ model Tenant {
   balanceAssertions         BalanceAssertion[]
   commodities               Commodity[]
   commodityPrices           CommodityPrice[]
+  lots                      Lot[]
   parties                   Party[]
   partyRoles                PartyRole[]
   items                     Item[]
@@ -219,6 +220,7 @@ model LegalEntity {
   items            Item[]
   periodCloses     PeriodClose[]
   balanceAssertions BalanceAssertion[]
+  lots              Lot[]
   fixedAssets      FixedAsset[]
   leases           Lease[]
   revenueContracts RevenueContract[]
@@ -257,6 +259,7 @@ model Book {
   journalEntries                JournalEntry[]
   periodCloses                  PeriodClose[]
   balanceAssertions             BalanceAssertion[]
+  lots                          Lot[]
   postingRules                  PostingRule[]
   fixedAssetBookAttributes      FixedAssetBookAttributes[]
   leaseBookAttributes           LeaseBookAttributes[]
@@ -512,6 +515,7 @@ model Commodity {
   active     Boolean  @default(true)
 
   prices CommodityPrice[]
+  lots   Lot[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -547,6 +551,73 @@ model CommodityPrice {
   @@index([tenantId])
   @@index([commodityId, currencyId, asOf])
   @@map("commodity_price")
+}
+
+// Lot — a parcel of a commodity acquired at a specific per-unit cost on a
+// specific date, held in an account, per book. This is the persistence layer
+// under the pure inventory engine (src/lib/accounting/inventory.ts): a purchase
+// AUGMENTS (creates) a lot; a sale REDUCES lots, drawing `remainingUnits` down
+// by booking method until the parcel is exhausted (status → CLOSED). Cost basis
+// is preserved parcel by parcel, which is what makes per-lot capital gains
+// possible.
+//
+// Book-aware, following the canon's "inventory layers" master-data-extension
+// pattern (like fixed_asset_book_attributes): the same holding can carry a
+// different basis under US_GAAP vs US_TAX. Modeled on ArOpenItem — a per-(entity,
+// book) sub-ledger parcel opened by a JournalEntry. openedByEntryId is nullable
+// so a lot can be seeded / imported before its GL posting is wired (the posting
+// integration is a later part of the arc).
+model Lot {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+
+  // The account the commodity is held in (the investment / asset account).
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id])
+
+  commodityId String    @db.Uuid
+  commodity   Commodity @relation(fields: [commodityId], references: [id])
+
+  // The JournalEntry that opened this lot (the purchase). Nullable — a lot may
+  // be seeded / imported before its GL posting exists.
+  openedByEntryId String?       @db.Uuid
+  openedByEntry   JournalEntry? @relation(fields: [openedByEntryId], references: [id])
+
+  label           String?  // optional user label ("RSU tranche 3", broker lot id)
+  acquisitionDate DateTime @db.Date
+
+  // Units + per-unit cost. High precision for fractional shares / crypto.
+  // costCurrencyId is a plain code (no relation), matching ar_open_item.
+  originalUnits  Decimal @db.Decimal(28, 10)
+  remainingUnits Decimal @db.Decimal(28, 10)
+  unitCost       Decimal @db.Decimal(28, 10)
+  costCurrencyId String
+
+  status LotStatus @default(OPEN)
+
+  // Lineage — populated on import; also the natural idempotency key for the
+  // augment-on-purchase path once posting is wired.
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([entityId, bookId, accountId, commodityId, status])
+  @@index([entityId, bookId, commodityId, status, acquisitionDate])
+  @@map("lot")
+}
+
+enum LotStatus {
+  OPEN
+  CLOSED
 }
 
 enum FxRateType {
@@ -745,6 +816,7 @@ model Account {
   lines                   JournalLine[]
   reconciliations         Reconciliation[]
   balanceAssertions       BalanceAssertion[]
+  lots                    Lot[]
   bankFeedTransactions    BankTransaction[] @relation("BankTxnBankAccount")
   categorizedTransactions BankTransaction[] @relation("BankTxnCategory")
   bankRuleCategories      BankRule[]        @relation("BankRuleCategory")
@@ -897,6 +969,7 @@ model JournalEntry {
   apOpenItemsOpened ApOpenItem[]    @relation("ApOpenedBy")
   arApplications    ArApplication[] @relation("ArAppliedBy")
   apApplications    ApApplication[] @relation("ApAppliedBy")
+  openedLots        Lot[]
 
   // Ownership + audit. ownerId is the default-responsible-party; defaults to
   // createdBy at insert and only changes via explicit reassignment (manual or

@@ -32,6 +32,14 @@ _No active claims._
 
 ## Recent completions
 
+### Session lot-persistence · 2026-07-18
+- **Scope**: Beancount adoption slice ④ / part 2. New `Lot` model + `LotStatus` enum (migration 0030, additive) — cost-basis parcel of a commodity in an account, per book; modeled on `ArOpenItem` (book-aware, `openedByEntryId` nullable). `src/lib/accounting/lots.ts`: `augmentLot` (purchase→OPEN lot), `getOpenLots` (returns the ENGINE's `Lot` type so `bookReduction` consumes directly), `consumeLots` (draw down remainingUnits + CLOSE depleted; run in the sale's tx). `Decimal(28,10)` units/cost. Branched off main (commodity ③ merged).
+- **Tests**: augment/read + **end-to-end composition** (augment 2 → getOpenLots → FIFO bookReduction → consumeLots → re-read: consumed lot CLOSED not deleted, remainder correct, gain 350) + tenant isolation.
+- **6 backrefs** added (Tenant/LegalEntity/Book/Account/Commodity/JournalEntry) — schema.prisma edit, will conflict on the Tenant/Account backref anchors + `.sha256` if other schema PRs land first (recompute-from-merged-schema).
+- **Files**: `prisma/schema.prisma` (+Lot,+LotStatus,+6 backrefs), `prisma/schema.prisma.sha256`, `prisma/migrations/0030_lot/migration.sql` (new), `src/lib/accounting/lots.ts` (new), `tests/lots.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `feat/lot-persistence` (PR against main).
+- **Outcome**: prisma validate + generate clean; tsc exit 0; fingerprint green. ⛔ NO local DB run (real books) — CI runs the suite. **Deploy**: migration 0030 needs `prisma db push` on personal-books + any prod. **Remaining ④: part 3 posting integration, part 4 UI.**
+
 ### Session beancount-adoption-study · 2026-07-18
 - **Scope**: Docs-only. Added `docs/spec/beancount-adoption-study.md` — a study of Beancount v3 (repo + official language/inventory/query docs) against ledger-core, with every "has/lacks" claim verified in-tree and every candidate checked against the LOCKED canon.
 - **Key findings**: ledger-core genuinely LACKS balance assertions (`Reconciliation` is a periodic attested workflow, not a cheap dated machine check), `pad`, a non-currency price DB (`FxRate` is currency-pair-only), account currency constraints / dated open-close (`Account` has only `active` + `bookScope`), lot & cost-basis booking (`CostingMethod` enum has ZERO code references), links, and general document attachment. Ranked adoption: ① balance assertions + pad → ② account currency constraints + open/close dates → ③ commodity+price → ④ lots. Explicit do-NOT-adopt list (plugin stream-rewriting, a query DSL, tolerance in the core balancing invariant, silent pad) with canon reasons.
