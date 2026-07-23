@@ -39,6 +39,13 @@ _No active claims._
 - **Files**: `docs/spec/beancount-adoption-study.md` (new), `STATUS.md` (this entry).
 - **Branch**: `docs/beancount-adoption-study` (PR against main)
 - **Outcome**: docs-only; no code, schema, or DB change. No suite run needed. 4 open decisions left to Chris (commodity/price extension, enforcement level, as-of convention, whether lots are on the roadmap).
+### Session inventory-booking-engine · 2026-07-18
+- **Scope**: Beancount adoption slice ④ / part 1 (Chris picked "④ lots/cost basis"). The PURE algorithmic core: `src/lib/accounting/inventory.ts` — `bookReduction(held, reduceUnits, method, opts)` matches lots (STRICT/FIFO/LIFO), computes cost relieved + realized gain (proceeds − basis). Helpers totalUnits/totalCost/averageCost. NONE/AVERAGE out of scope (AVERAGE unimplemented upstream too).
+- **Deliberately pure**: no DB, no schema, no posting integration → exhaustively unit-testable and **run LOCALLY 16/16** (DB-free single-file vitest is safe from this clone; verified no vitest globalSetup first) in addition to CI. All decimal.js.
+- **④ arc plan** (each its own PR): part 2 = Lot persistence model (book-aware, stacks on commodity ③) + augment; part 3 = posting integration (realized-gain JE via postJournalEntry); part 4 = UI/holdings. Deferred to stay reviewable.
+- **Files**: `src/lib/accounting/inventory.ts` (new), `tests/inventory-booking.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`. NO schema/migration/fingerprint change.
+- **Branch**: `feat/inventory-booking-engine` (PR against main — independent).
+- **Outcome**: tsc exit 0; 16/16 local + CI. No deploy action.
 
 ### Session entry-lineage-view · 2026-07-17
 - **Scope**: Documents & Corrections arc, Half A / A4 (scope doc `docs/spec/documents-and-corrections-arc.md`, PR #288). `getEntryLineage(db, {tenantId, entryId})` (`src/lib/accounting/lineage.ts`) — tenant-scoped resolver returning an entry's reversal + correction lineage in both directions (reverses/reversedBy via reversalOfId, corrects/correctedBy via correctionOfId). JE detail page renders a unified related-entries display from it (corrections alongside reversals; ReverseButton fed from the same source). Read-only, NO schema change.
