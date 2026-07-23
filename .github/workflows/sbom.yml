@@ -32,7 +32,7 @@ jobs:
       # was ever committed, so setup-node's `cache: pnpm` failed in
       # ~15s on every push. Switched to npm to match the actual repo
       # (mirrors ci.yml).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
