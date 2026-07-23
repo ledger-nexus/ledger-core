@@ -32,6 +32,14 @@ _No active claims._
 
 ## Recent completions
 
+### Session beancount-adoption-study · 2026-07-18
+- **Scope**: Docs-only. Added `docs/spec/beancount-adoption-study.md` — a study of Beancount v3 (repo + official language/inventory/query docs) against ledger-core, with every "has/lacks" claim verified in-tree and every candidate checked against the LOCKED canon.
+- **Key findings**: ledger-core genuinely LACKS balance assertions (`Reconciliation` is a periodic attested workflow, not a cheap dated machine check), `pad`, a non-currency price DB (`FxRate` is currency-pair-only), account currency constraints / dated open-close (`Account` has only `active` + `bookScope`), lot & cost-basis booking (`CostingMethod` enum has ZERO code references), links, and general document attachment. Ranked adoption: ① balance assertions + pad → ② account currency constraints + open/close dates → ③ commodity+price → ④ lots. Explicit do-NOT-adopt list (plugin stream-rewriting, a query DSL, tolerance in the core balancing invariant, silent pad) with canon reasons.
+- **First slice scoped concretely**: `BalanceAssertion` table + checker reusing `getTrialBalance(prisma, scope, asOf)` (already returns per-account normal-side balances scoped to tenant/entity/book, `documentDate <= asOf`), default tolerance from `Currency.decimals`. ⚠️ Flags the as-of convention divergence (Beancount asserts at START of date; recommend end-of-day to match `getTrialBalance`) as a silent-wrong-answer trap.
+- **Files**: `docs/spec/beancount-adoption-study.md` (new), `STATUS.md` (this entry).
+- **Branch**: `docs/beancount-adoption-study` (PR against main)
+- **Outcome**: docs-only; no code, schema, or DB change. No suite run needed. 4 open decisions left to Chris (commodity/price extension, enforcement level, as-of convention, whether lots are on the roadmap).
+
 ### Session entry-lineage-view · 2026-07-17
 - **Scope**: Documents & Corrections arc, Half A / A4 (scope doc `docs/spec/documents-and-corrections-arc.md`, PR #288). `getEntryLineage(db, {tenantId, entryId})` (`src/lib/accounting/lineage.ts`) — tenant-scoped resolver returning an entry's reversal + correction lineage in both directions (reverses/reversedBy via reversalOfId, corrects/correctedBy via correctionOfId). JE detail page renders a unified related-entries display from it (corrections alongside reversals; ReverseButton fed from the same source). Read-only, NO schema change.
 - **Files**: `src/lib/accounting/lineage.ts` (new), `tests/entry-lineage.test.ts` (new), `src/app/journal-entries/[id]/page.tsx`, `PROJECT_STATUS.md`, `STATUS.md`.
