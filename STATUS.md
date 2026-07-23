@@ -32,6 +32,14 @@ _No active claims._
 
 ## Recent completions
 
+### Session holdings-and-trade-action · 2026-07-18
+- **Scope**: Beancount adoption slice ④ / part 4 — completes the lots arc. `recordCommodityTradeAction` (gated Server Action: auth + session-derived scope + `auditPrivilegedAction`, wrapping the part-3 domain commands) + `getHoldings()` (open lots rolled up per commodity: units, cost basis, weighted-avg cost, mark-to-market via commodity-price ③; unpriced → nulls, never an invented mark) + read-only `/holdings` page. NO schema change.
+- **Why the action matters**: part 3's commands were intentionally left unreachable/un-audited; this is the control that makes trades user-reachable AND attributable ("AI suggests, humans approve, the system posts").
+- **⚠️ Dependency caught by tsc**: part 4 imports part 3's `commodity-trade.ts`, which was in unmerged #302 → merged #302 first, then rebased onto main. (Lesson: a part-N slice importing part-(N−1) must land the dependency or stack.)
+- **Files**: `src/lib/accounting/holdings.ts` (new), `src/app/actions/record-commodity-trade.ts` (new), `src/app/holdings/page.tsx` (new), `tests/holdings.test.ts` (new), `tests/record-commodity-trade-action.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `feat/holdings-and-trade-action` (PR against main).
+- **Outcome**: tsc exit 0; fingerprint unchanged (no schema). ⛔ NO local DB run (real books) — CI runs the suite. ⚠️ `/holdings` page is typecheck-verified ONLY, **not browser-verified** — interactive trade-entry FORM + sidebar nav link deliberately DEFERRED as browser-verified UI work for Chris's environment. No migration / no deploy action.
+
 ### Session commodity-trade · 2026-07-18
 - **Scope**: Beancount adoption slice ④ / part 3 — posting integration. `src/lib/accounting/commodity-trade.ts`: `recordCommodityPurchase` (Dr Investment / Cr Cash + augmentLot) + `recordCommoditySale` (getOpenLots → bookReduction → disposal JE → consumeLots). Disposal JE = Dr Cash proceeds / Cr Investment cost-relieved / Cr Gain or Dr Loss (gain driven by BASIS not price).
 - **Safety**: `postJournalEntry` NOT modified — only called (its debits==credits invariant rejects any bad composition). Whole flow in one `withTenantContext` tx → atomic (proven by over-sell test: throws InsufficientUnitsError, nothing posted, no lot touched). **Inert** — domain commands, NO user-facing caller yet (gated Server Action + audit + human gate = part 4). NO schema change.
