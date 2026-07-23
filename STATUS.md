@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session commodity-trade · 2026-07-18
+- **Scope**: Beancount adoption slice ④ / part 3 — posting integration. `src/lib/accounting/commodity-trade.ts`: `recordCommodityPurchase` (Dr Investment / Cr Cash + augmentLot) + `recordCommoditySale` (getOpenLots → bookReduction → disposal JE → consumeLots). Disposal JE = Dr Cash proceeds / Cr Investment cost-relieved / Cr Gain or Dr Loss (gain driven by BASIS not price).
+- **Safety**: `postJournalEntry` NOT modified — only called (its debits==credits invariant rejects any bad composition). Whole flow in one `withTenantContext` tx → atomic (proven by over-sell test: throws InsufficientUnitsError, nothing posted, no lot touched). **Inert** — domain commands, NO user-facing caller yet (gated Server Action + audit + human gate = part 4). NO schema change.
+- **Files**: `src/lib/accounting/commodity-trade.ts` (new), `tests/commodity-trade.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `feat/commodity-trade` (PR against main).
+- **Outcome**: tsc exit 0; fingerprint unchanged (no schema). ⛔ NO local DB run (real books) — CI runs the suite. No migration / no deploy action. **Remaining ④: part 4 = holdings UI + gated Server Action.**
+
 ### Session lot-persistence · 2026-07-18
 - **Scope**: Beancount adoption slice ④ / part 2. New `Lot` model + `LotStatus` enum (migration 0030, additive) — cost-basis parcel of a commodity in an account, per book; modeled on `ArOpenItem` (book-aware, `openedByEntryId` nullable). `src/lib/accounting/lots.ts`: `augmentLot` (purchase→OPEN lot), `getOpenLots` (returns the ENGINE's `Lot` type so `bookReduction` consumes directly), `consumeLots` (draw down remainingUnits + CLOSE depleted; run in the sale's tx). `Decimal(28,10)` units/cost. Branched off main (commodity ③ merged).
 - **Tests**: augment/read + **end-to-end composition** (augment 2 → getOpenLots → FIFO bookReduction → consumeLots → re-read: consumed lot CLOSED not deleted, remainder correct, gain 350) + tenant isolation.
