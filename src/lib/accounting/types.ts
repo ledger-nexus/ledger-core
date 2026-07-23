@@ -153,6 +153,46 @@ export class AccountBookScopeError extends Error {
   }
 }
 
+// Raised when an account constrains the commodities it may hold and the
+// entry's currency isn't one of them — e.g. a EUR posting into a USD-only
+// cash account. Accounts with an empty allowedCurrencies are unconstrained.
+export class AccountCurrencyNotAllowedError extends Error {
+  constructor(
+    public accountCode: string,
+    public currencyCode: string,
+    public allowedCurrencies: string[]
+  ) {
+    super(
+      `Account ${accountCode} does not accept ${currencyCode} ` +
+        `(allowed: ${allowedCurrencies.join(", ")})`
+    );
+    this.name = "AccountCurrencyNotAllowedError";
+  }
+}
+
+// Raised when an entry is dated outside the account's open window. Boundaries
+// are INCLUSIVE — posting ON openedOn or ON closedOn is fine; the error means
+// the document date fell strictly before the account opened or strictly after
+// it closed. A null boundary is unbounded.
+export class AccountNotOpenError extends Error {
+  constructor(
+    public accountCode: string,
+    public documentDate: Date,
+    public openedOn: Date | null,
+    public closedOn: Date | null
+  ) {
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const reason =
+      openedOn && documentDate < openedOn
+        ? `it did not open until ${iso(openedOn)}`
+        : `it closed on ${iso(closedOn as Date)}`;
+    super(
+      `Account ${accountCode} was not open on ${iso(documentDate)} — ${reason}`
+    );
+    this.name = "AccountNotOpenError";
+  }
+}
+
 // Raised when input.tenantId is supplied but doesn't match the tenant
 // that owns the resolved LegalEntity. Indicates a cross-tenant attempt —
 // e.g. a Server Action running as tenant A trying to write to an entity

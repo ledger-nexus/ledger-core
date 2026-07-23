@@ -652,6 +652,24 @@ model Account {
 
   active Boolean @default(true)
 
+  // Commodities this account may hold. EMPTY = unconstrained (the default, so
+  // this is inert for every existing account). When set, postJournalEntry
+  // refuses an entry whose currency isn't listed — a USD-only cash account
+  // cannot silently accumulate EUR. Same "make invalid states unrepresentable"
+  // intent as the debit/credit CHECK constraints, one level up.
+  allowedCurrencies String[] @default([])
+
+  // Dated account lifecycle. `active` is a boolean and therefore cannot answer
+  // "was this account valid on the ENTRY's date" — which is the only question
+  // that matters for a backdated post. These can, and postJournalEntry checks
+  // them against documentDate.
+  //
+  // BOUNDARIES ARE INCLUSIVE: the account is postable on [openedOn, closedOn].
+  // A post ON the open date or ON the close date is allowed; before or after is
+  // refused. NULL on either side means unbounded, so both are inert by default.
+  openedOn DateTime? @db.Date
+  closedOn DateTime? @db.Date
+
   // BlackLine arc Phase 1: per-account override of the tenant default.
   // - requiresReconReview: null = inherit ReconciliationConfig.defaultRequiresReview.
   //   true = always preparer→reviewer chain. false = single sign-off OK.
