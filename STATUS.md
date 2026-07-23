@@ -46,6 +46,14 @@ _No active claims._
 - **Files**: `src/lib/accounting/inventory.ts` (new), `tests/inventory-booking.test.ts` (new), `PROJECT_STATUS.md`, `STATUS.md`. NO schema/migration/fingerprint change.
 - **Branch**: `feat/inventory-booking-engine` (PR against main — independent).
 - **Outcome**: tsc exit 0; 16/16 local + CI. No deploy action.
+### Session pad-balance-assertion · 2026-07-18
+- **Scope**: Beancount adoption slice ① part 2 (study PR #295; assertions PR #296). `padBalanceAssertionAction` posts the adjusting entry that satisfies an unmet assertion — the opening-balances path. Explicit + human-triggered + audited via `postJournalEntry` (Beancount's `pad` inserts silently; ours never does). Direction DERIVED from delta + `normalBalance`, never supplied. Observed balance recomputed at pad time (never padded from the cached result).
+- **Idempotency without a status flag**: the entry carries lineage `(SUBSTRATE, BalanceAssertion.pad, <assertionId>)`, and the pre-existing `gl_entry_header_lineage_uniq` partial unique index makes a second pad fail P2002 → "already been padded". **NO schema change, no migration, fingerprint unchanged.**
+- **Shared semantics**: exported `resolveTolerance` / `evaluateAssertion` from `balance-assertions.ts` so pad and the checker use ONE definition of "satisfied", not two.
+- **Files**: `src/app/actions/pad-balance-assertion.ts` (new), `tests/pad-balance-assertion.test.ts` (new), `src/lib/accounting/balance-assertions.ts` (export the shared comparison), `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `feat/pad-balance-assertion` — ⚠️ STACKED on `feat/balance-assertions` (#296); needs the `BalanceAssertion` table. PR base = that branch.
+- **Outcome**: tsc exit 0; fingerprint unchanged (correct — no schema edit). ⛔ NO local DB run (real books) — CI verifies (stacked PRs need the temp-retarget-to-main trick).
+
 ### Session balance-assertions · 2026-07-18
 - **Scope**: Beancount adoption slice ① (study: `docs/spec/beancount-adoption-study.md`, PR #295). New `BalanceAssertion` model + `AssertionStatus` enum (migration 0027, additive) + `checkBalanceAssertions()` in `src/lib/accounting/balance-assertions.ts`. Enforces correctness ACROSS TIME (drift no single write would reject) vs `postJournalEntry`'s at-write enforcement. Complementary to `Reconciliation` (periodic human attested control), NOT a replacement.
 - **Design**: reuses `getTrialBalance` (one TB per distinct asOf, so N assertions on a date = one query) instead of a second balance query path; default tolerance from `Currency.decimals`; `expectedAmount` on the account's NORMAL side; result cache (`lastStatus`/`lastObservedAmount`/`lastCheckedAt`) refreshed only when `persist` is set. Relations to tenant/entity/book/account (PeriodClose shape); `currencyId` plain per ar/ap_open_item precedent.
