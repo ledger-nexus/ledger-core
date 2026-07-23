@@ -2,7 +2,7 @@
 // coverage — the full middleware integration runs in the next.config
 // header-application path which isn't unit-testable.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { _internal } from "../src/middleware";
 
 const { generateNonce, buildCspHeader } = _internal;
@@ -23,6 +23,10 @@ describe("CSP nonce (CC6.6 — anti-XSS)", () => {
 
 describe("CSP header (CC6.6 — content security policy)", () => {
   const NONCE = "ABCDEFGHIJKLMNOPQRSTUV";
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it("includes the nonce inside script-src 'nonce-...' 'strict-dynamic'", () => {
     const csp = buildCspHeader(NONCE);
@@ -55,6 +59,21 @@ describe("CSP header (CC6.6 — content security policy)", () => {
     const csp = buildCspHeader(NONCE);
     expect(csp).toContain("frame-src https://*.clerk.com");
     expect(csp).toContain("https://js.stripe.com");
+  });
+
+  it("non-production script-src carries 'unsafe-eval' — eval() is governed by script-src (not script-src-elem), and Next dev serves eval-wrapped modules", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const csp = buildCspHeader(NONCE);
+    const scriptSrc = csp.split("; ").find((d) => d.startsWith("script-src "));
+    expect(scriptSrc).toContain("'unsafe-eval'");
+  });
+
+  it("production script-src stays strict — no 'unsafe-eval', no dev script-src-elem relaxation", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const csp = buildCspHeader(NONCE);
+    const scriptSrc = csp.split("; ").find((d) => d.startsWith("script-src "));
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
+    expect(csp).not.toContain("script-src-elem");
   });
 
   it("policy is delimited with `; ` and parseable", () => {
