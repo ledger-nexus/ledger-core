@@ -54,8 +54,36 @@ export interface AssertionCheckResult {
  * (USD/2 → 0.01, JPY/0 → 1). Rounding noise from FX or allocation should not
  * trip an assertion; a real posting error is always larger than this.
  */
-function defaultTolerance(decimals: number): Decimal {
+export function defaultTolerance(decimals: number): Decimal {
   return new Decimal(10).pow(-decimals);
+}
+
+/**
+ * Effective tolerance for an assertion: the explicit one when set, otherwise
+ * derived from the currency's precision.
+ */
+export function resolveTolerance(
+  explicit: Decimal | null | undefined,
+  currencyDecimals: number
+): Decimal {
+  return explicit ?? defaultTolerance(currencyDecimals);
+}
+
+/**
+ * The single definition of "is this assertion satisfied". Exported so the pad
+ * flow decides whether there is anything to pad using exactly the same
+ * comparison the checker uses — one notion of satisfied, not two.
+ */
+export function evaluateAssertion(
+  expected: Decimal,
+  observed: Decimal,
+  tolerance: Decimal
+): { delta: Decimal; status: "PASS" | "FAIL" } {
+  const delta = observed.minus(expected);
+  return {
+    delta,
+    status: delta.abs().lessThanOrEqualTo(tolerance) ? "PASS" : "FAIL",
+  };
 }
 
 /**
@@ -129,11 +157,11 @@ export async function checkBalanceAssertions(
     // accounts, so an assertion against a deactivated account reads as zero.
     const observed = byAccount.get(a.account.code) ?? new Decimal(0);
     const expected = new Decimal(a.expectedAmount.toString());
-    const tolerance =
-      a.tolerance != null
-        ? new Decimal(a.tolerance.toString())
-        : defaultTolerance(decimalsByCurrency.get(a.currencyId) ?? 2);
-    const delta = observed.minus(expected);
+    const tolerance = resolveTolerance(
+      a.tolerance != null ? new Decimal(a.tolerance.toString()) : null,
+      decimalsByCurrency.get(a.currencyId) ?? 2
+    );
+    const { delta, status } = evaluateAssertion(expected, observed, tolerance);
     return {
       assertionId: a.id,
       accountCode: a.account.code,
@@ -143,7 +171,7 @@ export async function checkBalanceAssertions(
       observed,
       tolerance,
       delta,
-      status: delta.abs().lessThanOrEqualTo(tolerance) ? "PASS" : "FAIL",
+      status,
     };
   });
 
