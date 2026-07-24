@@ -117,6 +117,7 @@ model Tenant {
   notificationChannels      NotificationChannel[]
   notificationDispatches    NotificationDispatch[]
   bankTransactions          BankTransaction[]
+  emailDeliveries           EmailDelivery[]
 
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
@@ -2770,6 +2771,59 @@ model NotificationDispatch {
   @@unique([channelId, alertFingerprint])
   @@index([tenantId, sentAt])
   @@map("notification_dispatch")
+}
+
+/// Transactional email log — one row per attempted send, whatever the
+/// outcome. This is the operator's answer to "did this customer actually
+/// get their invite?" without grepping provider dashboards. Harvested
+/// from PR #46 (slice ② of the mega-branch harvest); templates and
+/// senders arrive with their consuming slices (team-invites, approvals,
+/// owner-transfer).
+model EmailDelivery {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Tenant the email is on behalf of. Null for platform-level emails
+  /// (no tenant context). SetNull on tenant delete — the delivery record
+  /// outlives the tenant, same rationale as audit_log's denormalization.
+  tenantId String? @db.Uuid
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  /// Recipient address. Encrypted at rest (random-IV AES-GCM) via the
+  /// encrypted-fields extension; equality lookups go through toEmailHash,
+  /// the same pattern as app_user.email/emailHash.
+  toEmail     String
+  /// HMAC-SHA256 search hash of the normalized recipient. Nullable (null
+  /// until the deterministic key is configured), NOT unique — many
+  /// deliveries per recipient is the normal case.
+  toEmailHash Bytes?
+
+  /// Stable template identifier — "tenant_invite", "je_approved",
+  /// "owner_transfer_offered", etc. Lets us answer "how many invites
+  /// went out this week?" without parsing subjects.
+  template String
+  /// Subject + bodies are literal email content (invite tokens, JE
+  /// context, people's names) — encrypted at rest via the extension.
+  subject  String
+  bodyText String?
+  bodyHtml String?
+
+  status       EmailDeliveryStatus
+  /// Provider message id (Resend's response.id when DELIVERED).
+  providerId   String?
+  /// Provider error detail on FAILED. Stored for diagnosis, never logged.
+  errorMessage String?
+  /// Template-specific payload (inviteId, entryId, …) for audit + replay.
+  metadata     Json?
+  sentAt       DateTime            @default(now())
+
+  @@index([tenantId, sentAt])
+  @@index([toEmailHash, sentAt])
+  @@map("email_delivery")
+}
+
+enum EmailDeliveryStatus {
+  DELIVERED // Provider accepted the message
+  LOGGED_ONLY // No RESEND_API_KEY set; row persisted for visibility
+  FAILED // Provider rejected (rate limit, bad recipient, etc.) or unreachable
 }
 
 // ─────────────────────────────────────────────────────────────────────────

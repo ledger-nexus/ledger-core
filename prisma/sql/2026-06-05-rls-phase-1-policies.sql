@@ -552,6 +552,17 @@ CREATE POLICY bank_rule_tenant_isolation ON bank_rule
   USING ("tenantId" = app_current_tenant_id())
   WITH CHECK ("tenantId" = app_current_tenant_id());
 
+-- 53. email_delivery — SPECIAL: tenantId is nullable for platform-level
+--     emails sent outside any tenant context. Same nullable-tenant shape
+--     as audit_log (#32): NULL-tenant rows are platform observability
+--     records, admitted for everyone; tenant-tagged rows isolate.
+ALTER TABLE email_delivery ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS email_delivery_tenant_isolation ON email_delivery;
+CREATE POLICY email_delivery_tenant_isolation ON email_delivery
+  FOR ALL
+  USING ("tenantId" IS NULL OR "tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" IS NULL OR "tenantId" = app_current_tenant_id());
+
 -- =============================================================================
 -- Verification
 -- =============================================================================
@@ -564,7 +575,7 @@ CREATE POLICY bank_rule_tenant_isolation ON bank_rule
 --     AND rowsecurity = true
 --   ORDER BY tablename;
 --
--- Expected: 52 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
+-- Expected: 53 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
 -- defines but does not FORCE).
 --
 -- Policy listing:
@@ -572,6 +583,6 @@ CREATE POLICY bank_rule_tenant_isolation ON bank_rule
 --   WHERE schemaname = 'public'
 --   ORDER BY tablename, policyname;
 --
--- Expected: 52 rows, all named <table>_tenant_isolation.
+-- Expected: 53 rows, all named <table>_tenant_isolation.
 
 -- End of Phase 1 migration.

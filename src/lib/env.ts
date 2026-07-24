@@ -62,6 +62,26 @@ const ENV_SPECS: EnvSpec[] = [
     description:
       "Gates POST /api/admin/reset. If unset, the reset endpoint returns 503.",
   },
+  // Transactional email (Resend). When RESEND_API_KEY is unset, sendEmail
+  // degrades to the LOGGED_ONLY path: the EmailDelivery row is still
+  // written, nothing leaves the machine, callers keep working. When the
+  // key IS set, EMAIL_FROM_ADDRESS must be a sender verified on the
+  // Resend domain or every send records FAILED.
+  {
+    name: "RESEND_API_KEY",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Resend API key for transactional email. Unset → sendEmail logs " +
+      "deliveries with LOGGED_ONLY status instead of sending.",
+  },
+  {
+    name: "EMAIL_FROM_ADDRESS",
+    requiredInProduction: false,
+    description:
+      "Verified from-address for Resend sends. Required whenever " +
+      "RESEND_API_KEY is set; sends record FAILED without it.",
+  },
   // Clerk auth — when both keys are present, the Clerk path activates
   // (see src/lib/auth/clerk.ts isClerkEnabled). When either is missing,
   // we fall back to the dev cookie stub. Marked REQUIRED_FOR_FEATURE

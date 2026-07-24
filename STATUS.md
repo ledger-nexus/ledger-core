@@ -37,6 +37,11 @@ _No active claims._
 - **Files**: `src/lib/auth/{policy,authorize,current-user}.ts`, 7 actions, 13 pages, audit-log CSV route, `src/lib/seed/{northwind,default-tenant}.ts`, `tests/authz-policy.test.ts` (new), `tests/{auth-current-user,period-close-action}.test.ts`.
 - **Branch**: `feat/authz-policy-layer` (worktree ~/Code/ledger-core-authz-policy). NO schema/migration/fingerprint change.
 - **Outcome**: tsc exit 0; full suite 149 files — 147 pass + period-close fixture fixed (now 9/9) + property-fuzz confirmed Neon-load flake (5/5 alone). ⚠️ Suites signing in via `lc-user` must pin `lc-tenant` — auto-resolve is concurrency-unsafe.
+### Session email-infra · 2026-07-24
+- **Scope**: #46 harvest slice ② — transactional email substrate. `sendEmail()` (Resend / LOGGED_ONLY degrade, never throws) + `EmailDelivery` model (migration 0032) + RLS policy #53 + day-one encryption of toEmail/subject/bodies with `toEmailHash` search hash. LOGGED_ONLY console line redacted vs #46 (no recipient/subject/body in stdout). Templates deferred to their consuming slices.
+- **Files**: `src/lib/email/send.ts` (new), `prisma/schema.prisma` + `prisma/migrations/0032_email_delivery/`, `prisma/sql/2026-06-05-rls-phase-1-policies.sql`, `src/lib/db/encrypted-fields-extension.ts`, `src/lib/env.ts`, `tests/email-send.test.ts` (new), fingerprint.
+- **Branch**: `feat/email-infra` (worktree ~/Code/ledger-core-email-infra).
+- **Outcome**: tsc 0; full suite 149 files / 1228 tests ALL PASS in the worktree (incl. the new email suite and the encryption-extension suite against the widened registry).
 
 ### Session commodity-price-entry · 2026-07-24
 - **Scope**: Added the two surfaces that made the commodity/lots arc reachable — `createCommodityAction` + `recordCommodityPriceAction` and the `/commodities` page. ⚠️ Found that NOTHING could create a Commodity (tests only), so ④'s trade form always failed "unknown commodity" — my 2026-07-18 "complete vertical slice" claim was wrong.
