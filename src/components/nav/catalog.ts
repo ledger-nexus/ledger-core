@@ -5,9 +5,16 @@
 // here keeps the two surfaces from drifting — a page added to the nav is
 // automatically reachable from the palette, and vice versa.
 //
-// The grouping and ordering rationale (Hick's / Miller's / Similarity /
-// Jakob's / Pareto / Von Restorff / Serial Position) lives with the
-// sidebar that renders it; this module is just the data.
+// Organization follows NetSuite's Accounting Center taxonomy, translated
+// from hover-menus to a sidebar. The owner's ruling on the earlier
+// Pareto-compressed design ("top items + More (N)") was that hiding
+// destinations costs more than it saves: a controller wants the complete
+// map. So EVERY destination is visible, grouped by the domains an
+// accountant already carries — Transactions (things that post),
+// Sub-ledgers (open-item registers), Lists (standing records the posts
+// point at — NetSuite's own word), Reports (every report enumerated, the
+// way NetSuite's Reports menu does it), Period & close (this product's
+// deepest suite, shown in full), and Setup (admin).
 
 export interface NavItem {
   href: string;
@@ -17,10 +24,7 @@ export interface NavItem {
 
 export interface NavSection {
   label: string;
-  /** Always visible in the sidebar — the Pareto set. */
   items: NavItem[];
-  /** Behind a <details> disclosure in the sidebar. Full-featured installs reach these. */
-  more?: NavItem[];
 }
 
 export const NAV_SECTIONS: NavSection[] = [
@@ -34,91 +38,98 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    // Events that post to the ledger. Everything here either is a posting
-    // or is a template/queue that becomes one.
+    // Things that post (or become postings) — NetSuite's Transactions >
+    // Financial neighborhood.
     label: "Transactions",
     items: [
-      { href: "/banking", label: "Bank transactions" },
       { href: "/journal-entries", label: "Journal entries" },
-    ],
-    more: [
-      { href: "/journal-entries/paste", label: "Paste from Excel", hint: "bulk lines" },
+      { href: "/banking", label: "Bank transactions" },
       { href: "/recurring-entries", label: "Recurring", hint: "templates" },
-      { href: "/ar", label: "Open AR" },
-      { href: "/ap", label: "Open AP" },
-      // The third open-item sub-ledger view: positions still held, with the
-      // cost basis behind them. Sits with AR/AP rather than in the Pareto set
-      // because most installs never hold securities.
+      { href: "/journal-entries/paste", label: "Paste from Excel", hint: "bulk" },
+    ],
+  },
+  {
+    // Open-item registers. NetSuite files these under Transactions >
+    // Receivables / Payables; at sidebar depth they earn their own
+    // region — burying AR/AP behind a disclosure in an accounting app
+    // was the core of the owner's complaint. Holdings is the third
+    // open-item register (positions at cost), so it lives here too.
+    label: "Sub-ledgers",
+    items: [
+      { href: "/ar", label: "Open AR", hint: "receivables" },
+      { href: "/ap", label: "Open AP", hint: "payables" },
       { href: "/holdings", label: "Holdings", hint: "investments" },
     ],
   },
   {
-    // Standing records the postings point at. An account isn't something
-    // that happened — it's a noun transactions reference, so it doesn't
-    // belong in the list above.
-    label: "Master data",
-    items: [{ href: "/accounts", label: "Chart of accounts" }],
-    more: [
-      // Securities master + the prices that mark them. Master data, not
-      // positions — those are Transactions → Holdings.
-      { href: "/commodities", label: "Commodities", hint: "securities + prices" },
-      { href: "/import/netsuite", label: "Import from NetSuite", hint: "single / multi-sub" },
+    // Standing records the postings point at. "Lists" is NetSuite's own
+    // word for exactly this drawer (Jakob's Law — users arrive fluent).
+    label: "Lists",
+    items: [
+      { href: "/accounts", label: "Chart of accounts" },
+      { href: "/commodities", label: "Commodities", hint: "securities" },
     ],
   },
   {
-    // Cross-cutting controls that aren't a ledger surface. "Automations"
-    // is the governance view for everything acting on your behalf.
-    label: "Settings",
-    items: [{ href: "/automations", label: "Automations" }],
-  },
-  {
+    // Every report, enumerated — the way NetSuite's Reports menu lists
+    // all of them. Order: financial statements, sub-ledger agings, tax,
+    // then multi-entity/FX.
     label: "Reports",
     items: [
       { href: "/reports/trial-balance", label: "Trial balance" },
       { href: "/reports/income-statement", label: "Income statement" },
       { href: "/reports/balance-sheet", label: "Balance sheet" },
       { href: "/reports/cash-flow", label: "Cash flow" },
-    ],
-    more: [
-      { href: "/reports/book-tax-difference", label: "Book-tax difference", hint: "ASC 740" },
-      { href: "/reports/m3-detail", label: "M-3 detail", hint: "Form 1120" },
       { href: "/reports/ar-aging", label: "AR aging" },
       { href: "/reports/ap-aging", label: "AP aging" },
+      { href: "/reports/book-tax-difference", label: "Book-tax difference", hint: "ASC 740" },
+      { href: "/reports/m3-detail", label: "M-3 detail", hint: "Form 1120" },
       { href: "/reports/fx-revaluation", label: "FX revaluation", hint: "ASC 830" },
       { href: "/reports/consolidation", label: "Consolidation", hint: "multi-entity" },
     ],
   },
   {
-    label: "Close",
+    // The close suite is this product's deepest differentiator — shown
+    // in FULL. NetSuite scatters this across Setup > Accounting Periods
+    // + the period close checklist; pulling it into one region is
+    // deliberate divergence from the reference taxonomy.
+    label: "Period & close",
     items: [
       { href: "/periods", label: "Periods" },
-      { href: "/close/tasks", label: "Close tasks" },
-      { href: "/reports/month-end", label: "Month-end review" },
-    ],
-    more: [
       { href: "/close", label: "Close dashboard", hint: "all pillars" },
-      { href: "/close/reconciliations", label: "Reconciliations", hint: "BS tie-out" },
-      // Beside Reconciliations on purpose: same job — does the balance agree
-      // with something outside the ledger — but the cheap machine half, run
-      // after any import rather than once a period with a sign-off.
-      { href: "/assertions", label: "Balance assertions", hint: "drift tripwire" },
-      { href: "/close/alerts", label: "Alerts", hint: "cross-pillar" },
+      { href: "/close/tasks", label: "Close tasks" },
+      { href: "/close/reconciliations", label: "Reconciliations", hint: "tie-out" },
+      // Beside Reconciliations on purpose: same question — does the
+      // balance agree with something outside the ledger — but the cheap
+      // machine half, run after any import rather than once a period.
+      { href: "/assertions", label: "Balance assertions", hint: "tripwire" },
       { href: "/close/flux", label: "Flux analysis", hint: "variance" },
+      { href: "/close/alerts", label: "Alerts" },
       { href: "/close/retrospective", label: "Retrospective", hint: "trend" },
+      { href: "/reports/month-end", label: "Month-end review", hint: "packet" },
     ],
+  },
+  {
+    // Cross-cutting governance visible to every member — the register of
+    // everything acting on your behalf. Admin-only setup is ADMIN_SECTION.
+    label: "Automation",
+    items: [{ href: "/automations", label: "Automations" }],
   },
 ];
 
+// "Setup" is NetSuite's word for the admin drawer. Rendered only for
+// ADMIN+ (canViewAdminPages). Import lives here, not under Lists — it
+// rewrites the chart of accounts and posts entries wholesale, which is
+// setup work, and the page itself is gated canRunErpImports.
 export const ADMIN_SECTION: NavSection = {
-  label: "Admin",
+  label: "Setup",
   items: [
     { href: "/admin/team", label: "Team", hint: "invites + roles" },
-    { href: "/admin/users", label: "Users" },
+    { href: "/admin/users", label: "Users", hint: "lifecycle" },
     { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
-  ],
-  more: [
-    { href: "/admin/orphans", label: "Orphan records", hint: "ownership" },
-    { href: "/admin/notification-channels", label: "Slack channels", hint: "alerts" },
+    { href: "/admin/orphans", label: "Orphan records" },
+    { href: "/admin/notification-channels", label: "Slack channels" },
+    { href: "/import/netsuite", label: "Import from NetSuite", hint: "ERP" },
   ],
 };
 
@@ -145,7 +156,7 @@ export function flattenCommands(opts: { isAdmin: boolean }): CommandItem[] {
     { ...PRIMARY_ACTION, group: "Actions", isAction: true },
   ];
   const push = (section: NavSection) => {
-    for (const item of [...section.items, ...(section.more ?? [])]) {
+    for (const item of section.items) {
       out.push({ ...item, group: section.label });
     }
   };

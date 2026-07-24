@@ -11,8 +11,10 @@ import {
   flattenCommands,
 } from "@/components/nav/catalog";
 
+// Sections no longer carry a hidden "more" tail — every destination is
+// a visible item (owner's ruling: the complete map, NetSuite-style).
 const hrefs = (sections: typeof NAV_SECTIONS) =>
-  sections.flatMap((s) => [...s.items, ...(s.more ?? [])].map((i) => i.href));
+  sections.flatMap((s) => s.items.map((i) => i.href));
 
 describe("flattenCommands", () => {
   it("leads with the primary action, flagged and in the Actions group", () => {

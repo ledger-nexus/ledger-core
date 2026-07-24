@@ -42,6 +42,7 @@ _No active claims._
 - **Files**: `tailwind.config.ts`, `src/app/globals.css`, `src/app/layout.tsx`, `src/components/ui/{card,button,table,input}.tsx`, 16 page-title h1 classNames.
 - **Branch**: `feat/ui-polish-vibecurb` (worktree ~/Code/ledger-core-ui-polish).
 - **Outcome**: tsc 0; `next build` green; browser-verified on dev DB (palette/radius/easing confirmed via computed styles, zero console errors). NO logic/schema.
+- **Second commit — NetSuite nav reorg (owner's direct request)**: the "More (N)" Pareto compression is GONE; all 39 destinations visible across 8 NetSuite-taxonomy sections (Overview / Transactions / Sub-ledgers / Lists / Reports / Period & close / Automation / Setup). Open AR/AP promoted to a first-class Sub-ledgers region; every report enumerated; the full close suite shown; admin section renamed Setup with Import moved in. DOM-verified: 39 links, hasMore=false, nav scrolls independently. ⚠️ Team link 404s until #314 merges — merge #314 BEFORE this branch and resolve the catalog.ts conflict by keeping THIS file (it already includes Team).
 
 ### Session authz-policy-layer · 2026-07-24
 - **Scope**: #46 harvest slice ① — per-tenant RBAC. New `src/lib/auth/policy.ts` (named-permission catalog) + `src/lib/auth/authorize.ts` (`requirePermitted`/`getViewerRole`); DELETED the email-allowlist `isAdmin`/`requireAdmin` and migrated all 21 call sites; tenant-pinned period close/reopen entity lookups; user-lifecycle membership pin + previously-missing audit rows; seeds grant memberships (controller ADMIN etc.).
