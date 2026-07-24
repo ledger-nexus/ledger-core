@@ -153,7 +153,9 @@ async function seedMasterData() {
     },
     update: {},
   });
-  // Admin user (matches the allowlist in current-user.ts).
+  // Admin user. "Admin" is a per-tenant role (TenantMembership.role via
+  // src/lib/auth/policy.ts), not an email allowlist — grant it here so
+  // the suite doesn't depend on the Northwind seed's membership grants.
   const admin = await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
     create: {
@@ -164,12 +166,21 @@ async function seedMasterData() {
     update: { isActive: true },
   });
   adminUserId = admin.id;
+  await prisma.tenantMembership.upsert({
+    where: { tenantId_userId: { tenantId, userId: admin.id } },
+    create: { tenantId, userId: admin.id, role: "ADMIN" },
+    update: { role: "ADMIN" },
+  });
 }
 
 function setAdminCookie() {
   mockCookieStore.set(authInternal.cookieName, {
     value: authInternal.encode(adminUserId),
   });
+  // Pin the tenant explicitly. Single-membership auto-resolve is not
+  // safe under parallel suites — another suite can grant this same user
+  // a second membership mid-run.
+  mockCookieStore.set("lc-tenant", { value: "default" });
 }
 
 function setCookie(name: string, value: string) {
@@ -331,13 +342,23 @@ describe("closePeriodAction + reopenPeriodAction", () => {
   });
 
   it("non-admin user gets denied", async () => {
-    // Create a non-admin user + cookie
+    // Create a MEMBER-role user + cookie. The membership matters: a
+    // user with NO membership is refused earlier (NoTenantMembership),
+    // which would pass a weaker assertion without exercising the
+    // canClosePeriods role floor this test exists to pin.
     const nonAdmin = await prisma.user.upsert({
       where: { email: "regular@test.local" },
       create: { email: "regular@test.local", displayName: "Regular User", isActive: true },
       update: { isActive: true },
     });
+    const tenantId = await getDefaultTenantId(prisma);
+    await prisma.tenantMembership.upsert({
+      where: { tenantId_userId: { tenantId, userId: nonAdmin.id } },
+      create: { tenantId, userId: nonAdmin.id, role: "MEMBER" },
+      update: { role: "MEMBER" },
+    });
     setCookie(authInternal.cookieName, authInternal.encode(nonAdmin.id));
+    setCookie("lc-tenant", "default");
     const r = await closePeriodAction({
       entityCode: ENTITY_CODE,
       bookCode: BOOK_GAAP,

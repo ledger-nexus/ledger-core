@@ -9,8 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { canModerateNotes } from "@/lib/auth/policy";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { getEntryLineage } from "@/lib/accounting/lineage";
 import ReverseButton from "./reverse-button";
@@ -222,7 +223,7 @@ export default async function JournalEntryDetailPage({
           resolvedBy: n.resolvedBy,
         }))}
         currentUserId={currentUser?.id ?? null}
-        currentUserIsAdmin={isAdmin(currentUser)}
+        currentUserIsAdmin={canModerateNotes(tenant?.role)}
       />
 
       {entry.sourcePayload && (

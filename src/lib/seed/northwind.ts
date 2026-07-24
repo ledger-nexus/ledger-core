@@ -764,6 +764,35 @@ export async function seedTestUsersAndQueues(
     });
   }
 
+  // ─── Tenant memberships ──────────────────────────────────────────────────
+  // Roles are per-tenant facts (TenantMembership.role), not global ones —
+  // the policy catalog in src/lib/auth/policy.ts reads these. Floors match
+  // the org chart above: the controller is the tenant admin; accountants
+  // and clerks are members. The auditor gets MEMBER until the read-only
+  // VIEWER role lands with the team-invites slice.
+  const membershipTenantId = await getDefaultTenantId(prisma);
+  const roleSpecs: { email: string; role: "ADMIN" | "MEMBER" }[] = [
+    { email: "controller@northwind.test", role: "ADMIN" },
+    { email: "gl@northwind.test", role: "MEMBER" },
+    { email: "ar-clerk@northwind.test", role: "MEMBER" },
+    { email: "auditor@deloitte.test", role: "MEMBER" },
+  ];
+  for (const spec of roleSpecs) {
+    // where: { email } resolves through the encrypted-fields extension's
+    // hash rewrite, same as the user upsert above.
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { email: spec.email },
+      select: { id: true },
+    });
+    await prisma.tenantMembership.upsert({
+      where: {
+        tenantId_userId: { tenantId: membershipTenantId, userId: user.id },
+      },
+      create: { tenantId: membershipTenantId, userId: user.id, role: spec.role },
+      update: { role: spec.role },
+    });
+  }
+
   // ─── Queues ───────────────────────────────────────────────────────────────
   const queueSpecs = [
     {

@@ -18,10 +18,10 @@
 import { prisma } from "@/lib/db";
 import {
   getCurrentUser,
-  isAdmin,
   NotAuthenticatedError,
-  NotAuthorizedError,
 } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canManageUsers } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -32,8 +32,8 @@ export default async function UsersPage() {
   if (!currentUser) {
     return <PermissionDenied reason={new NotAuthenticatedError().message} />;
   }
-  if (!isAdmin(currentUser)) {
-    return <PermissionDenied reason={new NotAuthorizedError().message} />;
+  if (!canManageUsers(await getViewerRole())) {
+    return <PermissionDenied reason="This page requires admin access" />;
   }
 
   const [users, queues, ownerJeCounts, ownerArCounts] = await Promise.all([

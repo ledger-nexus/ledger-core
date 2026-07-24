@@ -3,13 +3,14 @@
 
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canManageRecurringEntries } from "@/lib/auth/policy";
 import { EmptyState } from "@/components/ui/empty-state";
 import NewRecurringForm from "./new-recurring-form";
 
 export default async function NewRecurringPage() {
   const scope = await getCurrentScope();
-  const user = await getCurrentUser();
+  const viewerRole = await getViewerRole();
 
   if (!scope) {
     return (
@@ -19,7 +20,7 @@ export default async function NewRecurringPage() {
       />
     );
   }
-  if (!isAdmin(user)) {
+  if (!canManageRecurringEntries(viewerRole)) {
     return (
       <EmptyState
         title="Admin required"

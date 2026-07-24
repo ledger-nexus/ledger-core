@@ -26,11 +26,12 @@
 // in RecordEvent (the same audit table reassignments use) — see v0.3
 // of this file for the RecordEvent wiring.
 //
-// Permission: both actions require requireAdmin. Period close is one of
-// the highest-impact admin operations in an accounting system — it
-// freezes the books for a (book, period) tuple — so the explicit gate
-// is non-negotiable. Reopen is similarly gated because it can resurrect
-// posting on a period that's already been reported on to stakeholders.
+// Permission: both actions require canClosePeriods (ADMIN+ in the
+// current tenant). Period close is one of the highest-impact admin
+// operations in an accounting system — it freezes the books for a
+// (book, period) tuple — so the explicit gate is non-negotiable. Reopen
+// is similarly gated because it can resurrect posting on a period
+// that's already been reported on to stakeholders.
 //
 // Per-book independence: GAAP April can be closed while Tax April stays
 // open. This is the whole point of multi-book — close on the schedule
@@ -38,11 +39,9 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import {
-  requireAdmin,
-  NotAuthenticatedError,
-  NotAuthorizedError,
-} from "@/lib/auth/current-user";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
+import { canClosePeriods, PermissionDeniedError } from "@/lib/auth/policy";
 import {
   auditPrivilegedAction,
   auditAccessDenied,
@@ -77,18 +76,21 @@ export async function closePeriodAction(
   input: ClosePeriodInput
 ): Promise<ClosePeriodState> {
   try {
-    const admin = await requireAdmin();
+    const { user: admin, tenant } = await requirePermitted(
+      "period.close",
+      canClosePeriods
+    );
 
     if (!input.entityCode || !input.bookCode || !input.periodCode) {
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
     }
 
-    // Phase 4b: legalEntity.code is unique per [tenantId, code]. Use
-    // findFirst — admin auth check already ensures the caller has a
-    // tenant, but we accept the entity belonging to any tenant the
-    // admin has access to (rare cross-tenant admin scenarios).
+    // Phase 4b: legalEntity.code is unique per [tenantId, code]. Pinned
+    // to the CURRENT tenant — admin is a per-tenant role now, so an
+    // ADMIN of tenant A must never resolve (and close) tenant B's
+    // entity by guessing its code.
     const entity = await prisma.legalEntity.findFirst({
-      where: { code: input.entityCode },
+      where: { code: input.entityCode, tenantId: tenant.id },
       // tenantId pulled so the PeriodClose row is tenant-tagged.
       select: { id: true, code: true, tenantId: true },
     });
@@ -229,13 +231,9 @@ export async function closePeriodAction(
       });
       return { ok: false, message: "You must be signed in." };
     }
-    if (e instanceof NotAuthorizedError) {
-      await auditAccessDenied({
-        attemptedAction: "close-period",
-        reason: "Not admin",
-        resource: "Period",
-        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
-      });
+    if (e instanceof PermissionDeniedError) {
+      // requirePermitted already wrote the ACCESS_DENIED audit row —
+      // don't double-log the same refusal here.
       return { ok: false, message: "Period close requires admin permission." };
     }
     return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
@@ -264,7 +262,10 @@ export async function reopenPeriodAction(
   input: ReopenPeriodInput
 ): Promise<ReopenPeriodState> {
   try {
-    const admin = await requireAdmin();
+    const { user: admin, tenant } = await requirePermitted(
+      "period.reopen",
+      canClosePeriods
+    );
 
     if (!input.entityCode || !input.bookCode || !input.periodCode) {
       return { ok: false, message: "entityCode, bookCode, and periodCode are all required" };
@@ -278,9 +279,9 @@ export async function reopenPeriodAction(
       return { ok: false, message: "A reason is required to reopen a closed period." };
     }
 
-    // Phase 4b: see closePeriodAction above; findFirst by code.
+    // Phase 4b: see closePeriodAction above; tenant-pinned findFirst.
     const entity = await prisma.legalEntity.findFirst({
-      where: { code: input.entityCode },
+      where: { code: input.entityCode, tenantId: tenant.id },
       select: { id: true, tenantId: true },
     });
     if (!entity) return { ok: false, message: `Unknown entity: ${input.entityCode}` };
@@ -374,13 +375,8 @@ export async function reopenPeriodAction(
       });
       return { ok: false, message: "You must be signed in." };
     }
-    if (e instanceof NotAuthorizedError) {
-      await auditAccessDenied({
-        attemptedAction: "reopen-period",
-        reason: "Not admin",
-        resource: "Period",
-        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
-      });
+    if (e instanceof PermissionDeniedError) {
+      // requirePermitted already wrote the ACCESS_DENIED audit row.
       return { ok: false, message: "Period reopen requires admin permission." };
     }
     return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };

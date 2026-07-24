@@ -77,5 +77,13 @@ export async function ensureDefaultTenant(prisma: PrismaClient): Promise<string>
     },
     select: { id: true },
   });
+  // Tenant.ownerUserId records ownership, but role resolution reads
+  // TenantMembership.role (see src/lib/auth/policy.ts) — without this
+  // row the bootstrap owner would have a tenant and no role in it.
+  await prisma.tenantMembership.upsert({
+    where: { tenantId_userId: { tenantId: tenant.id, userId: owner.id } },
+    create: { tenantId: tenant.id, userId: owner.id, role: "OWNER" },
+    update: { role: "OWNER" },
+  });
   return tenant.id;
 }

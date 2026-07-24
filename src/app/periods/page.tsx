@@ -11,7 +11,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canClosePeriods } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -34,8 +35,7 @@ export default async function PeriodsPage() {
       />
     );
   }
-  const user = await getCurrentUser();
-  const admin = isAdmin(user);
+  const admin = canClosePeriods(await getViewerRole());
 
   // Resolve the entity by its tenant-verified id (for its display name).
   const entity = await prisma.legalEntity.findUnique({

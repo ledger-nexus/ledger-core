@@ -26,12 +26,12 @@ import { prisma } from "@/lib/db";
 import { Decimal } from "decimal.js";
 import type { Cadence } from "@prisma/client";
 import { withTenantContext } from "@/lib/tenant-context";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
 import {
-  requireAdmin,
-  NotAuthenticatedError,
-  NotAuthorizedError,
-} from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+  canManageRecurringEntries,
+  PermissionDeniedError,
+} from "@/lib/auth/policy";
 import {
   auditPrivilegedAction,
   auditAccessDenied,
@@ -79,8 +79,10 @@ export async function createRecurringEntryAction(
   input: CreateRecurringEntryInput
 ): Promise<CreateRecurringEntryState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "recurringEntry.manage",
+      canManageRecurringEntries
+    );
 
     // ── Validate code ────────────────────────────────────────────────────
     const code = input.code?.trim().toUpperCase() ?? "";
@@ -253,8 +255,10 @@ export async function runRecurringEntriesAction(
   input: RunRecurringInput
 ): Promise<RunRecurringState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "recurringEntry.manage",
+      canManageRecurringEntries
+    );
 
     const throughDate = new Date(input.throughDate);
     if (isNaN(throughDate.getTime())) {
@@ -322,8 +326,10 @@ export async function setRecurringActiveAction(
   input: SetActiveInput
 ): Promise<SetActiveState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "recurringEntry.manage",
+      canManageRecurringEntries
+    );
     // RLS Phase 2b shape W2 (no helper involved): wrap the single
     // updateMany in withTenantContext. Tenant-scoped predicate retained
     // as defense in depth.
@@ -368,8 +374,10 @@ export async function deleteRecurringEntryAction(
   input: DeleteRecurringInput
 ): Promise<DeleteRecurringState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "recurringEntry.manage",
+      canManageRecurringEntries
+    );
     // RLS Phase 2b shape T2: findFirst + delete inside one
     // withTenantContext tx. Tenant-scoped predicate retained.
     // Cascade deletes lines (FK ON DELETE CASCADE). JEs already posted
@@ -416,12 +424,8 @@ function handleAuthError(
     });
     return { ok: false, message: "You must be signed in." };
   }
-  if (e instanceof NotAuthorizedError) {
-    void auditAccessDenied({
-      attemptedAction,
-      reason: "Not admin",
-      resource: "RecurringEntry",
-    });
+  if (e instanceof PermissionDeniedError) {
+    // requirePermitted already wrote the ACCESS_DENIED audit row.
     return { ok: false, message: "Recurring entries require admin permission." };
   }
   return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
