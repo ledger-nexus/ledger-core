@@ -59,6 +59,9 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Master data",
     items: [{ href: "/accounts", label: "Chart of accounts" }],
     more: [
+      // Securities master + the prices that mark them. Master data, not
+      // positions — those are Transactions → Holdings.
+      { href: "/commodities", label: "Commodities", hint: "securities + prices" },
       { href: "/import/netsuite", label: "Import from NetSuite", hint: "single / multi-sub" },
     ],
   },

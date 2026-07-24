@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session commodity-price-entry · 2026-07-24
+- **Scope**: Added the two surfaces that made the commodity/lots arc reachable — `createCommodityAction` + `recordCommodityPriceAction` and the `/commodities` page. ⚠️ Found that NOTHING could create a Commodity (tests only), so ④'s trade form always failed "unknown commodity" — my 2026-07-18 "complete vertical slice" claim was wrong.
+- **Files**: `src/app/actions/manage-commodities.ts` (new), `src/app/commodities/page.tsx` (new), `src/app/commodities/commodity-forms.tsx` (new), `src/components/nav/catalog.ts`, `tests/manage-commodities-actions.test.ts` (new).
+- **Branch**: `feat/commodity-price-entry`. NO schema/migration/fingerprint change.
+- **Outcome**: tsc exit 0; DB suite CI-only. ⚠️ VISUAL unverified from this clone.
+
+
 ### Session assertion-close-alerts · 2026-07-24
 - **Scope**: Completed Beancount ① — assertions now PUSH. Added the `assertion` close-alert pillar (FAIL→high, UNCHECKED→low, period-scoped, reads the cached lastStatus) + `POST /api/cron/assertion-check` daily 03:00 UTC (after the 02:00 recurring-JE run) refreshing that cache.
 - **Files**: `src/lib/close/alerts.ts`, `src/app/close/alerts/page.tsx`, `src/app/api/cron/assertion-check/route.ts` (new), `vercel.json`, `tests/close-alerts-assertion-pillar.test.ts` (new).
