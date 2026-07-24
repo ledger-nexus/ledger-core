@@ -76,7 +76,7 @@ export default async function RecurringEntriesPage() {
     <div className="flex flex-col gap-4">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-ink-900">Recurring entries</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Recurring entries</h1>
           <p className="text-sm text-ink-500 mt-1 max-w-prose">
             Templates that fire on a schedule. Every cadence step posts a fresh
             journal entry via the substrate — same posting boundary, same audit

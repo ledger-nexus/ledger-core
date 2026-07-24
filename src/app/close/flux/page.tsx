@@ -121,7 +121,7 @@ export default async function FluxListPage() {
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Flux analysis</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Flux analysis</h1>
         <p className="text-sm text-ink-500">
           Period-over-period variance review. Each statement flags accounts
           whose delta breaches the absolute $ or % threshold; the controller

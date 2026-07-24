@@ -92,7 +92,7 @@ export default async function UsersPage() {
   return (
     <div className="flex flex-col gap-6">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Users</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Users</h1>
         <p className="text-sm text-ink-500">
           Deactivating a user is what creates orphan records — this page is
           the prevention-side counterpart to{" "}

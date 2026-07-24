@@ -247,7 +247,7 @@ export default async function CloseTasksListPage({
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Close tasks</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Close tasks</h1>
         <p className="text-sm text-ink-500">
           The controller's checklist for this period. Blocked tasks
           surface first; dependencies enforce order.

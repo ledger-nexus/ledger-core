@@ -270,7 +270,7 @@ export default async function ReconciliationsListPage({
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Reconciliations</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Reconciliations</h1>
         <p className="text-sm text-ink-500">
           Per-account close-period reconciliations. Worst-disagreement rows
           sort to the top so the controller's eye lands on what needs work.

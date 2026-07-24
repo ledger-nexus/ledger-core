@@ -1,16 +1,18 @@
 import { InputHTMLAttributes, SelectHTMLAttributes, LabelHTMLAttributes, forwardRef } from "react";
 import { cn } from "@/lib/utils/cn";
 
+// Accent focus treatment: colored border + a soft 3px halo instead of the
+// gray ring — the one place the accent color earns its keep on every page.
+const fieldClasses =
+  "h-9 w-full rounded-lg border border-ink-200 bg-white px-3 text-sm " +
+  "transition-[border-color,box-shadow] duration-200 ease-snap " +
+  "focus:outline-none focus:border-accent-500 focus:ring-[3px] focus:ring-accent-500/15";
+
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => (
     <input
       ref={ref}
-      className={cn(
-        "h-9 w-full rounded-md border border-ink-200 bg-white px-3 text-sm",
-        "placeholder:text-ink-400",
-        "focus:outline-none focus:ring-2 focus:ring-ink-300 focus:border-ink-400",
-        className
-      )}
+      className={cn(fieldClasses, "placeholder:text-ink-400", className)}
       {...props}
     />
   )
@@ -19,15 +21,7 @@ Input.displayName = "Input";
 
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
   ({ className, children, ...props }, ref) => (
-    <select
-      ref={ref}
-      className={cn(
-        "h-9 w-full rounded-md border border-ink-200 bg-white px-3 text-sm",
-        "focus:outline-none focus:ring-2 focus:ring-ink-300 focus:border-ink-400",
-        className
-      )}
-      {...props}
-    >
+    <select ref={ref} className={cn(fieldClasses, className)} {...props}>
       {children}
     </select>
   )

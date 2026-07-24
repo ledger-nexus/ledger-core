@@ -103,7 +103,7 @@ export default async function CloseRetrospectivePage({
       <header className="flex flex-col gap-1">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-ink-900">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
               Close retrospective
             </h1>
             <p className="text-sm text-ink-500">

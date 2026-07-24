@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Outfit } from "next/font/google";
 import Link from "next/link";
 import { CommandPalette, CommandPaletteHint } from "@/components/nav/command-palette";
 import { Sidebar } from "@/components/nav/sidebar";
@@ -15,6 +16,16 @@ import { getRecentNotifications } from "@/lib/notifications";
 import { prisma } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import "./globals.css";
+
+// Display face — headings only (see tailwind fontFamily.display). Body
+// text stays on the system stack for speed and data density. next/font
+// self-hosts at build time; the CSS variable scopes it to font-display
+// utilities with graceful system-ui fallback.
+const outfit = Outfit({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-display",
+});
 
 export const metadata: Metadata = {
   title: "ledger-core",
@@ -68,7 +79,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // The lazy import below is rendered once per request — Next.js
   // dedupes at the React level.
   const tree = (
-    <html lang="en">
+    <html lang="en" className={outfit.variable}>
       <body>
         <div className="grid min-h-screen grid-cols-[260px_1fr] bg-ink-50">
           <aside className="border-r border-ink-200 bg-white">
@@ -76,8 +87,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </aside>
           <main className="flex flex-col">
             <header className="flex items-center justify-between border-b border-ink-200 bg-white px-8 py-3">
-              <div>
-                <h1 className="text-lg font-semibold text-ink-900">
+              {/* Context line, not a title — page h1s own the hierarchy now.
+                  Single line, truncates instead of wrapping into the controls. */}
+              <div className="min-w-0">
+                <h1 className="truncate whitespace-nowrap text-sm font-medium text-ink-900">
                   {currentTenant && (
                     <>
                       <span className="text-ink-500">{currentTenant.name}</span>
@@ -88,12 +101,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <span className="text-ink-700">{scope.bookCode}</span>
                 </h1>
               </div>
-              <div className="flex items-start gap-3">
+              <div className="flex items-center gap-2">
                 <CommandPaletteHint />
                 <Link
                   href="/ask"
                   title="Ask your ledger — plain-English questions, read-only"
-                  className="flex h-9 items-center gap-1.5 rounded-md border border-ink-300 bg-white px-3 text-sm font-medium text-ink-900 transition-colors hover:border-ink-900 hover:bg-ink-50"
+                  className="flex h-9 items-center gap-1.5 rounded-full border border-ink-300 bg-white px-3.5 text-sm font-medium text-ink-900 hover:border-ink-900 hover:bg-ink-50"
                 >
                   <span aria-hidden="true">✦</span>
                   <span>Ask</span>
