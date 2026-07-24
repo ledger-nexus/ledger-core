@@ -32,10 +32,11 @@ const PILLAR_LABELS: Record<AlertPillar, string> = {
   recon: "Recon",
   task: "Task",
   flux: "Flux",
+  assertion: "Assertion",
 };
 
 const ALL_SEVERITIES: AlertSeverity[] = ["high", "medium", "low"];
-const ALL_PILLARS: AlertPillar[] = ["recon", "task", "flux"];
+const ALL_PILLARS: AlertPillar[] = ["recon", "task", "flux", "assertion"];
 
 export default async function CloseAlertsPage({
   searchParams,
