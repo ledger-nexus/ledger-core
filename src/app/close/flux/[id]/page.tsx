@@ -228,7 +228,7 @@ export default async function FluxDetailPage({
           </Link>
         </div>
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-ink-900">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
             Flux: {stmt.entity.code} / {stmt.book.code}
           </h1>
           <Badge tone={finalized ? "positive" : "warning"}>

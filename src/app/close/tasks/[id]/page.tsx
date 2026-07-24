@@ -161,7 +161,7 @@ export default async function CloseTaskDetailPage({
           </Link>
         </div>
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-ink-900">{task.name}</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">{task.name}</h1>
           <Badge tone={STATUS_TONES[task.status]}>{task.status}</Badge>
           <Badge tone="neutral">{task.category}</Badge>
           {!task.requiredForClose && (

@@ -162,7 +162,7 @@ export default async function PeriodsPage() {
         </Card>
       )}
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Periods</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Periods</h1>
         <p className="text-sm text-ink-500">
           Close status for every fiscal period. Closing a period freezes it — any
           entry dated into a period marked <strong>Closed</strong> will be

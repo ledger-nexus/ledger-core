@@ -14,7 +14,7 @@ export default async function SignInPage() {
   if (!isClerkEnabled()) {
     return (
       <div className="mx-auto max-w-md p-8">
-        <h1 className="text-xl font-semibold text-ink-900">Sign-in not configured</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Sign-in not configured</h1>
         <p className="mt-3 text-sm text-ink-600">
           This deployment is running with the dev-cookie auth stub. Sign-in
           via Clerk requires <code>CLERK_SECRET_KEY</code> +{" "}

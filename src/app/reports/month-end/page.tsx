@@ -210,7 +210,7 @@ export default async function MonthEndPage({
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Month-end review</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Month-end review</h1>
         <p className="text-sm text-ink-500">
           Trial balance + income statement + balance sheet, all in one place, for a
           single period. The standard month-end close checklist condensed to one URL.

@@ -143,7 +143,7 @@ export default async function CloseAlertsPage({
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Close alerts</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Close alerts</h1>
         <p className="text-sm text-ink-500">
           Cross-pillar alerts for this period. Sorted by severity, oldest
           first within severity.

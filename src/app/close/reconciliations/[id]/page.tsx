@@ -190,7 +190,7 @@ export default async function ReconciliationDetailPage({
           </Link>
         </div>
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-ink-900">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
             <span className="font-mono text-base">{recon.account.code}</span>{" "}
             {recon.account.name}
           </h1>

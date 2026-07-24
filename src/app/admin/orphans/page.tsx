@@ -95,7 +95,7 @@ export default async function OrphansPage() {
   return (
     <div className="flex flex-col gap-6">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Orphaned records</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Orphaned records</h1>
         <p className="text-sm text-ink-500">
           Records whose owner is no longer valid — typically because the user was
           deactivated or the queue was deleted. The reassignment-rules engine
