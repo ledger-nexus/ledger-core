@@ -95,6 +95,10 @@ export const NAV_SECTIONS: NavSection[] = [
     more: [
       { href: "/close", label: "Close dashboard", hint: "all pillars" },
       { href: "/close/reconciliations", label: "Reconciliations", hint: "BS tie-out" },
+      // Beside Reconciliations on purpose: same job — does the balance agree
+      // with something outside the ledger — but the cheap machine half, run
+      // after any import rather than once a period with a sign-off.
+      { href: "/assertions", label: "Balance assertions", hint: "drift tripwire" },
       { href: "/close/alerts", label: "Alerts", hint: "cross-pillar" },
       { href: "/close/flux", label: "Flux analysis", hint: "variance" },
       { href: "/close/retrospective", label: "Retrospective", hint: "trend" },

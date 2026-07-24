@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session balance-assertions-ui · 2026-07-24
+- **Scope**: Armed Beancount ① — added the missing create path + `/assertions` page with live PASS/FAIL results. `checkBalanceAssertions` previously had zero callers in `src/`.
+- **Files**: `src/app/actions/create-balance-assertion.ts` (new), `src/app/assertions/page.tsx` (new), `src/app/assertions/assertion-form.tsx` (new), `src/components/nav/catalog.ts`, `tests/create-balance-assertion.test.ts` (new).
+- **Branch**: `feat/balance-assertions-ui`. **Working dir**: `.worktrees/assert-ui`. NO schema/migration/fingerprint change.
+- **Outcome**: tsc exit 0; DB suite CI-only (real books in this clone). ⚠️ VISUAL unverified from this clone — Chris's browser is the check.
+
+
 ### Session encrypt-note-author-email · 2026-07-24
 - **Scope**: Landable remainder of PR #131 — `JournalEntryNote.authorEmail` joins the encryption registry. Dropped #131's speculative `authorEmailHash` column (the report justifying it doesn't exist; zero filters on the column), so this is a registry line + tests with NO schema/migration/backfill/fingerprint change.
 - **Files**: `src/lib/db/encrypted-fields-extension.ts`, `tests/encrypted-fields-extension.test.ts`.
