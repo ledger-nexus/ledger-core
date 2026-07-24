@@ -21,12 +21,9 @@
 
 import { revalidatePath } from "next/cache";
 import type { AccountType, NormalBalance, Prisma, PrismaClient } from "@prisma/client";
-import {
-  requireAdmin,
-  NotAuthenticatedError,
-  NotAuthorizedError,
-} from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
+import { canEditAccounts, PermissionDeniedError } from "@/lib/auth/policy";
 import {
   auditPrivilegedAction,
   auditAccessDenied,
@@ -71,8 +68,10 @@ export async function createAccountAction(
   input: CreateAccountInput
 ): Promise<CreateAccountState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "account.manage",
+      canEditAccounts
+    );
 
     // ── Validate code shape ────────────────────────────────────────────
     const code = input.code?.trim().toUpperCase() ?? "";
@@ -246,8 +245,10 @@ export async function updateAccountAction(
   input: UpdateAccountInput
 ): Promise<UpdateAccountState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "account.manage",
+      canEditAccounts
+    );
 
     // Pre-tx validation that doesn't need DB access.
     const data: Record<string, unknown> = {};
@@ -418,12 +419,8 @@ function handleAuthError(
     });
     return { ok: false, message: "You must be signed in." };
   }
-  if (e instanceof NotAuthorizedError) {
-    void auditAccessDenied({
-      attemptedAction,
-      reason: "Not admin",
-      resource: "Account",
-    });
+  if (e instanceof PermissionDeniedError) {
+    // requirePermitted already wrote the ACCESS_DENIED audit row.
     return { ok: false, message: "Managing accounts requires admin permission." };
   }
   return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };

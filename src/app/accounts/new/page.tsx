@@ -3,13 +3,14 @@
 
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canEditAccounts } from "@/lib/auth/policy";
 import { EmptyState } from "@/components/ui/empty-state";
 import NewAccountForm from "./new-account-form";
 
 export default async function NewAccountPage() {
   const scope = await getCurrentScope();
-  const user = await getCurrentUser();
+  const viewerRole = await getViewerRole();
 
   if (!scope) {
     return (
@@ -19,7 +20,7 @@ export default async function NewAccountPage() {
       />
     );
   }
-  if (!isAdmin(user)) {
+  if (!canEditAccounts(viewerRole)) {
     return (
       <EmptyState
         title="Admin required"

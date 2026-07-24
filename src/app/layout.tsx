@@ -7,7 +7,8 @@ import { UserSwitcher } from "@/components/nav/user-switcher";
 import { NotificationBell } from "@/components/nav/notification-bell";
 import { TenantSwitcher } from "@/components/nav/tenant-switcher";
 import { getCurrentScope, DEFAULT_SCOPE } from "@/lib/scope";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { canViewAdminPages } from "@/lib/auth/policy";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { isClerkEnabled } from "@/lib/auth/clerk";
 import { getRecentNotifications } from "@/lib/notifications";
@@ -71,7 +72,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <div className="grid min-h-screen grid-cols-[260px_1fr] bg-ink-50">
           <aside className="border-r border-ink-200 bg-white">
-            <Sidebar isAdmin={isAdmin(currentUser)} reviewCount={reviewCount} />
+            <Sidebar isAdmin={canViewAdminPages(currentTenant?.role)} reviewCount={reviewCount} />
           </aside>
           <main className="flex flex-col">
             <header className="flex items-center justify-between border-b border-ink-200 bg-white px-8 py-3">
@@ -125,7 +126,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <div className="flex-1 overflow-y-auto px-8 py-6">{children}</div>
           </main>
           {/* Global ⌘K palette — mounted once, reachable from every page. */}
-          <CommandPalette isAdmin={isAdmin(currentUser)} reviewCount={reviewCount} />
+          <CommandPalette isAdmin={canViewAdminPages(currentTenant?.role)} reviewCount={reviewCount} />
         </div>
       </body>
     </html>

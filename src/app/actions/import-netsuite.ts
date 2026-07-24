@@ -17,10 +17,12 @@
 //     field on each transaction.
 //
 // Security:
-//   - requireAdmin: importing rewrites the chart of accounts + posts
-//     JEs; only admins can do this.
-//   - requireCurrentTenant: the import scopes to one tenant (the
-//     mapper uses getDefaultTenantId, which honors auth context).
+//   - canRunErpImports (ADMIN+ in the current tenant): importing
+//     rewrites the chart of accounts + posts JEs; only admins can
+//     do this.
+//   - requirePermitted also resolves the tenant — the import scopes
+//     to one tenant (the mapper uses getDefaultTenantId, which honors
+//     auth context).
 //   - JSON size limit: 10 MB. NS exports for real customers are
 //     typically under 5 MB at this scope; the limit guards against
 //     accidentally dumping a multi-gig payload.
@@ -30,8 +32,8 @@
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { requirePermitted } from "@/lib/auth/authorize";
+import { canRunErpImports } from "@/lib/auth/policy";
 import { logAuditEvent } from "@/lib/audit/log";
 import { importFromNs } from "@/lib/mappers/netsuite";
 import type { NsExport } from "@/lib/mappers/netsuite/types";
@@ -125,9 +127,15 @@ export async function importNsAction(
   let adminEmail: string | null = null;
   let tenantId: string | null = null;
   try {
-    const u = await requireAdmin();
+    // ERP imports rewrite the chart of accounts and post JEs wholesale —
+    // canRunErpImports floors at ADMIN in the current tenant.
+    // requirePermitted writes the ACCESS_DENIED row for role refusals;
+    // the catch below covers the not-signed-in / no-tenant paths.
+    const { user: u, tenant: t } = await requirePermitted(
+      "erpImport.run",
+      canRunErpImports
+    );
     adminEmail = u.email;
-    const t = await requireCurrentTenant();
     tenantId = t.id;
   } catch {
     // SOC 2: log access denials. An attacker probing the action gets

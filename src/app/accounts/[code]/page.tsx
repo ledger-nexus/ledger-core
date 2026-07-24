@@ -12,7 +12,8 @@ import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canEditAccounts } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -33,8 +34,7 @@ export default async function AccountDetailPage({
 }) {
   const scope = await getCurrentScope();
   if (!scope) return notFound();
-  const user = await getCurrentUser();
-  const canEdit = isAdmin(user);
+  const canEdit = canEditAccounts(await getViewerRole());
 
   // Try entity-specific first, fall back to shared. Mirrors how the
   // chart of accounts dedups in reports.

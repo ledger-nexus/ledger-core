@@ -32,6 +32,12 @@ _No active claims._
 
 ## Recent completions
 
+### Session authz-policy-layer · 2026-07-24
+- **Scope**: #46 harvest slice ① — per-tenant RBAC. New `src/lib/auth/policy.ts` (named-permission catalog) + `src/lib/auth/authorize.ts` (`requirePermitted`/`getViewerRole`); DELETED the email-allowlist `isAdmin`/`requireAdmin` and migrated all 21 call sites; tenant-pinned period close/reopen entity lookups; user-lifecycle membership pin + previously-missing audit rows; seeds grant memberships (controller ADMIN etc.).
+- **Files**: `src/lib/auth/{policy,authorize,current-user}.ts`, 7 actions, 13 pages, audit-log CSV route, `src/lib/seed/{northwind,default-tenant}.ts`, `tests/authz-policy.test.ts` (new), `tests/{auth-current-user,period-close-action}.test.ts`.
+- **Branch**: `feat/authz-policy-layer` (worktree ~/Code/ledger-core-authz-policy). NO schema/migration/fingerprint change.
+- **Outcome**: tsc exit 0; full suite 149 files — 147 pass + period-close fixture fixed (now 9/9) + property-fuzz confirmed Neon-load flake (5/5 alone). ⚠️ Suites signing in via `lc-user` must pin `lc-tenant` — auto-resolve is concurrency-unsafe.
+
 ### Session commodity-price-entry · 2026-07-24
 - **Scope**: Added the two surfaces that made the commodity/lots arc reachable — `createCommodityAction` + `recordCommodityPriceAction` and the `/commodities` page. ⚠️ Found that NOTHING could create a Commodity (tests only), so ④'s trade form always failed "unknown commodity" — my 2026-07-18 "complete vertical slice" claim was wrong.
 - **Files**: `src/app/actions/manage-commodities.ts` (new), `src/app/commodities/page.tsx` (new), `src/app/commodities/commodity-forms.tsx` (new), `src/components/nav/catalog.ts`, `tests/manage-commodities-actions.test.ts` (new).

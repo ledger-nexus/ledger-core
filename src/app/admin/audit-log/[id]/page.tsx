@@ -14,11 +14,10 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import {
   getCurrentUser,
-  isAdmin,
   NotAuthenticatedError,
-  NotAuthorizedError,
 } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { canViewAuditLog } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils/format";
@@ -32,11 +31,10 @@ export default async function AuditLogDetailPage({
   if (!currentUser) {
     return <PermissionDenied reason={new NotAuthenticatedError().message} />;
   }
-  if (!isAdmin(currentUser)) {
-    return <PermissionDenied reason={new NotAuthorizedError().message} />;
-  }
-
   const tenant = await getCurrentTenant();
+  if (!canViewAuditLog(tenant?.role)) {
+    return <PermissionDenied reason="This page requires admin access" />;
+  }
 
   const row = await prisma.auditLog.findUnique({
     where: { id: params.id },

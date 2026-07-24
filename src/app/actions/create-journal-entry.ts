@@ -3,7 +3,12 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
-import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
+import {
+  canPostJournalEntries,
+  PermissionDeniedError,
+} from "@/lib/auth/policy";
 import { requireCurrentScope, NoScopeError } from "@/lib/scope";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
@@ -39,7 +44,13 @@ export async function createJournalEntryAction(
   let entryId: string;
 
   try {
-    const user = await requireCurrentUser();
+    // MEMBER floor today (every membership can post) — the gate is the
+    // seam where the read-only VIEWER role and maker-checker submission
+    // land without touching this action's body again.
+    const { user } = await requirePermitted(
+      "journalEntry.post",
+      canPostJournalEntries
+    );
     const scope = await requireCurrentScope();
 
     const documentDateStr = String(formData.get("documentDate") ?? "");
@@ -112,6 +123,9 @@ export async function createJournalEntryAction(
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
       return { ok: false, error: "You must be signed in to post a journal entry." };
+    }
+    if (e instanceof PermissionDeniedError) {
+      return { ok: false, error: "Your role can't post journal entries in this tenant." };
     }
     if (e instanceof NoScopeError) {
       return { ok: false, error: "No active scope — pick an entity + book first." };

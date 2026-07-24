@@ -8,7 +8,7 @@
 //
 // SOC 2:
 //   CC6.1  scope (entity, book) resolved from the session, never client input
-//   CC6.3  requireTenantAdmin — authenticated AND authorized; non-admins
+//   CC6.3  canClosePeriods (ADMIN+) — authenticated AND authorized; non-admins
 //          get a structured NOT_ADMIN error + an ACCESS_DENIED audit row
 //   CC6.8  periodCode validated (YYYY-MM / YYYY-Qn shape) before use
 //   CC7.2  postRevaluation writes the fx.revaluation.post audit row; the
@@ -22,7 +22,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { requireCurrentUser } from "@/lib/auth/current-user";
-import { requireCurrentTenant, requireTenantAdmin } from "@/lib/auth/tenant";
+import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { canClosePeriods } from "@/lib/auth/policy";
 import { auditAccessDenied } from "@/lib/audit/log";
 import { postRevaluation } from "@/lib/accounting/revaluation-posting";
 
@@ -77,11 +78,12 @@ export async function postFxRevaluationAction(
     return { ok: false, code: "NO_TENANT", error: "No active tenant" };
   }
 
-  try {
-    await requireTenantAdmin();
-  } catch {
+  // Same floor as period close — an FX revaluation posts adjustment +
+  // reversal JEs that land directly in reported balances.
+  if (!canClosePeriods(tenant.role)) {
     await auditAccessDenied({
       attemptedAction: "fx.revaluation.post",
+      actor: { id: user.id, email: user.email },
       reason: "Not a tenant admin",
       resource: "JournalEntry",
     });

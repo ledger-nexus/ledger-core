@@ -5,7 +5,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canEditAccounts } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -30,8 +31,7 @@ export default async function AccountsPage() {
       />
     );
   }
-  const user = await getCurrentUser();
-  const admin = isAdmin(user);
+  const admin = canEditAccounts(await getViewerRole());
   const accounts = await prisma.account.findMany({
     where: {
       tenantId: scope.tenantId,

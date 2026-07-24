@@ -17,12 +17,12 @@ import {
   ReassignError,
   type ReassignableRecordType,
 } from "@/lib/ownership/reassign";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
 import {
-  requireAdmin,
-  NotAuthenticatedError,
-  NotAuthorizedError,
-} from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+  canManageReassignmentRules,
+  PermissionDeniedError,
+} from "@/lib/auth/policy";
 import { withTenantContext } from "@/lib/tenant-context";
 
 export interface AdminReassignState {
@@ -38,8 +38,10 @@ export async function adminReassignAction(input: {
   reason?: string;
 }): Promise<AdminReassignState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "reassignment.execute",
+      canManageReassignmentRules
+    );
 
     if (!input.recordId) return { ok: false, message: "recordId required" };
     if (!input.newOwnerId) return { ok: false, message: "newOwnerId required" };
@@ -84,7 +86,7 @@ export async function adminReassignAction(input: {
     return { ok: true };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) return { ok: false, message: e.message };
-    if (e instanceof NotAuthorizedError) return { ok: false, message: e.message };
+    if (e instanceof PermissionDeniedError) return { ok: false, message: e.message };
     if (e instanceof ReassignError) {
       return { ok: false, message: `${e.code}: ${e.message}` };
     }

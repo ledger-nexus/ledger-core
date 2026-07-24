@@ -17,10 +17,10 @@
 import { revalidatePath } from "next/cache";
 import {
   requireCurrentUser,
-  isAdmin,
   NotAuthenticatedError,
 } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { canModerateNotes } from "@/lib/auth/policy";
 import {
   auditPrivilegedAction,
   auditAccessDenied,
@@ -229,11 +229,11 @@ export async function deleteJournalEntryNoteAction(
     return { ok: false, message: "Note not found in this tenant." };
   }
 
-  // Permission: author OR admin can delete. Others can't (audit-trail
-  // discipline — a passing CPA shouldn't be able to silently delete
-  // someone else's review comment).
+  // Permission: author OR a tenant admin can delete. Others can't
+  // (audit-trail discipline — a passing CPA shouldn't be able to
+  // silently delete someone else's review comment).
   const isAuthor = note.authorUserId === user.id;
-  if (!isAuthor && !isAdmin(user)) {
+  if (!isAuthor && !canModerateNotes(tenant.role)) {
     await auditAccessDenied({
       attemptedAction: "delete-journal-entry-note",
       reason: "Not author and not admin",
