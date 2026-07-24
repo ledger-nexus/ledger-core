@@ -32,6 +32,12 @@ _No active claims._
 
 ## Recent completions
 
+### Session team-invites · 2026-07-24
+- **Scope**: #46 harvest slice ③ — team management. `/admin/team` + `/invites/accept` + team.ts actions (invite/revoke/change-role/remove, all requirePermitted + audited); VIEWER role added (migration 0033 enum value; auditor seed flipped); `TenantInvite` with day-one email encryption + search hash; accept state machine extracted to `src/lib/team/accept-invite.ts`; RLS policy #54. ⚠️ Rewriter does NOT recurse relation filters — resolve User top-level, then membership by userId.
+- **Files**: `prisma/{schema.prisma,migrations/0033_tenant_invite_and_viewer/}`, RLS phase-1 SQL, `src/lib/auth/policy.ts` (VIEWER), `src/lib/db/encrypted-fields-extension.ts`, `src/lib/seed/northwind.ts`, `src/app/actions/team.ts` (new), `src/lib/team/accept-invite.ts` (new), `src/lib/email/templates/invite.ts` (new), `src/app/admin/team/*` (new ×3), `src/app/invites/accept/page.tsx` (new), `src/components/nav/catalog.ts`, `tests/team-invites.test.ts` (new).
+- **Branch**: `feat/team-invites` (worktree ~/Code/ledger-core-team-invites).
+- **Outcome**: tsc 0; full suite 151 files — 150 passed + one fixture bug in the NEW suite caught under full-parallel and fixed: users created via the RAW client carry NULL emailHash, and a prior suite's leaked FIELD_DETERMINISTIC_KEY makes the rewritten equality filter miss them (the documented raw-client rollout gap, reproduced in a fixture). Fix: create fixture users through the APP client. Suite now passes bare AND with keys ambient. Browser-verified on the dev DB (invite → LOGGED_ONLY + accept URL + pending row; wrong-user accept → EMAIL MISMATCH).
+
 ### Session authz-policy-layer · 2026-07-24
 - **Scope**: #46 harvest slice ① — per-tenant RBAC. New `src/lib/auth/policy.ts` (named-permission catalog) + `src/lib/auth/authorize.ts` (`requirePermitted`/`getViewerRole`); DELETED the email-allowlist `isAdmin`/`requireAdmin` and migrated all 21 call sites; tenant-pinned period close/reopen entity lookups; user-lifecycle membership pin + previously-missing audit rows; seeds grant memberships (controller ADMIN etc.).
 - **Files**: `src/lib/auth/{policy,authorize,current-user}.ts`, 7 actions, 13 pages, audit-log CSV route, `src/lib/seed/{northwind,default-tenant}.ts`, `tests/authz-policy.test.ts` (new), `tests/{auth-current-user,period-close-action}.test.ts`.

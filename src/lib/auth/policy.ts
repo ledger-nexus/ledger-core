@@ -1,13 +1,13 @@
 // Per-tenant role-based access control policy.
 //
-// One source of truth for "what can a TenantRole do?". The three roles
+// One source of truth for "what can a TenantRole do?". The four roles
 // form a strict hierarchy:
 //
-//   OWNER > ADMIN > MEMBER
+//   OWNER > ADMIN > MEMBER > VIEWER
 //
-// (A read-only VIEWER role below MEMBER is planned for the team-invites
-// slice — auditors need view-without-write. Adding it is an additive
-// enum migration; every floor below already anticipates it.)
+// VIEWER is the auditor role: view-without-write. Every mutation floor
+// sits at MEMBER or above, so a VIEWER can read reports and pages but
+// every gated Server Action refuses them.
 //
 // Each permission below maps to the MINIMUM role required. Server
 // Actions and pages call the matching helper instead of hard-coding
@@ -34,6 +34,7 @@ import type { TenantRole } from "@prisma/client";
 // ─── Role hierarchy ──────────────────────────────────────────────────────
 
 const ROLE_RANK: Record<TenantRole, number> = {
+  VIEWER: 0,
   MEMBER: 1,
   ADMIN: 2,
   OWNER: 3,
@@ -52,10 +53,10 @@ function meets(actual: TenantRole | undefined | null, required: TenantRole): boo
 // arrives with <slice>" have no call site yet — they document the
 // agreed rubric so later slices add consumers, not policy decisions.
 
-// READ — every membership can view; drops to VIEWER when that role lands.
+// READ — every membership can view, including the read-only VIEWER.
 
 export const canViewReports = (role: TenantRole | undefined | null): boolean =>
-  meets(role, "MEMBER");
+  meets(role, "VIEWER");
 
 export const canViewAuditLog = (role: TenantRole | undefined | null): boolean =>
   meets(role, "ADMIN");

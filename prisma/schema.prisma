@@ -118,6 +118,7 @@ model Tenant {
   notificationDispatches    NotificationDispatch[]
   bankTransactions          BankTransaction[]
   emailDeliveries           EmailDelivery[]
+  invites                   TenantInvite[]
 
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
@@ -148,6 +149,7 @@ enum TenantRole {
   OWNER // cannot be removed; can delete the tenant
   ADMIN // full read+write+admin (period close, user lifecycle)
   MEMBER // read+write, no admin actions
+  VIEWER // read-only — reports and pages, no mutations (auditors)
 }
 
 // Per-tenant API tokens for companion-repo authentication.
@@ -1929,6 +1931,8 @@ model User {
   closeTaskStateChangesMade   CloseTaskStateChange[]
   // Notifications arc: which channels did this user create.
   notificationChannelsCreated NotificationChannel[]
+  // Team management: invites this user originated (audit trail).
+  invitesSent                 TenantInvite[]             @relation("InvitedBy")
   // BlackLine arc Phase 3: flux / variance analysis.
   fluxStatementsFinalized     FluxStatement[]            @relation("FluxFinalizer")
   fluxLineComments            FluxLine[]                 @relation("FluxLineCommenter")
@@ -2824,6 +2828,58 @@ enum EmailDeliveryStatus {
   DELIVERED // Provider accepted the message
   LOGGED_ONLY // No RESEND_API_KEY set; row persisted for visibility
   FAILED // Provider rejected (rate limit, bad recipient, etc.) or unreachable
+}
+
+/// Invite-by-email into a tenant. Flow: an ADMIN+ invites an address;
+/// the invite holds a random single-use token; the accept URL
+/// (/invites/accept?token=...) verifies the signed-in user's email
+/// matches the invite's (case-insensitively — no hijacking), creates
+/// the TenantMembership at the stored role, and flips the invite to
+/// ACCEPTED. Invites lazy-expire after expiresAt (default 14 days).
+/// Harvested from PR #46 (slice ③).
+model TenantInvite {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Email the invite was sent to. Lowercased on insert; encrypted at
+  /// rest (random-IV AES-GCM) via the encrypted-fields extension.
+  email     String
+  /// HMAC-SHA256 search hash of the normalized email — the
+  /// duplicate-invite refusal filters on this (via the extension's
+  /// where-rewrite; call sites write plain `where: { email }`).
+  /// Registered from day one, so no rollout window and no backfill.
+  emailHash Bytes?
+
+  /// Role granted on acceptance. OWNER is intentionally not invitable —
+  /// there is one OWNER per tenant, set at tenant creation.
+  role TenantRole
+
+  /// Random URL-safe token (32 bytes hex). Stored as-is (not hashed):
+  /// acceptance is single-use and the token only lets the holder JOIN
+  /// the tenant at the stored role, not impersonate an existing member.
+  /// If invites ever grant broader scope, switch to hashed-at-rest.
+  token String @unique
+
+  status      InviteStatus @default(PENDING)
+  /// Who created the invite — the audit trail's originator.
+  invitedById String       @db.Uuid
+  invitedBy   User         @relation("InvitedBy", fields: [invitedById], references: [id])
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+
+  @@index([tenantId, status])
+  @@index([tenantId, emailHash])
+  @@map("tenant_invite")
+}
+
+enum InviteStatus {
+  PENDING // outstanding — the accept link works
+  ACCEPTED // membership created; link is spent
+  REVOKED // admin cancelled before acceptance
+  EXPIRED // lazy-flipped when an expired link is followed
 }
 
 // ─────────────────────────────────────────────────────────────────────────
