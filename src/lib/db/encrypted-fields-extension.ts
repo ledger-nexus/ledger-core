@@ -134,6 +134,21 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // content. Audited 2026-05-30 across all 5 repos: zero filter-by-
   // body queries. Standard AES-GCM is safe.
   { model: "JournalEntryNote", field: "body" },
+  // JournalEntryNote.authorEmail is snapshotted at note-write time so
+  // authorship survives the author's User row being deactivated. Same
+  // confidentiality class as the body it sits beside: notes routinely
+  // name customer-side people ("Bob from Acme asked about the rebate"),
+  // and this column identifies the responsible CPA.
+  //
+  // NO searchHash, deliberately. PR #131 proposed one for a per-tenant
+  // "notes by author" report — that report does not exist, and audited
+  // 2026-07-24 there is zero filtering on this column anywhere in src
+  // (the only note lookup is by id + tenantId). A hash column is not
+  // free: it's a schema change, a migration, and a backfill, and a
+  // deterministic hash leaks equality across rows in exchange. If the
+  // report ever ships, the hash can be added then and backfilled by
+  // decrypting with the current key — nothing here forecloses it.
+  { model: "JournalEntryNote", field: "authorEmail" },
   // Tenant.name is the customer's organization name as displayed in
   // the workspace switcher, billing pages, and admin tools. It's NOT
   // the slug (which stays plaintext — it's the URL key, in WHERE
