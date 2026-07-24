@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session encrypt-note-author-email · 2026-07-24
+- **Scope**: Landable remainder of PR #131 — `JournalEntryNote.authorEmail` joins the encryption registry. Dropped #131's speculative `authorEmailHash` column (the report justifying it doesn't exist; zero filters on the column), so this is a registry line + tests with NO schema/migration/backfill/fingerprint change.
+- **Files**: `src/lib/db/encrypted-fields-extension.ts`, `tests/encrypted-fields-extension.test.ts`.
+- **Branch**: `soc2/encrypt-note-author-email` (PR against main). **Working dir**: `.worktrees/enc-phase3`.
+- **Outcome**: tsc exit 0; DB suite CI-only (real books in this clone). No deploy action — nothing to push to a DB.
+
+
 ### Session encrypt-user-email · 2026-07-23
 - **Scope**: Rebased PR #130 (`User.email` encryption) onto main and made it landable. Added `rewriteWhereForSearchHash` to the encrypted-fields extension so equality `where` filters rewrite onto `emailHash` transparently, and non-equality filters throw `EncryptedFieldQueryError` instead of silently matching nothing. Fixed the `ensureDefaultTenant` duplicate-owner drift bug (via the rewriter, not a hand edit). Added migration 0031 (#130 shipped none). CI caught that #130's three direct `emailLookupKeyForUser` call sites throw when `FIELD_DETERMINISTIC_KEY` is unset — all reverted to plain `where: { email }`.
 - **Files**: `prisma/schema.prisma` (+fingerprint), `prisma/migrations/0031_user_email_hash/`, `src/lib/db/encrypted-fields-extension.ts`, `src/lib/soc2/index.ts`, `src/lib/auth/clerk.ts`, `src/lib/seed/{northwind,default-tenant}.ts`, `scripts/encrypt-user-emails.ts` (new), `tests/{encrypted-fields-extension,tenant-isolation,audit-log-csv}.test.ts`.

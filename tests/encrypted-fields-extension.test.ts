@@ -313,6 +313,7 @@ describe("encrypted-fields extension: JournalEntryNote (Confidentiality TSC)", (
   let noteId: string;
   let parentEntryId: string;
   const plaintextBody = `CPA prose ${SUFFIX} — disputed Acme invoice — see thread 4/22`;
+  const plaintextAuthorEmail = `note-author-${SUFFIX}@northwind.test`;
 
   beforeEach(async () => {
     const { prisma } = await import("@/lib/db");
@@ -336,6 +337,7 @@ describe("encrypted-fields extension: JournalEntryNote (Confidentiality TSC)", (
         tenantId,
         entryId: parentEntryId,
         body: plaintextBody,
+        authorEmail: plaintextAuthorEmail,
       },
     });
     noteId = note.id;
@@ -348,6 +350,40 @@ describe("encrypted-fields extension: JournalEntryNote (Confidentiality TSC)", (
     });
     expect(raw?.body).not.toBe(plaintextBody);
     expect(looksEncrypted(raw?.body)).toBe(true);
+  });
+
+  it("on-disk authorEmail is encrypted (raw prisma probe)", async () => {
+    const raw = await rawPrisma.journalEntryNote.findUnique({
+      where: { id: noteId },
+      select: { authorEmail: true },
+    });
+    expect(raw?.authorEmail).not.toBe(plaintextAuthorEmail);
+    expect(looksEncrypted(raw?.authorEmail)).toBe(true);
+  });
+
+  it("app surface sees plaintext authorEmail (auto-decrypt)", async () => {
+    const { prisma } = await import("@/lib/db");
+    const note = await prisma.journalEntryNote.findUnique({
+      where: { id: noteId },
+      select: { authorEmail: true },
+    });
+    expect(note?.authorEmail).toBe(plaintextAuthorEmail);
+  });
+
+  it("a null authorEmail stays null (notes can be authorless)", async () => {
+    // authorUserId/authorEmail are both nullable — a note written by a
+    // since-deleted user, or a system-generated note, has neither.
+    const { prisma } = await import("@/lib/db");
+    const tenantId = await getDefaultTenantId(prisma as PrismaClient);
+    const anon = await prisma.journalEntryNote.create({
+      data: { tenantId, entryId: parentEntryId, body: `anon ${SUFFIX}` },
+    });
+    expect(anon.authorEmail).toBeNull();
+    const raw = await rawPrisma.journalEntryNote.findUnique({
+      where: { id: anon.id },
+      select: { authorEmail: true },
+    });
+    expect(raw?.authorEmail).toBeNull();
   });
 
   it("app surface sees plaintext body (auto-decrypt)", async () => {
