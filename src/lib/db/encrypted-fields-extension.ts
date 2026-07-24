@@ -109,10 +109,28 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // sha256 matchHash column provides the uniqueness the ciphertext can't.
   { model: "BankRule", field: "matchText" },
   // EmailDelivery body fields contain literal email content sent to
-  // users — JE memos, owner-transfer offers, invite tokens. Highest-
+  // users — JE context, owner-transfer offers, invite tokens. Highest-
   // cost-per-leak after JE memo because a leaked email body typically
   // reveals BOTH the tenant context AND the operational event in the
-  // same row.
+  // same row. Registered the day the model shipped, so the table has
+  // never held a plaintext row and there is no backfill script.
+  { model: "EmailDelivery", field: "subject" },
+  { model: "EmailDelivery", field: "bodyText" },
+  { model: "EmailDelivery", field: "bodyHtml" },
+  // The recipient address is the same PII class as User.email and gets
+  // the same treatment: encrypted value + deterministic search hash for
+  // equality lookups (the future /admin/email-log "deliveries to X"
+  // filter). Unlike User.emailHash this is NOT unique — many deliveries
+  // per recipient is the normal case.
+  {
+    model: "EmailDelivery",
+    field: "toEmail",
+    searchHash: {
+      hashColumn: "toEmailHash",
+      domain: "EmailDelivery.toEmail",
+      normalize: "emailLowercase",
+    },
+  },
   // Party.displayName is the customer / vendor / contact name as
   // displayed across AR/AP, JE detail, and the aging reports. A
   // leaked Party table = a leaked customer roster, which is also
@@ -120,9 +138,6 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   // 5 repos: zero queries filter by displayName (only `code` is
   // searchable), so AES-GCM is safe — no need for deterministic
   // encryption or a secondary search index.
-  // EmailDelivery.{subject,bodyText,bodyHtml} intentionally absent —
-  // the EmailDelivery model never landed on main (chain-era). Re-add
-  // the three entries when that model ships.
   { model: "Party", field: "displayName" },
   // JournalEntryNote.body is plain-text prose CPAs write to annotate
   // ledger entries. The schema comment says it directly: "CPAs write
