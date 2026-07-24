@@ -112,6 +112,7 @@ export const NAV_SECTIONS: NavSection[] = [
 export const ADMIN_SECTION: NavSection = {
   label: "Admin",
   items: [
+    { href: "/admin/team", label: "Team", hint: "invites + roles" },
     { href: "/admin/users", label: "Users" },
     { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
   ],

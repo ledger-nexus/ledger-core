@@ -131,6 +131,20 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
       normalize: "emailLowercase",
     },
   },
+  // TenantInvite.email is the invitee's address — same PII class as
+  // User.email, same treatment: encrypted value + deterministic search
+  // hash. The duplicate-invite refusal filters on equality (rewritten
+  // onto emailHash by rewriteWhereForSearchHash below); registered from
+  // day one so the table never holds a plaintext row.
+  {
+    model: "TenantInvite",
+    field: "email",
+    searchHash: {
+      hashColumn: "emailHash",
+      domain: "TenantInvite.email",
+      normalize: "emailLowercase",
+    },
+  },
   // Party.displayName is the customer / vendor / contact name as
   // displayed across AR/AP, JE detail, and the aging reports. A
   // leaked Party table = a leaked customer roster, which is also

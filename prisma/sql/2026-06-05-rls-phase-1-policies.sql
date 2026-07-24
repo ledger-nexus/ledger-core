@@ -563,6 +563,14 @@ CREATE POLICY email_delivery_tenant_isolation ON email_delivery
   USING ("tenantId" IS NULL OR "tenantId" = app_current_tenant_id())
   WITH CHECK ("tenantId" IS NULL OR "tenantId" = app_current_tenant_id());
 
+-- 54. tenant_invite (team invites; direct NOT NULL tenantId)
+ALTER TABLE tenant_invite ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_invite_tenant_isolation ON tenant_invite;
+CREATE POLICY tenant_invite_tenant_isolation ON tenant_invite
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
 -- =============================================================================
 -- Verification
 -- =============================================================================
@@ -575,7 +583,7 @@ CREATE POLICY email_delivery_tenant_isolation ON email_delivery
 --     AND rowsecurity = true
 --   ORDER BY tablename;
 --
--- Expected: 53 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
+-- Expected: 54 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
 -- defines but does not FORCE).
 --
 -- Policy listing:
@@ -583,6 +591,6 @@ CREATE POLICY email_delivery_tenant_isolation ON email_delivery
 --   WHERE schemaname = 'public'
 --   ORDER BY tablename, policyname;
 --
--- Expected: 53 rows, all named <table>_tenant_isolation.
+-- Expected: 54 rows, all named <table>_tenant_isolation.
 
 -- End of Phase 1 migration.

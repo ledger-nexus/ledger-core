@@ -768,14 +768,13 @@ export async function seedTestUsersAndQueues(
   // Roles are per-tenant facts (TenantMembership.role), not global ones —
   // the policy catalog in src/lib/auth/policy.ts reads these. Floors match
   // the org chart above: the controller is the tenant admin; accountants
-  // and clerks are members. The auditor gets MEMBER until the read-only
-  // VIEWER role lands with the team-invites slice.
+  // and clerks are members; the external auditor is read-only VIEWER.
   const membershipTenantId = await getDefaultTenantId(prisma);
-  const roleSpecs: { email: string; role: "ADMIN" | "MEMBER" }[] = [
+  const roleSpecs: { email: string; role: "ADMIN" | "MEMBER" | "VIEWER" }[] = [
     { email: "controller@northwind.test", role: "ADMIN" },
     { email: "gl@northwind.test", role: "MEMBER" },
     { email: "ar-clerk@northwind.test", role: "MEMBER" },
-    { email: "auditor@deloitte.test", role: "MEMBER" },
+    { email: "auditor@deloitte.test", role: "VIEWER" },
   ];
   for (const spec of roleSpecs) {
     // where: { email } resolves through the encrypted-fields extension's
