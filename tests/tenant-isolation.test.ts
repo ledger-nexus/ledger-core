@@ -125,8 +125,11 @@ afterAll(async () => {
   await prisma.recordEvent.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenantMembership.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
+  // Delete by id, not by email prefix: `email` is encrypted at rest with
+  // a random IV, so `contains` matches nothing. Every seeded owner id is
+  // already on the SeededTenant record.
   await prisma.user.deleteMany({
-    where: { email: { contains: SUFFIX } },
+    where: { id: { in: [tenantA.ownerUserId, tenantB.ownerUserId] } },
   }).catch(() => {});
   await prisma.$disconnect();
 });

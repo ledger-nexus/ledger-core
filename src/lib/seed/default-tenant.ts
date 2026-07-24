@@ -49,6 +49,18 @@ const BOOTSTRAP_USER_EMAIL = "ci-bootstrap@northwind.test";
 // sign-up, and a runtime path that silently mints a tenant would bypass it.
 // getDefaultTenantId stays strict (throws) for exactly that reason.
 export async function ensureDefaultTenant(prisma: PrismaClient): Promise<string> {
+  // CC6 — `email` is encrypted at rest with a random IV, so the same
+  // plaintext yields different ciphertext on every write. That makes the
+  // column's @unique unenforceable AND would make this upsert never match
+  // an existing row, silently minting a second bootstrap owner on every
+  // call with no constraint violation to catch it.
+  //
+  // The filter below stays in plaintext ON PURPOSE: the encrypted-fields
+  // extension rewrites it onto the deterministic `emailHash` when a
+  // deterministic key is configured, and leaves it alone when there isn't
+  // one (in which case writes weren't hashed either, so plaintext is the
+  // correct match). Calling the hash helper here directly would THROW in
+  // any environment without FIELD_DETERMINISTIC_KEY — which includes CI.
   const owner = await prisma.user.upsert({
     where: { email: BOOTSTRAP_USER_EMAIL },
     update: {},

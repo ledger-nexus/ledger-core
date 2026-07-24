@@ -434,15 +434,33 @@ export {
   KeyNotConfiguredError,
 } from "./field-encryption";
 
-// Deterministic search-hash for equality lookups on encrypted columns
-// (the future User.email / TenantInvite.email / Tenant.slug rollout).
-// Phase 1: the helper only — no column registry uses it yet.
+// Deterministic search-hash for equality lookups on encrypted columns.
+// Phase 1 (commit 4a99863): helper only.
+// Phase 2: User.email — uses `emailLookupKeyForUser` below.
+import { searchHash as _searchHash } from "./deterministic-encryption";
 export {
   searchHash,
   searchHashEqual,
   normalize as normalizeForSearchHash,
 } from "./deterministic-encryption";
 export type { Normalizer } from "./deterministic-encryption";
+
+/**
+ * Computes the search-hash value to use in a `findUnique({ where:
+ * { emailHash: ... } })` filter against the User table. Hides the
+ * domain string + normalizer policy so call sites don't have to know
+ * the deterministic-encryption internals.
+ *
+ *   const hash = emailLookupKeyForUser("Alice@Acme.test");
+ *   const user = await prisma.user.findUnique({ where: { emailHash: hash } });
+ *
+ * The domain `"User.email"` MUST match the entry in
+ * `src/lib/db/encrypted-fields-extension.ts` ENCRYPTED_COLUMNS exactly
+ * — changing one without the other breaks every lookup.
+ */
+export function emailLookupKeyForUser(email: string): Buffer {
+  return _searchHash("User.email", email, "emailLowercase");
+}
 
 // Re-export Prisma type for ergonomic helper signatures elsewhere.
 export type { PrismaClient };

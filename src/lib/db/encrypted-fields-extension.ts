@@ -45,6 +45,7 @@ import {
   KeyNotConfiguredError,
   FieldEncryptionError,
 } from "@/lib/soc2/field-encryption";
+import { searchHash } from "@/lib/soc2/deterministic-encryption";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Column registry
@@ -69,10 +70,35 @@ import {
  */
 export type EncryptedColumnType = "string" | "json";
 
+/**
+ * Search-hash configuration for a column that needs equality lookups.
+ * When set, the extension writes BOTH the encrypted value to `field`
+ * AND a deterministic HMAC-SHA256 hash to `hashColumn`. Call sites
+ * filter by `hashColumn` using the helper from
+ * `@/lib/soc2/deterministic-encryption`. See
+ * `docs/design/deterministic-encryption.md` for the full design.
+ *
+ * `domain` is the canonical column name used to separate hashes
+ * across columns (so the hash of `"alice@a"` under `"User.email"` is
+ * different from the hash under `"TenantInvite.email"`). MUST stay
+ * stable for the column's lifetime — changing it invalidates every
+ * hash on disk.
+ *
+ * `normalize` is the canonicalization policy. Currently
+ * `"emailLowercase"` (lowercase + trim) and `"exact"` (no transform).
+ */
+export interface SearchHashConfig {
+  hashColumn: string;
+  domain: string;
+  normalize: "emailLowercase" | "exact";
+}
+
 export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   model: string;
   field: string;
   type?: EncryptedColumnType;
+  /** Set ONLY on columns that need equality lookups (email, slug). */
+  searchHash?: SearchHashConfig;
 }> = [
   { model: "JournalEntry", field: "memo" },
   // Bank-feed descriptions carry merchant/payee detail — as sensitive as
@@ -139,11 +165,37 @@ export const ENCRYPTED_COLUMNS: ReadonlyArray<{
   { model: "LegalEntity", field: "name" },
   // User.displayName is the human-readable name shown on the user's
   // profile, audit log attributions, and owner-transfer
-  // notifications. NOT the email (email stays plaintext for the
-  // login flow — deterministic encryption is required for email
-  // and is a separate workstream). Audited 2026-05-31: zero
-  // filter-by-displayName queries; only display reads.
+  // notifications. Audited 2026-05-31: zero filter-by-displayName
+  // queries; only display reads.
   { model: "User", field: "displayName" },
+  // User.email — the login-keyed PII. Encrypted-at-rest with an
+  // HMAC-SHA256 search hash in `emailHash` to preserve the
+  // upsert-by-email + findUnique-by-email paths used by the Clerk
+  // login flow and the seed code. See
+  // `docs/design/deterministic-encryption.md` for the full design.
+  //
+  // Lookup pattern at every call site:
+  //   const hash = emailLookupKeyForUser(email);
+  //   await prisma.user.findUnique({ where: { emailHash: hash } });
+  //
+  // Re-audited 2026-07-23 (the 2026-05-31 note said "3 lookup-by-email
+  // sites" — main has moved a great deal since). Actual count on the
+  // day this landed: 4 in src/ (Clerk upsert, 2 Northwind seed sites,
+  // ensureDefaultTenant) and 47 across 38 test files. Migrating 51 call
+  // sites by hand was the wrong shape of fix, so the extension now
+  // rewrites equality `where` filters onto `emailHash` itself — see
+  // rewriteWhereForSearchHash. Only substring/range filters need
+  // hand-editing, and those now throw EncryptedFieldQueryError instead
+  // of silently matching nothing.
+  {
+    model: "User",
+    field: "email",
+    searchHash: {
+      hashColumn: "emailHash",
+      domain: "User.email",
+      normalize: "emailLowercase",
+    },
+  },
   // AuditLog.metadata is the per-event payload for SOC 2 audit
   // records — varies by eventType, examples:
   //   - PRIVILEGED_ACTION → { action, reason, resource, resourceId, ... }
@@ -210,6 +262,59 @@ function columnType(model: string, field: string): EncryptedColumnType {
     (c) => c.model === model && c.field === field
   );
   return entry?.type ?? "string";
+}
+
+/**
+ * Returns the searchHash config for a (model, field), or null if the
+ * column doesn't need a deterministic search hash. When non-null, the
+ * write path also computes `searchHash(domain, plaintext, normalize)`
+ * and writes it to `data[hashColumn]`.
+ */
+function searchHashConfigFor(
+  model: string,
+  field: string
+): SearchHashConfig | null {
+  const entry = ENCRYPTED_COLUMNS.find(
+    (c) => c.model === model && c.field === field
+  );
+  return entry?.searchHash ?? null;
+}
+
+/** Every searchHash-backed column declared for a model. */
+function searchHashFieldsForModel(
+  model: string
+): Array<{ field: string; config: SearchHashConfig }> {
+  return ENCRYPTED_COLUMNS.filter(
+    (c) => c.model === model && c.searchHash != null
+  ).map((c) => ({ field: c.field, config: c.searchHash as SearchHashConfig }));
+}
+
+/**
+ * Thrown when a query filters an encrypted column with an operator that
+ * a deterministic hash cannot express.
+ *
+ * This exists to convert a SILENT WRONG ANSWER into a loud failure.
+ * Ciphertext is AES-GCM with a random IV, so `contains` / `startsWith`
+ * against the encrypted column matches nothing — the query returns an
+ * empty result and the caller concludes "no such rows" instead of
+ * "this question can't be asked here". That failure mode bit us in the
+ * self-healing `beforeAll` cleanup helpers, where finding zero orphan
+ * rows looks exactly like a clean database.
+ */
+export class EncryptedFieldQueryError extends Error {
+  constructor(model: string, field: string, operators: string[], hashColumn: string) {
+    super(
+      `Cannot filter ${model}.${field} with [${operators.join(", ")}] — the ` +
+        `column is encrypted at rest with a random IV, so substring and ` +
+        `range operators match nothing. Only equality (a bare value, ` +
+        `\`equals\`, \`in\`, \`not\`, \`notIn\`) is supported; those are ` +
+        `rewritten onto \`${hashColumn}\` automatically. To select rows by ` +
+        `a partial ${field}, filter on a non-encrypted column instead ` +
+        `(e.g. an id set gathered beforehand). See ` +
+        `docs/design/deterministic-encryption.md.`
+    );
+    this.name = "EncryptedFieldQueryError";
+  }
 }
 
 /**
@@ -416,6 +521,7 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
       async update({ model, args, query }) {
         if (!modelTouchesEncryption(model)) return query(args);
         args.data = encryptDataObject(model, args.data) as typeof args.data;
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         const result = await query(args);
         return decryptRow(model, result);
       },
@@ -423,6 +529,7 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
       async updateMany({ model, args, query }) {
         if (!modelTouchesEncryption(model)) return query(args);
         args.data = encryptDataObject(model, args.data) as typeof args.data;
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         return query(args);
       },
 
@@ -430,36 +537,61 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
         if (!modelTouchesEncryption(model)) return query(args);
         args.create = encryptDataObject(model, args.create) as typeof args.create;
         args.update = encryptDataObject(model, args.update) as typeof args.update;
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         const result = await query(args);
         return decryptRow(model, result);
       },
 
+      async delete({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
+        const result = await query(args);
+        return decryptRow(model, result);
+      },
+
+      async deleteMany({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
+        return query(args);
+      },
+
+      async count({ model, args, query }) {
+        if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
+        return query(args);
+      },
+
       async findUnique({ model, args, query }) {
         if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findUniqueOrThrow({ model, args, query }) {
         if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findFirst({ model, args, query }) {
         if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findFirstOrThrow({ model, args, query }) {
         if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         const result = await query(args);
         return decryptRow(model, result);
       },
 
       async findMany({ model, args, query }) {
         if (!modelTouchesEncryption(model)) return query(args);
+        args.where = rewriteWhereForSearchHash(model, args.where) as typeof args.where;
         const result = await query(args);
         if (!Array.isArray(result)) return result;
         return result.map((row) => decryptRow(model, row));
@@ -471,6 +603,122 @@ export const encryptedFieldsExtension = Prisma.defineExtension({
 // ─────────────────────────────────────────────────────────────────────────────
 // Walkers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compute the search hash for a column, with the same pass-through
+ * safety as safeEncrypt: if the deterministic key isn't set, log a
+ * one-time warning and return null so the write still succeeds (the
+ * hashColumn will be NULL, and that row simply can't be looked up by
+ * the deterministic helper until backfilled). This matches the
+ * rollout-safety-net behavior of the existing encryption path.
+ */
+let warnedAboutMissingDeterministicKey = false;
+function safeSearchHash(
+  config: SearchHashConfig,
+  plaintext: string
+): Buffer | null {
+  try {
+    return searchHash(config.domain, plaintext, config.normalize);
+  } catch (e) {
+    // FieldEncryptionError is thrown when FIELD_DETERMINISTIC_KEY is
+    // missing OR malformed. Treat the same way as missing encryption
+    // key in the rollout window: warn once, pass through.
+    if (e instanceof FieldEncryptionError) {
+      if (!warnedAboutMissingDeterministicKey) {
+        console.warn(
+          "[encrypted-fields] FIELD_DETERMINISTIC_KEY is not set or " +
+            "malformed; search-hash columns will be NULL until the env " +
+            "var is configured."
+        );
+        warnedAboutMissingDeterministicKey = true;
+      }
+      return null;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Operators a deterministic hash CAN express, because they only ever
+ * compare whole values for equality. Everything else (contains,
+ * startsWith, endsWith, search, lt/gt, mode) is rejected — see
+ * EncryptedFieldQueryError.
+ */
+const HASH_SAFE_OPERATORS = new Set(["equals", "in", "not", "notIn"]);
+
+/**
+ * Rewrite `where` filters on searchHash-backed encrypted columns onto
+ * their hash column, so callers can keep writing the natural
+ * `where: { email }` and get correct results.
+ *
+ * Rollout caveat: a row whose hash column is still NULL (written before
+ * the backfill, or while FIELD_DETERMINISTIC_KEY was unset) will not
+ * match ANY rewritten filter — including a `not`, since SQL `NULL <> x`
+ * is NULL, not true. That is the same window the equality path already
+ * has, and `scripts/encrypt-user-emails.ts` closes it. When the
+ * deterministic key isn't configured at all we leave the filter alone:
+ * writes weren't hashed either, so a plaintext match is still correct.
+ */
+function rewriteWhereForSearchHash(model: string, where: unknown): unknown {
+  if (!where || typeof where !== "object" || Array.isArray(where)) return where;
+  const configs = searchHashFieldsForModel(model);
+  if (configs.length === 0) return where;
+
+  const out: Record<string, unknown> = { ...(where as Record<string, unknown>) };
+
+  // Prisma nests filters under AND / OR / NOT — recurse so a hashed
+  // column is rewritten wherever it appears, not just at the top level.
+  for (const key of ["AND", "OR", "NOT"] as const) {
+    if (!(key in out)) continue;
+    const branch = out[key];
+    out[key] = Array.isArray(branch)
+      ? branch.map((b) => rewriteWhereForSearchHash(model, b))
+      : rewriteWhereForSearchHash(model, branch);
+  }
+
+  for (const { field, config } of configs) {
+    if (!(field in out)) continue;
+    const filter = out[field];
+    if (filter === null || filter === undefined) continue;
+
+    // Bare value → plain equality.
+    if (typeof filter === "string") {
+      const hash = safeSearchHash(config, filter);
+      if (hash === null) continue; // key unset: writes weren't hashed either
+      delete out[field];
+      out[config.hashColumn] = hash;
+      continue;
+    }
+
+    if (typeof filter === "object") {
+      const ops = Object.keys(filter as Record<string, unknown>);
+      const unsupported = ops.filter((o) => !HASH_SAFE_OPERATORS.has(o));
+      if (unsupported.length > 0) {
+        throw new EncryptedFieldQueryError(model, field, unsupported, config.hashColumn);
+      }
+      const rewritten: Record<string, unknown> = {};
+      let keyMissing = false;
+      for (const [op, val] of Object.entries(filter as Record<string, unknown>)) {
+        if (typeof val === "string") {
+          const h = safeSearchHash(config, val);
+          if (h === null) { keyMissing = true; break; }
+          rewritten[op] = h;
+        } else if (Array.isArray(val) && val.every((v) => typeof v === "string")) {
+          const hashes = val.map((v) => safeSearchHash(config, v as string));
+          if (hashes.some((h) => h === null)) { keyMissing = true; break; }
+          rewritten[op] = hashes;
+        } else {
+          throw new EncryptedFieldQueryError(model, field, [op], config.hashColumn);
+        }
+      }
+      if (keyMissing) continue;
+      delete out[field];
+      out[config.hashColumn] = rewritten;
+    }
+  }
+
+  return out;
+}
 
 /** Encrypt fields in the `data` payload of a write operation. */
 function encryptDataObject(model: string, data: unknown): unknown {
@@ -488,15 +736,29 @@ function encryptDataObject(model: string, data: unknown): unknown {
     // AES-GCM; String columns go straight in.
     const type = columnType(model, field);
     const encrypt = type === "json" ? safeEncryptJson : safeEncrypt;
+    const sh = searchHashConfigFor(model, field);
     // Prisma write-operation values can be `{ set: ... }` for nested
     // update inputs. Unwrap before encrypting and re-wrap on the way
     // out so the underlying generator still recognizes the shape.
     if (typeof value === "object" && value !== null && "set" in value) {
       const wrapped = value as { set: unknown };
       out[field] = { set: encrypt(wrapped.set) };
+      if (sh && typeof wrapped.set === "string" && wrapped.set.length > 0) {
+        out[sh.hashColumn] = {
+          set: safeSearchHash(sh, wrapped.set),
+        };
+      }
       continue;
     }
     out[field] = encrypt(value);
+    // Compute the search-hash for the same plaintext if the column
+    // has one declared. Caller can omit the hash column from data —
+    // we'll populate it from the plaintext automatically. If the
+    // caller already passed a hash (e.g., from a backfill script
+    // bypassing the encryption path), don't clobber it.
+    if (sh && typeof value === "string" && value.length > 0 && !(sh.hashColumn in out)) {
+      out[sh.hashColumn] = safeSearchHash(sh, value);
+    }
   }
 
   // Recurse into nested relation writes. Prisma's $extends query

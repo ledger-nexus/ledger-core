@@ -64,9 +64,12 @@ export async function getCurrentUserFromClerk(): Promise<CurrentUser | null> {
       .join(" ")
       .trim() || email;
 
-  // Upsert by email so existing seed users get linked, and new sign-ups
-  // get an app_user row. The DB User.email column has @unique so this
-  // is naturally idempotent.
+  // Upsert by emailHash so existing seed users get linked, and new
+  // sign-ups get an app_user row. The User.email column is encrypted
+  // at rest (random IV — same plaintext → different ciphertext every
+  // write), so we can't match by email directly. The deterministic
+  // emailHash gives us idempotency. The extension auto-populates the
+  // emailHash on write from the email we pass in `create`/`update`.
   const dbUser = await prisma.user.upsert({
     where: { email },
     create: { email, displayName, isActive: true },
