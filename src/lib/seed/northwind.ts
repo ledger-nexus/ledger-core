@@ -11,6 +11,7 @@
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "../accounting/post-journal";
 import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../db/chart-of-accounts";
+import { emailLookupKeyForUser } from "../soc2";
 import { openArItem, applyArPayment } from "../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../accounting/sub-ledgers/ap";
 import { getDefaultTenantId } from "./default-tenant";
@@ -753,8 +754,12 @@ export async function seedTestUsersAndQueues(
     { email: "auditor@deloitte.test", displayName: "Devon Auditor (Deloitte)" },
   ];
   for (const spec of userSpecs) {
+    // CC6: User.email is encrypted at rest (random IV per write), so
+    // upsert-by-email doesn't work — same plaintext → different
+    // ciphertext every call. Match by the deterministic emailHash
+    // instead. See docs/design/deterministic-encryption.md.
     await prisma.user.upsert({
-      where: { email: spec.email },
+      where: { emailHash: emailLookupKeyForUser(spec.email) },
       create: spec,
       update: { displayName: spec.displayName, isActive: true },
     });
@@ -821,8 +826,9 @@ export async function seedTestUsersAndQueues(
     { userEmail: "gl@northwind.test", queueCode: "GL_APPROVAL" },
   ];
   for (const m of memberships) {
+    // See CC6 comment above re: encrypted email + emailHash lookup.
     const user = await prisma.user.findUniqueOrThrow({
-      where: { email: m.userEmail },
+      where: { emailHash: emailLookupKeyForUser(m.userEmail) },
       select: { id: true },
     });
     // Phase 4b: queue.code unique per [tenantId, code]; findFirst.

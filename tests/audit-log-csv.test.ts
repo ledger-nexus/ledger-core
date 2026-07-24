@@ -134,8 +134,11 @@ afterAll(async () => {
   await prisma.tenant.deleteMany({
     where: { id: { in: [tenantA.id, tenantB.id] } },
   });
+  // By id, not email prefix — `email` is encrypted with a random IV so
+  // `contains` matches nothing. Only the throwaway non-admin is ours;
+  // `admin` is the shared Northwind controller and must survive.
   await prisma.user.deleteMany({
-    where: { email: { contains: SUFFIX } },
+    where: { id: nonAdmin.id },
   }).catch(() => {});
   await prisma.$disconnect();
 });

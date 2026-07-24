@@ -1888,6 +1888,17 @@ enum OwnerType {
 model User {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email         String    @unique
+  // SOC 2 CC6 — Confidentiality TSC. HMAC-SHA256 search-hash for
+  // the encrypted `email` column. Populated by the encrypted-fields
+  // Prisma extension on write; queried by `emailLookupKeyForUser`
+  // (see src/lib/soc2/index.ts) on every login + admin email
+  // lookup. See docs/design/deterministic-encryption.md.
+  //
+  // Nullable during the Phase 2 rollout window so existing pre-
+  // rollout rows (with NULL hash) don't block writes. Backfill via
+  // scripts/encrypt-user-emails.ts. Tightened to NOT NULL in the
+  // Phase 3 cleanup PR once every row has a hash.
+  emailHash     Bytes?    @unique
   displayName   String
   isActive      Boolean   @default(true)
   deactivatedAt DateTime?

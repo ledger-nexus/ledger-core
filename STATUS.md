@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session encrypt-user-email · 2026-07-23
+- **Scope**: Rebased PR #130 (`User.email` encryption) onto main and made it landable. Added `rewriteWhereForSearchHash` to the encrypted-fields extension so equality `where` filters rewrite onto `emailHash` transparently, and non-equality filters throw `EncryptedFieldQueryError` instead of silently matching nothing. Fixed the `ensureDefaultTenant` plaintext-email upsert (drift bug #130 predated). Added migration 0031 (#130 shipped none).
+- **Files**: `prisma/schema.prisma` (+fingerprint), `prisma/migrations/0031_user_email_hash/`, `src/lib/db/encrypted-fields-extension.ts`, `src/lib/soc2/index.ts`, `src/lib/auth/clerk.ts`, `src/lib/seed/{northwind,default-tenant}.ts`, `scripts/encrypt-user-emails.ts` (new), `tests/{encrypted-fields-extension,tenant-isolation,audit-log-csv}.test.ts`.
+- **Branch**: `soc2/encrypt-user-email` (PR against main). **Working dir**: `.worktrees/enc-phase2`.
+- **Outcome**: tsc exit 0. DB suite is CI-only (real books in this clone). ⚠️ Requires `prisma db push` + `scripts/encrypt-user-emails.ts` backfill on any environment with existing users; until backfilled, NULL-hash rows match no rewritten filter.
+
+
 ### Session holdings-trade-form · 2026-07-18
 - **Scope**: Beancount adoption ④ part 4b — the UI I had deferred. `src/app/holdings/trade-form.tsx` (client component) calls the gated `recordCommodityTradeAction`; gain/loss fields render only for SELL; errors show the substrate's own message. Wired into `/holdings`. Nav: Holdings added to **Transactions → `more`** (beside Open AR/AP — third open-item sub-ledger view; kept out of the Pareto `items` set deliberately).
 - **Files**: `src/app/holdings/trade-form.tsx` (new), `src/app/holdings/page.tsx`, `src/components/nav/catalog.ts`, `PROJECT_STATUS.md`, `STATUS.md`. NO schema/migration/fingerprint change; no new server logic (action + reader already tested).
