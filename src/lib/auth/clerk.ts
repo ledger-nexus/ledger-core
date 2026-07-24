@@ -20,7 +20,6 @@
 
 import type { CurrentUser } from "./current-user";
 import { prisma } from "@/lib/db";
-import { emailLookupKeyForUser } from "@/lib/soc2";
 
 /**
  * Read the current Clerk session, look up (or JIT-create) the matching
@@ -72,7 +71,7 @@ export async function getCurrentUserFromClerk(): Promise<CurrentUser | null> {
   // emailHash gives us idempotency. The extension auto-populates the
   // emailHash on write from the email we pass in `create`/`update`.
   const dbUser = await prisma.user.upsert({
-    where: { emailHash: emailLookupKeyForUser(email) },
+    where: { email },
     create: { email, displayName, isActive: true },
     // On re-sign-in, reactivate (a deactivated user re-signing-in via
     // Clerk shouldn't be silently locked out — but we audit-log this

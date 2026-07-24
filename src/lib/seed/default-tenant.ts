@@ -13,7 +13,6 @@
 // migrated.
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { emailLookupKeyForUser } from "../soc2";
 
 // Widened DB client type — accepts both PrismaClient and TransactionClient.
 // RLS Phase 2b pattern; see docs/architecture/rls-phase-2b-migration-guide.md.
@@ -52,13 +51,18 @@ const BOOTSTRAP_USER_EMAIL = "ci-bootstrap@northwind.test";
 export async function ensureDefaultTenant(prisma: PrismaClient): Promise<string> {
   // CC6 — `email` is encrypted at rest with a random IV, so the same
   // plaintext yields different ciphertext on every write. That makes the
-  // column's @unique unenforceable AND makes a `where: { email }` upsert
-  // never match an existing row — it would mint a second bootstrap owner
-  // on each call, silently, with no constraint violation to catch it.
-  // The deterministic emailHash is what carries the uniqueness invariant
-  // now, so match on it. See docs/design/deterministic-encryption.md.
+  // column's @unique unenforceable AND would make this upsert never match
+  // an existing row, silently minting a second bootstrap owner on every
+  // call with no constraint violation to catch it.
+  //
+  // The filter below stays in plaintext ON PURPOSE: the encrypted-fields
+  // extension rewrites it onto the deterministic `emailHash` when a
+  // deterministic key is configured, and leaves it alone when there isn't
+  // one (in which case writes weren't hashed either, so plaintext is the
+  // correct match). Calling the hash helper here directly would THROW in
+  // any environment without FIELD_DETERMINISTIC_KEY — which includes CI.
   const owner = await prisma.user.upsert({
-    where: { emailHash: emailLookupKeyForUser(BOOTSTRAP_USER_EMAIL) },
+    where: { email: BOOTSTRAP_USER_EMAIL },
     update: {},
     create: { email: BOOTSTRAP_USER_EMAIL, displayName: "CI Bootstrap" },
     select: { id: true },

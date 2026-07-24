@@ -717,6 +717,33 @@ describe("encrypted-fields extension: User.displayName + User.email (Confidentia
     expect(survivor?.id).toBe(userId);
   });
 
+  it("rewriting DEGRADES to plaintext when the deterministic key is unset", async () => {
+    // CI sets neither encryption key, so plaintext passthrough is the
+    // baseline every seed and suite runs under. The rewriter must leave
+    // the filter alone there — writes weren't hashed either, so matching
+    // on plaintext is correct. This is the case that broke CI when the
+    // seed called the hash helper directly: that helper THROWS on a
+    // missing key, while the extension's safeSearchHash degrades.
+    const { prisma } = await import("@/lib/db");
+    const { _setKeyForTesting: _setDetKey } = await import(
+      "@/lib/soc2/deterministic-encryption"
+    );
+    const savedKey = process.env.FIELD_DETERMINISTIC_KEY;
+    delete process.env.FIELD_DETERMINISTIC_KEY;
+    _setDetKey(null);
+    try {
+      // Must not throw. Returns nothing useful here (the row on disk was
+      // written WITH a key, so its plaintext column is ciphertext) — the
+      // assertion that matters is that the query runs at all.
+      await expect(
+        prisma.user.findFirst({ where: { email: plaintextEmail } })
+      ).resolves.not.toThrow();
+    } finally {
+      process.env.FIELD_DETERMINISTIC_KEY = savedKey;
+      _setDetKey(null);
+    }
+  });
+
   it("nested AND/OR branches get rewritten too", async () => {
     const { prisma } = await import("@/lib/db");
     const rows = await prisma.user.findMany({
