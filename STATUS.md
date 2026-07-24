@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session assertion-close-alerts · 2026-07-24
+- **Scope**: Completed Beancount ① — assertions now PUSH. Added the `assertion` close-alert pillar (FAIL→high, UNCHECKED→low, period-scoped, reads the cached lastStatus) + `POST /api/cron/assertion-check` daily 03:00 UTC (after the 02:00 recurring-JE run) refreshing that cache.
+- **Files**: `src/lib/close/alerts.ts`, `src/app/close/alerts/page.tsx`, `src/app/api/cron/assertion-check/route.ts` (new), `vercel.json`, `tests/close-alerts-assertion-pillar.test.ts` (new).
+- **Branch**: `feat/assertion-close-alerts`. NO schema/migration/fingerprint change.
+- **Outcome**: tsc exit 0; DB suite CI-only. ⚠️ Deploy: vercel.json cron entry needs a deploy to register.
+
+
 ### Session balance-assertions-ui · 2026-07-24
 - **Scope**: Armed Beancount ① — added the missing create path + `/assertions` page with live PASS/FAIL results. `checkBalanceAssertions` previously had zero callers in `src/`.
 - **Files**: `src/app/actions/create-balance-assertion.ts` (new), `src/app/assertions/page.tsx` (new), `src/app/assertions/assertion-form.tsx` (new), `src/components/nav/catalog.ts`, `tests/create-balance-assertion.test.ts` (new).

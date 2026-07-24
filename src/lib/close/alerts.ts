@@ -19,7 +19,7 @@ import type { DbClient } from "@/lib/db";
 
 
 export type AlertSeverity = "high" | "medium" | "low";
-export type AlertPillar = "recon" | "task" | "flux";
+export type AlertPillar = "recon" | "task" | "flux" | "assertion";
 
 export interface CloseAlert {
   id: string;
@@ -204,6 +204,79 @@ export async function getCloseAlerts(
     }
   }
 
+  // ── Balance-assertion pillar ─────────────────────────────────────
+  // Assertions whose asOf falls inside the period being closed, and whose
+  // LAST CHECK disagreed with the ledger.
+  //
+  // This reads the cached lastStatus rather than re-running the checker.
+  // That is what the cache is for: this aggregator runs on every /close page
+  // load AND inside the Slack digest, and a live re-check would mean a trial
+  // balance scan per distinct asOf date on each of those. The cron at
+  // /api/cron/assertion-check is what keeps the cache honest; a stale cache
+  // shows up here as the UNCHECKED case below rather than as a false PASS.
+  const period = await prisma.period.findUnique({
+    where: { id: scope.periodId },
+    select: { startsOn: true, endsOn: true },
+  });
+  if (period) {
+    const assertions = await prisma.balanceAssertion.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        entityId: scope.entityId,
+        bookId: scope.bookId,
+        asOf: { gte: period.startsOn, lte: period.endsOn },
+        lastStatus: { in: ["FAIL", "UNCHECKED"] },
+      },
+      orderBy: { asOf: "asc" },
+      select: {
+        id: true,
+        asOf: true,
+        expectedAmount: true,
+        lastObservedAmount: true,
+        lastCheckedAt: true,
+        lastStatus: true,
+        createdAt: true,
+        account: { select: { code: true, name: true } },
+      },
+    });
+    for (const a of assertions) {
+      const asOfDay = a.asOf.toISOString().slice(0, 10);
+      if (a.lastStatus === "UNCHECKED") {
+        // Never checked — the assertion is inert, which is its own problem:
+        // a tripwire nobody armed reads as silence, not as safety.
+        alerts.push({
+          id: `assertion:${a.id}`,
+          severity: "low",
+          pillar: "assertion",
+          title: `Assertion not yet checked: ${a.account.code} ${a.account.name}`,
+          description: `Asserted ${a.expectedAmount.toString()} as of ${asOfDay}, never verified against the ledger.`,
+          ageDays: daysBetween(a.createdAt, now),
+          href: "/assertions",
+          createdAt: a.createdAt,
+        });
+        continue;
+      }
+      // A FAIL is drift no single write would have rejected — a double-posted
+      // import, a missed reversal, a mapper regression. High: it means the
+      // books disagree with a figure someone stated on the record.
+      const observed = a.lastObservedAmount;
+      const since = a.lastCheckedAt ?? a.createdAt;
+      alerts.push({
+        id: `assertion:${a.id}`,
+        severity: "high",
+        pillar: "assertion",
+        title: `Balance disagrees: ${a.account.code} ${a.account.name}`,
+        description:
+          `Asserted ${a.expectedAmount.toString()} as of ${asOfDay}` +
+          (observed != null ? `, books show ${observed.toString()}` : "") +
+          ".",
+        ageDays: daysBetween(since, now),
+        href: "/assertions",
+        createdAt: since,
+      });
+    }
+  }
+
   // Severity order: high (0) → medium (1) → low (2). Within severity,
   // oldest first.
   const SEV_ORDER: Record<AlertSeverity, number> = { high: 0, medium: 1, low: 2 };
@@ -227,7 +300,7 @@ export function summarizeAlerts(alerts: CloseAlert[]): AlertHistogram {
   const histogram: AlertHistogram = {
     total: alerts.length,
     bySeverity: { high: 0, medium: 0, low: 0 },
-    byPillar: { recon: 0, task: 0, flux: 0 },
+    byPillar: { recon: 0, task: 0, flux: 0, assertion: 0 },
   };
   for (const a of alerts) {
     histogram.bySeverity[a.severity]++;

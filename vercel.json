@@ -13,6 +13,10 @@
     {
       "path": "/api/cron/close-alerts-digest",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/assertion-check",
+      "schedule": "0 3 * * *"
     }
   ]
 }
