@@ -20,6 +20,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { getCloseAlerts, summarizeAlerts } from "@/lib/close/alerts";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -208,8 +209,14 @@ afterAll(async () => {
   await prisma.period.deleteMany({ where: { tenantId } });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId } });
   await prisma.legalEntity.deleteMany({ where: { id: { in: [entityId, otherEntityId] } } });
-  await prisma.tenant.deleteMany({ where: { id: { in: [tenantId, otherTenantId] } } });
-  await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
+  // app_user hard-deletes need the audit-mutable window even though this suite
+  // writes no audit rows: Postgres runs a referential-integrity query for
+  // audit_log_actorUserId_fkey, the append-only RULE rewrites it, and the
+  // delete fails with XX000 "gave unexpected result".
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.tenant.deleteMany({ where: { id: { in: [tenantId, otherTenantId] } } });
+    await tx.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
+  });
   await prisma.$disconnect();
 });
 
