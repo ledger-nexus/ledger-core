@@ -17,6 +17,7 @@
 // its own read past the scope the caller granted.
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { Decimal } from "decimal.js";
 import {
   getTrialBalance,
@@ -369,6 +370,7 @@ export async function executeTool(
             tenantId: scope.tenantId,
             entity: { code: scope.entityCode },
             book: { code: scope.bookCode },
+            status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
             ...(from || to ? { documentDate } : {}),
           },
         },

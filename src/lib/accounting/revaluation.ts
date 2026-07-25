@@ -40,6 +40,7 @@
 // mutation, no audit row (the posting in PR 3 carries the audit trail).
 
 import { PrismaClient } from "@prisma/client";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { Decimal } from "decimal.js";
 
 import { resolveFxRate } from "@/lib/accounting/fx";
@@ -187,7 +188,7 @@ export async function computeRevaluation(
     where: {
       accountId: { in: accountIds },
       transactionCurrencyId: { not: reportingCurrency },
-      entry: { entityId: entity.id, bookId: book.id, documentDate: { lte: asOf } },
+      entry: { entityId: entity.id, bookId: book.id, documentDate: { lte: asOf }, status: { in: [...LEDGER_EFFECTIVE_STATUSES] } },
     },
     select: {
       accountId: true,

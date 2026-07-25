@@ -43,6 +43,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Transactions",
     items: [
       { href: "/journal-entries", label: "Journal entries" },
+      { href: "/journal-entries/pending", label: "Pending approval", hint: "queue" },
       { href: "/banking", label: "Bank transactions" },
       { href: "/recurring-entries", label: "Recurring", hint: "templates" },
       { href: "/journal-entries/paste", label: "Paste from Excel", hint: "bulk" },

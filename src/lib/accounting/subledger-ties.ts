@@ -22,6 +22,7 @@
 // account" — each book-attribute carries its own asset / contra codes.
 
 import type { PrismaClient } from "@prisma/client";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { Decimal } from "decimal.js";
 import { openArBalance } from "./sub-ledgers/ar";
 import { openApBalance } from "./sub-ledgers/ap";
@@ -247,6 +248,7 @@ async function sumControlAccountBalance(
         entity: { code: args.entityCode },
         book: { code: args.bookCode },
         documentDate: { lte: args.asOf },
+        status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
       },
     },
     _sum: { debit: true, credit: true },

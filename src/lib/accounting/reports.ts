@@ -12,6 +12,7 @@
 // diffs two single-book report results — not a fourth book-agnostic report.
 
 import { PrismaClient } from "@prisma/client";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { Decimal } from "decimal.js";
 import { AccountType, signFor } from "./types";
 
@@ -110,7 +111,7 @@ export async function getTrialBalance(
     include: {
       lines: {
         where: {
-          entry: { entityId, bookId, documentDate: { lte: asOf } },
+          entry: { entityId, bookId, documentDate: { lte: asOf }, status: { in: [...LEDGER_EFFECTIVE_STATUSES] } },
         },
         select: { debit: true, credit: true },
       },
@@ -228,6 +229,7 @@ export async function getIncomeStatement(
             entityId,
             bookId,
             documentDate: { gte: periodStart, lte: periodEnd },
+            status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
           },
         },
         select: { debit: true, credit: true },
@@ -329,7 +331,7 @@ export async function getBalanceSheet(
     include: {
       lines: {
         where: {
-          entry: { entityId, bookId, documentDate: { lte: asOf } },
+          entry: { entityId, bookId, documentDate: { lte: asOf }, status: { in: [...LEDGER_EFFECTIVE_STATUSES] } },
         },
         select: { debit: true, credit: true },
       },

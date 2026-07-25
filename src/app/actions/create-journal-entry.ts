@@ -12,6 +12,9 @@ import {
 import { requireCurrentScope, NoScopeError } from "@/lib/scope";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
+import Decimal from "decimal.js";
+import { canApproveJournalEntries } from "@/lib/auth/policy";
+import { resolveApprovalRoute } from "@/lib/accounting/approval-threshold";
 
 export interface NewEntryDraftLine {
   accountCode: string;
@@ -47,7 +50,7 @@ export async function createJournalEntryAction(
     // MEMBER floor today (every membership can post) — the gate is the
     // seam where the read-only VIEWER role and maker-checker submission
     // land without touching this action's body again.
-    const { user } = await requirePermitted(
+    const { user, tenant } = await requirePermitted(
       "journalEntry.post",
       canPostJournalEntries
     );
@@ -100,6 +103,37 @@ export async function createJournalEntryAction(
     // TransactionClient (ledger-core v1.11 contract — see CLAUDE.md),
     // so no helper widening is required. This is the simplest possible
     // RLS migration: ONE prisma call → wrap + swap.
+    // Maker-checker branching: when the tenant has requireJeApproval on
+    // AND the actor can't approve entries themselves, the post lands in
+    // PENDING_APPROVAL instead of POSTED. ADMIN/OWNER bypass the queue —
+    // they ARE the approvers. Threshold: with jeApprovalMinAmount > 0,
+    // only entries whose total ≥ threshold queue; smaller ones post
+    // directly even from MEMBERs. Pure decision matrix in
+    // src/lib/accounting/approval-threshold.ts.
+    const tenantConfig = await prisma.tenant.findUnique({
+      where: { id: tenant.id },
+      select: { requireJeApproval: true, jeApprovalMinAmount: true },
+    });
+    const entryTotal = lines.reduce((acc, l) => {
+      if (l.side !== "DEBIT") return acc;
+      let n: Decimal;
+      try {
+        n = new Decimal(l.amount || "0");
+      } catch {
+        return acc; // postJournalEntry rejects malformed lines with a clearer error
+      }
+      return n.isFinite() && n.greaterThan(0) ? acc.plus(n) : acc;
+    }, new Decimal(0));
+    const route = resolveApprovalRoute({
+      requireJeApproval: tenantConfig?.requireJeApproval ?? false,
+      jeApprovalMinAmount: tenantConfig?.jeApprovalMinAmount
+        ? new Decimal(tenantConfig.jeApprovalMinAmount.toString())
+        : null,
+      entryTotal,
+      actorIsApprover: canApproveJournalEntries(tenant.role),
+    });
+    const requireApproval = route === "PENDING_APPROVAL";
+
     const result = await withTenantContext(prisma, scope.tenantId, async (tx) =>
       postJournalEntry(tx, {
         tenantId: scope.tenantId,
@@ -110,6 +144,8 @@ export async function createJournalEntryAction(
         source,
         createdBy: user.email,
         ownerUserId: user.id,
+        initialStatus: requireApproval ? "PENDING_APPROVAL" : "POSTED",
+        submittedByUserId: requireApproval ? user.id : undefined,
         lines: lines.map((l) => ({
           accountCode: l.accountCode,
           debit: l.side === "DEBIT" ? l.amount : undefined,
@@ -120,6 +156,9 @@ export async function createJournalEntryAction(
       })
     );
     entryId = result.id;
+    if (requireApproval) {
+      revalidatePath("/journal-entries/pending");
+    }
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
       return { ok: false, error: "You must be signed in to post a journal entry." };

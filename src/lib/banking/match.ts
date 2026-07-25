@@ -14,6 +14,7 @@
 // convention as the feed amount and the register.
 
 import { Decimal } from "decimal.js";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import type { PrismaClient } from "@prisma/client";
 
 export const MATCH_WINDOW_DAYS = 10;
@@ -65,6 +66,7 @@ export async function findMatchCandidates(
         entityId: input.entityId,
         bookId: input.bookId,
         documentDate: { gte: from, lte: to },
+        status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
       },
     },
     select: {
