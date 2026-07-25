@@ -99,7 +99,29 @@ export interface JournalEntryInput {
   sourcePayload?: unknown;
   mappingVersion?: string;
   extensions?: Record<string, unknown>;
+
+  // Maker-checker: when "PENDING_APPROVAL", the entry is persisted with
+  // its lines (balance validated up front) but has NO ledger effect —
+  // every aggregation site filters to LEDGER_EFFECTIVE_STATUSES below.
+  // Defaults to "POSTED", the historical behavior. Period-close checks
+  // are SKIPPED on pending entries (re-run at approval time) so a
+  // submission doesn't fail just because the period closed between
+  // submit and approve.
+  initialStatus?: "POSTED" | "PENDING_APPROVAL";
+  // Required when initialStatus="PENDING_APPROVAL" — the maker's User
+  // UUID, used for the separation-of-duties check at approval.
+  submittedByUserId?: string;
 }
+
+/**
+ * The statuses with ledger effect. PENDING_APPROVAL entries (queued
+ * maker-checker submissions) and VOID entries (rejected/withdrawn
+ * submissions, plus any future lined voids) carry lines but must NOT
+ * count in any balance, report, revaluation, tie-out, or match.
+ * REVERSED originals stay in — they and their reversal entries net.
+ * Every aggregation over journal lines filters on this.
+ */
+export const LEDGER_EFFECTIVE_STATUSES = ["POSTED", "REVERSED"] as const;
 
 // Custom error types so the API layer can produce useful messages.
 export class UnbalancedEntryError extends Error {

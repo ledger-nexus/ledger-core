@@ -61,6 +61,17 @@ model Tenant {
   name        String
   ownerUserId String @db.Uuid
 
+  // ─── Maker-checker policy (PR #46 harvest ④) ───────────────────────
+  /// When true, non-approver journal entries land in the
+  /// PENDING_APPROVAL queue instead of posting directly. Default off —
+  /// solo books and small teams keep the historical behavior.
+  requireJeApproval Boolean @default(false)
+  /// Optional amount threshold. Null (or ≤ 0) with the flag on means
+  /// EVERY non-approver entry queues; when > 0, only entries whose
+  /// total ≥ this amount queue and smaller ones post directly. Units:
+  /// the entry's own currency total (one currency per entry).
+  jeApprovalMinAmount Decimal? @db.Decimal(18, 4)
+
   memberships TenantMembership[]
   apiTokens   TenantApiToken[]
 
@@ -933,6 +944,22 @@ model JournalEntry {
   source JournalSource @default(MANUAL)
   status EntryStatus   @default(POSTED)
 
+  // ─── Maker-checker approval columns (PR #46 harvest ④) ─────────────
+  // Populated only for entries that flow through the approval queue;
+  // direct ADMIN+ postings leave all of these null. submittedById is
+  // the maker; approved*/rejected* are set when an approver resolves
+  // it. rejectionReason is required when a pending entry flips to VOID
+  // (withdraw reuses the rejected* columns with a "Withdrawn:" prefix
+  // and rejectedById === submittedById as the marker). Bare UUIDs, not
+  // relations — same posture as ownerId's polymorphic discipline.
+  submittedById   String?   @db.Uuid
+  submittedAt     DateTime?
+  approvedById    String?   @db.Uuid
+  approvedAt      DateTime?
+  rejectedById    String?   @db.Uuid
+  rejectedAt      DateTime?
+  rejectionReason String?
+
   reversalOfId String?        @db.Uuid
   reversalOf   JournalEntry?  @relation("Reversal", fields: [reversalOfId], references: [id])
   reversedBy   JournalEntry[] @relation("Reversal")
@@ -1006,6 +1033,8 @@ model JournalEntry {
   @@index([entityId, bookId, periodId])
   @@index([sourceSystem, sourceRecordType, sourceRecordId])
   @@index([tenantId, postingDate])
+  // Pending-approval queue: list PENDING_APPROVAL for a tenant, newest first.
+  @@index([tenantId, status, createdAt])
   @@map("gl_entry_header")
 }
 
@@ -1019,8 +1048,9 @@ enum JournalSource {
 
 enum EntryStatus {
   DRAFT
+  PENDING_APPROVAL // maker-checker queue: lines exist + balance, NO ledger effect until approved
   POSTED
-  VOID
+  VOID // rejected/withdrawn pending entries land here too (rejectionReason set)
   REVERSED
 }
 

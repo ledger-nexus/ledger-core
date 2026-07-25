@@ -11,7 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
-import { canModerateNotes } from "@/lib/auth/policy";
+import { canModerateNotes, canApproveJournalEntries } from "@/lib/auth/policy";
+import { ApprovalActions } from "./approval-actions";
+import { WithdrawAction } from "./withdraw-action";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { getEntryLineage } from "@/lib/accounting/lineage";
 import ReverseButton from "./reverse-button";
@@ -93,7 +95,17 @@ export default async function JournalEntryDetailPage({
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-1.5">
-            <Badge tone="info">{entry.status}</Badge>
+            <Badge
+              tone={
+                entry.status === "PENDING_APPROVAL"
+                  ? "warning"
+                  : entry.status === "VOID"
+                    ? "negative"
+                    : "info"
+              }
+            >
+              {entry.status}
+            </Badge>
             <Badge tone="neutral">{entry.source}</Badge>
             {entry.sourceSystem && (
               <Badge tone="neutral">
@@ -126,6 +138,44 @@ export default async function JournalEntryDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Maker-checker panel. Approvers who are NOT the submitter get the
+          approve/reject controls (separation of duties — the server
+          re-checks); the submitter gets withdraw; everyone else sees why
+          the entry has no ledger effect yet. */}
+      {entry.status === "PENDING_APPROVAL" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="text-sm font-medium text-amber-900">
+            Awaiting approval — this entry has no ledger effect until an
+            approver posts it.
+          </div>
+          <div className="mt-3">
+            {tenant &&
+            canApproveJournalEntries(tenant.role) &&
+            entry.submittedById !== currentUser?.id ? (
+              <ApprovalActions entryId={entry.id} entryNumber={entry.entryNumber} />
+            ) : entry.submittedById === currentUser?.id ? (
+              <WithdrawAction entryId={entry.id} entryNumber={entry.entryNumber} />
+            ) : (
+              <p className="text-xs text-amber-800">
+                An ADMIN or OWNER (other than the submitter) can approve or
+                reject it.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      {entry.status === "VOID" && entry.rejectionReason && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <span className="font-medium">
+            {entry.rejectionReason.startsWith("Withdrawn")
+              ? "Withdrawn by submitter"
+              : "Rejected"}
+            :
+          </span>{" "}
+          {entry.rejectionReason}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Field label="Entity" value={entry.entity.code} />

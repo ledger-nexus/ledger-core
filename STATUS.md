@@ -32,6 +32,12 @@ _No active claims._
 
 ## Recent completions
 
+### Session je-approvals · 2026-07-25
+- **Scope**: #46 harvest slice ④ — maker-checker JE approvals. `initialStatus` seam in postJournalEntry (period-close check + rules deferred to approval); `LEDGER_EFFECTIVE_STATUSES` stamped on EVERY aggregation site (reports/revaluation/tie-outs/bank-match/ask-tool/register — they previously had NO status filter); approval lifecycle lib (self-approval refused, reason-required reject, submitter-only withdraw); tenant flag + threshold + pure routing matrix; `/journal-entries/pending` queue + JE-detail panels + team-page policy card; approve/reject emails via slice ②.
+- **Files**: `prisma/{schema.prisma,migrations/0034_je_maker_checker/}`, `src/lib/accounting/{types,post-journal,approval,approval-threshold,reports,revaluation,subledger-ties}.ts`, `src/lib/banking/match.ts`, `src/lib/assistant/tools.ts`, `src/app/accounts/[code]/page.tsx`, actions ×3, `src/app/journal-entries/pending/` + `[id]` panels, `src/app/admin/team/{page,approval-toggle}.tsx`, templates ×2, nav catalog, `tests/je-approvals.test.ts` (13).
+- **Branch**: `feat/je-approvals` (worktree ~/Code/ledger-core-je-approvals).
+- **Outcome**: tsc 0; approvals suite 13/13 incl. the TB-exclusion core claim; browser-verified queue + policy card; full suite 152 files / 1260 tests ALL PASS in the worktree.
+
 ### Session team-invites · 2026-07-24
 - **Scope**: #46 harvest slice ③ — team management. `/admin/team` + `/invites/accept` + team.ts actions (invite/revoke/change-role/remove, all requirePermitted + audited); VIEWER role added (migration 0033 enum value; auditor seed flipped); `TenantInvite` with day-one email encryption + search hash; accept state machine extracted to `src/lib/team/accept-invite.ts`; RLS policy #54. ⚠️ Rewriter does NOT recurse relation filters — resolve User top-level, then membership by userId.
 - **Files**: `prisma/{schema.prisma,migrations/0033_tenant_invite_and_viewer/}`, RLS phase-1 SQL, `src/lib/auth/policy.ts` (VIEWER), `src/lib/db/encrypted-fields-extension.ts`, `src/lib/seed/northwind.ts`, `src/app/actions/team.ts` (new), `src/lib/team/accept-invite.ts` (new), `src/lib/email/templates/invite.ts` (new), `src/app/admin/team/*` (new ×3), `src/app/invites/accept/page.tsx` (new), `src/components/nav/catalog.ts`, `tests/team-invites.test.ts` (new).

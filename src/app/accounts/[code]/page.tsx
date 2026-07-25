@@ -8,6 +8,7 @@
 // show only a count ("Posted lines: 42"), which answers neither question.
 
 import { notFound } from "next/navigation";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
@@ -90,6 +91,9 @@ export default async function AccountDetailPage({
       entry: {
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
+        // Register running balance = ledger truth: pending/void entries
+        // carry lines but must not move the balance.
+        status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
       },
     },
     orderBy: [

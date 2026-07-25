@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InviteForm } from "./invite-form";
 import { MemberActions, InviteActions } from "./row-actions";
+import { ApprovalToggle } from "./approval-toggle";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export default async function TeamPage() {
     );
   }
 
-  const [members, invites] = await Promise.all([
+  const [members, invites, tenantConfig] = await Promise.all([
     prisma.tenantMembership.findMany({
       where: { tenantId: tenant.id },
       include: {
@@ -72,6 +73,10 @@ export default async function TeamPage() {
         invitedBy: { select: { displayName: true } },
       },
       orderBy: { createdAt: "desc" },
+    }),
+    prisma.tenant.findUnique({
+      where: { id: tenant.id },
+      select: { requireJeApproval: true, jeApprovalMinAmount: true },
     }),
   ]);
 
@@ -94,6 +99,20 @@ export default async function TeamPage() {
         </CardHeader>
         <CardContent>
           <InviteForm />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Workspace policy — journal-entry approval</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ApprovalToggle
+            initialEnabled={tenantConfig?.requireJeApproval ?? false}
+            initialThreshold={
+              tenantConfig?.jeApprovalMinAmount?.toString() ?? null
+            }
+          />
         </CardContent>
       </Card>
 

@@ -340,7 +340,12 @@ export async function postJournalEntry(
 
   // ---- 6. Check the (entity, book, period) close lock --------------------
 
-  if (period) {
+  // Skipped for PENDING_APPROVAL entries — the entry doesn't hit the
+  // ledger until approval, and approval re-runs this check. If the
+  // period closes between submit and approve, the approve action fails
+  // (and the approver can void / move the entry). This matches the
+  // real-world maker-checker flow where stale drafts are common.
+  if (period && input.initialStatus !== "PENDING_APPROVAL") {
     const closed = await prisma.periodClose.findUnique({
       where: {
         entityId_bookId_periodId: {
@@ -397,7 +402,15 @@ export async function postJournalEntry(
         totalDebit: sumTotalDebit,
         totalCredit: sumTotalCredit,
         source: input.source ?? "MANUAL",
-        status: "POSTED",
+        // Maker-checker: when the caller asks for PENDING_APPROVAL, the
+        // entry persists with lines but has NO ledger effect — every
+        // aggregation site filters to LEDGER_EFFECTIVE_STATUSES.
+        // approveJournalEntry (src/lib/accounting/approval.ts) flips it
+        // to POSTED after a second pair of eyes.
+        status: input.initialStatus ?? "POSTED",
+        submittedById: input.submittedByUserId,
+        submittedAt:
+          input.initialStatus === "PENDING_APPROVAL" ? new Date() : null,
         createdBy: input.createdBy,
         updatedBy: input.createdBy,
         ownerId: input.ownerUserId,
@@ -451,7 +464,13 @@ export async function postJournalEntry(
   // This is also why the system/seed depreciation post (ownerUserId
   // null) is the typical caller for the tx path — no routing needed.
   let rulesResult: FireRulesResult | undefined;
-  if (input.ownerUserId && hasTransaction(prisma)) {
+  // Pending entries don't fire ON_INSERT rules — they haven't really
+  // landed yet. approveJournalEntry wires the second-pass firing.
+  if (
+    input.ownerUserId &&
+    hasTransaction(prisma) &&
+    input.initialStatus !== "PENDING_APPROVAL"
+  ) {
     try {
       // Load the entry shape rules might match on (memo, source, etc.).
       const fullEntry = await prisma.journalEntry.findUniqueOrThrow({
