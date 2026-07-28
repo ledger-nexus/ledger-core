@@ -72,6 +72,18 @@ model Tenant {
   /// the entry's own currency total (one currency per entry).
   jeApprovalMinAmount Decimal? @db.Decimal(18, 4)
 
+  // ─── Ownership transfer (PR #46 harvest ⑤) ─────────────────────────
+  /// Two-step OWNER hand-off: these columns record the target user +
+  /// when the offer was made. The target must accept (Server Action
+  /// gated on currentUser.id === pendingOwnerTransferToUserId) to swap;
+  /// either side can cancel before that. The atomic swap rotates
+  /// Tenant.ownerUserId + flips the OWNER/ADMIN roles on the two
+  /// memberships in one $transaction. Null on both = no transfer
+  /// pending. Initiator-only column kept thin — the initiator is always
+  /// the current OWNER, recoverable from ownerUserId while non-null.
+  pendingOwnerTransferToUserId    String?   @db.Uuid
+  pendingOwnerTransferInitiatedAt DateTime?
+
   memberships TenantMembership[]
   apiTokens   TenantApiToken[]
 

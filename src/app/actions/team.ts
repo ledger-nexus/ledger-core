@@ -274,7 +274,7 @@ export async function changeMemberRoleAction(
       return {
         ok: false,
         message:
-          "The workspace OWNER cannot be demoted. Ownership transfer arrives in a follow-up.",
+          "The workspace OWNER cannot be demoted. Use the Ownership card below to transfer it.",
       };
     }
     // ADMINs can't change other ADMINs — only the OWNER can. A v1
