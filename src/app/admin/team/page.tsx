@@ -34,6 +34,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { InviteForm } from "./invite-form";
 import { MemberActions, InviteActions } from "./row-actions";
 import { ApprovalToggle } from "./approval-toggle";
+import { OwnerTransferCard } from "./owner-transfer-card";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,42 @@ export default async function TeamPage() {
   if (!tenant) {
     return <Forbidden reason="Pick a workspace via the tenant switcher first." />;
   }
+  // Ownership-transfer carve-out: a non-admin MEMBER/VIEWER who is the
+  // PENDING TARGET of a transfer is allowed in — but sees only the
+  // "ownership offered to you" card. Without this, the notification
+  // link would 403 for the very person being asked to act.
+  const pendingCheck = await prisma.tenant.findUnique({
+    where: { id: tenant.id },
+    select: {
+      pendingOwnerTransferToUserId: true,
+      pendingOwnerTransferInitiatedAt: true,
+    },
+  });
+  const isPendingTarget = pendingCheck?.pendingOwnerTransferToUserId === user.id;
+
   if (!canManageMemberships(tenant.role)) {
+    if (isPendingTarget) {
+      return (
+        <div className="flex flex-col gap-6 p-6">
+          <div>
+            <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
+              Team
+            </h1>
+          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Ownership offered to you</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <OwnerTransferCard
+                mode="TARGET_PENDING"
+                initiatedAt={pendingCheck?.pendingOwnerTransferInitiatedAt}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
     return (
       <Forbidden reason="Workspace member management requires ADMIN or OWNER role in this workspace." />
     );
@@ -115,6 +151,48 @@ export default async function TeamPage() {
           />
         </CardContent>
       </Card>
+
+      {(callerIsOwner || isPendingTarget) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ownership</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isPendingTarget ? (
+              <OwnerTransferCard
+                mode="TARGET_PENDING"
+                initiatedAt={pendingCheck?.pendingOwnerTransferInitiatedAt}
+              />
+            ) : pendingCheck?.pendingOwnerTransferToUserId ? (
+              <OwnerTransferCard
+                mode="OWNER_PENDING"
+                targetEmail={
+                  members.find(
+                    (m) => m.userId === pendingCheck.pendingOwnerTransferToUserId
+                  )?.user.email
+                }
+                targetDisplayName={
+                  members.find(
+                    (m) => m.userId === pendingCheck.pendingOwnerTransferToUserId
+                  )?.user.displayName
+                }
+                initiatedAt={pendingCheck?.pendingOwnerTransferInitiatedAt}
+              />
+            ) : (
+              <OwnerTransferCard
+                mode="OWNER_NO_PENDING"
+                candidates={members
+                  .filter((m) => m.role !== "OWNER" && m.user.isActive)
+                  .map((m) => ({
+                    id: m.userId,
+                    email: m.user.email,
+                    displayName: m.user.displayName,
+                  }))}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

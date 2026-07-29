@@ -32,6 +32,12 @@ _No active claims._
 
 ## Recent completions
 
+### Session owner-transfer · 2026-07-27
+- **Scope**: #46 harvest slice ⑤ — two-step tenant ownership transfer. Pending-offer columns (migration 0035), pure lifecycle lib (OWNER-only initiate; target-only accept with identity-masking refusals; atomic role swap + ownerUserId rotation; either-party cancel), audited actions + bell + offered/accepted/cancelled emails, `/admin/team` Ownership card with the non-admin pending-target carve-out.
+- **Files**: `prisma/{schema.prisma,migrations/0035_owner_transfer/}`, `src/lib/auth/owner-transfer.ts` (new), `src/app/actions/owner-transfer.ts` (new), `src/app/admin/team/{page,owner-transfer-card}.tsx`, `src/lib/email/templates/owner-transfer-{offered,accepted,cancelled}.ts` (new ×3), `src/app/actions/team.ts` (message), `tests/owner-transfer.test.ts` (new).
+- **Branch**: `feat/owner-transfer` (worktree ~/Code/ledger-core-je-approvals, branch-switched after ④ merged).
+- **Outcome**: tsc 0; suite 4/4; browser-verified both sides of the OWNER gate. ⚠️ Teardown lesson: the initiate action rings the bell — delete `notification` rows before the tenant. Full suite 153 files / 1264 tests ALL PASS in the worktree.
+
 ### Session je-approvals · 2026-07-25
 - **Scope**: #46 harvest slice ④ — maker-checker JE approvals. `initialStatus` seam in postJournalEntry (period-close check + rules deferred to approval); `LEDGER_EFFECTIVE_STATUSES` stamped on EVERY aggregation site (reports/revaluation/tie-outs/bank-match/ask-tool/register — they previously had NO status filter); approval lifecycle lib (self-approval refused, reason-required reject, submitter-only withdraw); tenant flag + threshold + pure routing matrix; `/journal-entries/pending` queue + JE-detail panels + team-page policy card; approve/reject emails via slice ②.
 - **Files**: `prisma/{schema.prisma,migrations/0034_je_maker_checker/}`, `src/lib/accounting/{types,post-journal,approval,approval-threshold,reports,revaluation,subledger-ties}.ts`, `src/lib/banking/match.ts`, `src/lib/assistant/tools.ts`, `src/app/accounts/[code]/page.tsx`, actions ×3, `src/app/journal-entries/pending/` + `[id]` panels, `src/app/admin/team/{page,approval-toggle}.tsx`, templates ×2, nav catalog, `tests/je-approvals.test.ts` (13).
