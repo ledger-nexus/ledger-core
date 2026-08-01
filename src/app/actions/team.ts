@@ -41,6 +41,10 @@ import {
   PermissionDeniedError,
 } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import {
+  assertCanInviteUser,
+  PlanLimitExceededError,
+} from "@/lib/billing/limits";
 import { sendInviteEmail } from "@/lib/email/templates/invite";
 import type { TenantRole } from "@prisma/client";
 
@@ -96,8 +100,19 @@ export async function inviteMemberAction(
       };
     }
 
-    // Seam: plan-tier seat limits land with the billing slice — the
-    // check goes here, before the duplicate validations.
+    // Plan seat cap (harvest ⑦). Runs BEFORE the duplicate checks so a
+    // workspace at its cap gets "you are out of seats" rather than
+    // "that person is already a member" — the cap is the real reason.
+    // Counts members + outstanding PENDING invites; soft-warns unless
+    // BILLING_ENFORCE_LIMITS=true.
+    try {
+      await assertCanInviteUser(tenant.id);
+    } catch (e) {
+      if (e instanceof PlanLimitExceededError) {
+        return { ok: false, message: e.message };
+      }
+      throw e;
+    }
 
     // Already a member of THIS tenant? Resolve the user top-level
     // (extension rewrites email → emailHash), then check membership.

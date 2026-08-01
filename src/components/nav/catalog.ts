@@ -129,6 +129,7 @@ export const ADMIN_SECTION: NavSection = {
     { href: "/admin/users", label: "Users", hint: "lifecycle" },
     { href: "/admin/audit-log", label: "Audit log", hint: "SOC 2" },
     { href: "/admin/data-subject-requests", label: "Data requests", hint: "GDPR" },
+    { href: "/admin/billing", label: "Billing", hint: "plan + caps" },
     { href: "/admin/orphans", label: "Orphan records" },
     { href: "/admin/notification-channels", label: "Slack channels" },
     { href: "/import/netsuite", label: "Import from NetSuite", hint: "ERP" },

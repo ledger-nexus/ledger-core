@@ -103,6 +103,35 @@ const ENV_SPECS: EnvSpec[] = [
       "Clerk client-side publishable key (pk_test_... or pk_live_...). " +
       "Required whenever CLERK_SECRET_KEY is set.",
   },
+  // Stripe billing. Every one of these is optional and the whole feature
+  // is dark without them: /admin/billing renders a read-only free-tier
+  // view, the checkout/portal routes 503, and the webhook 503s (fail
+  // closed — an unverifiable webhook must not write entitlement).
+  // See docs/billing-setup.md for the Stripe-side setup.
+  {
+    name: "STRIPE_SECRET_KEY",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Stripe secret key (sk_test_... or sk_live_...). Unset → the " +
+      "checkout and portal routes return 503 and billing stays dark.",
+  },
+  {
+    name: "STRIPE_WEBHOOK_SECRET",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Signing secret (whsec_...) for POST /api/billing/webhook. Unset → " +
+      "the endpoint returns 503. Required whenever STRIPE_SECRET_KEY is set, " +
+      "or subscriptions will never activate.",
+  },
+  {
+    name: "APP_BASE_URL",
+    requiredInProduction: false,
+    description:
+      "Absolute origin (https://…) used to build Stripe return URLs and " +
+      "invite/approval links. Checkout and portal 503 without it.",
+  },
 ];
 
 export interface EnvValidationResult {
