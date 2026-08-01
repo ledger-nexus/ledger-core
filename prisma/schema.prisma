@@ -84,6 +84,34 @@ model Tenant {
   pendingOwnerTransferToUserId    String?   @db.Uuid
   pendingOwnerTransferInitiatedAt DateTime?
 
+  // ─── Stripe subscription state (PR #46 harvest ⑦) ──────────────────
+  //
+  // Written ONLY by /api/billing/webhook after signature verification —
+  // never by a Server Action, never from client input. Everything the
+  // app decides about entitlement reads these five columns; Stripe is
+  // the system of record and this is its local mirror.
+  //
+  // All nullable: a tenant with no subscription (the common case, and
+  // the only case until Stripe env vars are configured) has NULL in all
+  // five and resolves to FREE_TIER via getEffectivePlan().
+  /// Stripe Customer id (cus_...). Unique — one Stripe customer per
+  /// workspace, so a webhook can never fan out across tenants.
+  stripeCustomerId String? @unique
+  /// Stripe Subscription id (sub_...). Null when never subscribed or
+  /// after cancellation.
+  stripeSubscriptionId String?
+  /// Plan key from src/lib/billing/plans.ts ("starter" | "growth" |
+  /// "scale"). Null = free tier. A key not in the catalog (a retired
+  /// tier) also resolves to FREE_TIER rather than throwing.
+  billingPlan String?
+  /// Raw Stripe subscription status string ("active", "trialing",
+  /// "past_due", "canceled", …). Deliberately NOT an enum: Stripe adds
+  /// statuses, and a value we don't recognize must degrade to free
+  /// tier, not fail a migration.
+  subscriptionStatus String?
+  /// End of the current paid period — display only ("Renews 2026-09-01").
+  currentPeriodEnd DateTime?
+
   memberships TenantMembership[]
   apiTokens   TenantApiToken[]
 

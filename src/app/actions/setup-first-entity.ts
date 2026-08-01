@@ -26,6 +26,10 @@ import {
 } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import {
+  assertCanCreateEntity,
+  PlanLimitExceededError,
+} from "@/lib/billing/limits";
 import { withTenantContext } from "@/lib/tenant-context";
 
 export type ChartChoice = "standard" | "empty";
@@ -105,6 +109,23 @@ export async function setupFirstEntityAction(
   }
   if (input.chartType !== "standard" && input.chartType !== "empty") {
     return { ok: false, message: "Invalid chartType — must be 'standard' or 'empty'." };
+  }
+
+  // Plan entity cap (harvest ⑦). Placed on the canonical create path so
+  // the guard is where it belongs, but be honest about today's reach:
+  // this action is first-entity-only (the idempotency check below exits
+  // when the tenant already has one), so a cap of ≥1 can never bite
+  // here. It becomes load-bearing when an "add another entity" flow
+  // lands. The NetSuite multi-subsidiary import creates entities through
+  // the mapper layer and does NOT pass through here — see the note on
+  // assertCanCreateEntity.
+  try {
+    await assertCanCreateEntity(tenant.id);
+  } catch (e) {
+    if (e instanceof PlanLimitExceededError) {
+      return { ok: false, message: e.message };
+    }
+    throw e;
   }
 
   // ─── Ensure USD currency + US_GAAP book exist ────────────────────────
