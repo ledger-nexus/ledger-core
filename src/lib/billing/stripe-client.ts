@@ -182,6 +182,35 @@ export interface StripeSubscription {
   metadata: Record<string, string>;
 }
 
+/**
+ * Stripe object ids are `prefix_` + base62 (e.g. `sub_1PabcXYZ`). Anything
+ * outside that alphabet — a slash, a dot, a percent-encoded byte — cannot
+ * be a real id and must never be interpolated into a request path.
+ */
+const STRIPE_ID_RE = /^[A-Za-z0-9_]{1,255}$/;
+
+export class InvalidStripeIdError extends Error {
+  constructor(kind: string) {
+    // Do NOT echo the offending value: it came off the wire and would
+    // land verbatim in logs and error responses.
+    super(`Malformed Stripe ${kind} id`);
+    this.name = "InvalidStripeIdError";
+  }
+}
+
+/**
+ * Fetch a subscription by id.
+ *
+ * The id reaches us from a webhook body (`checkout.session.completed` →
+ * `session.subscription`). That body is signature-verified before we get
+ * here, so this is defense in depth rather than the primary control —
+ * but an id goes straight into a URL path, and a path segment carrying
+ * `../` or an encoded separator is how a request to api.stripe.com
+ * becomes a request to some other endpoint. Validate the shape first.
+ */
 export async function getSubscription(id: string): Promise<StripeSubscription> {
-  return stripeGet<StripeSubscription>(`/subscriptions/${id}`);
+  if (!STRIPE_ID_RE.test(id)) throw new InvalidStripeIdError("subscription");
+  return stripeGet<StripeSubscription>(
+    `/subscriptions/${encodeURIComponent(id)}`
+  );
 }

@@ -145,18 +145,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       default:
         // Acknowledge so Stripe stops retrying. Logged so a new event
         // type we should be handling is visible rather than silent.
-        console.log(`[stripe-webhook] unhandled event type: ${event.type}`);
+        //
+        // event.type is off the wire, so it never goes INTO the template
+        // string — it rides as a separate, sanitized argument. Anything
+        // interpolated into a log line can carry newlines and forge
+        // additional log entries.
+        console.log("[stripe-webhook] unhandled event type:", safeLabel(event.type));
     }
   } catch (e) {
     // Never 500 back to Stripe: it retries with backoff for days, and
     // a single poison event would keep re-firing. Log and ack.
     console.error(
-      `[stripe-webhook] handler error type=${event.type}`,
+      "[stripe-webhook] handler error",
+      safeLabel(event.type),
       redactPii(e instanceof Error ? e.message : String(e))
     );
   }
 
   return NextResponse.json({ ok: true, received: event.id });
+}
+
+/**
+ * Clamp an off-the-wire string to something safe to put in a log line:
+ * Stripe's own identifier alphabet, length-capped, with a marker when it
+ * isn't. Stops CRLF and control characters from forging log entries, and
+ * stops an oversized field from flooding the log.
+ */
+function safeLabel(value: unknown): string {
+  if (typeof value !== "string") return "<non-string>";
+  const trimmed = value.slice(0, 64);
+  return /^[A-Za-z0-9_.:-]*$/.test(trimmed) ? trimmed : "<unprintable>";
 }
 
 /**
@@ -175,14 +193,32 @@ function resolvePlanKey(sub: StripeSubscriptionObject): string | null {
   return findPlanByPriceId(price.id)?.key ?? null;
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Pull the tenant pointer out of subscription metadata, or null.
+ *
+ * Metadata is free-form on Stripe's side — anyone with dashboard access
+ * to the connected account can type anything into it. Requiring a UUID
+ * means a malformed pointer is a clean skip rather than a Prisma P2023
+ * thrown deep in the handler and swallowed by the outer catch.
+ */
+function resolveTenantId(sub: StripeSubscriptionObject): string | null {
+  const raw = sub.metadata?.tenantId;
+  if (!raw || !UUID_RE.test(raw)) return null;
+  return raw;
+}
+
 async function applySubscriptionState(
   sub: StripeSubscriptionObject,
   eventId: string
 ): Promise<void> {
-  const tenantId = sub.metadata?.tenantId;
+  const tenantId = resolveTenantId(sub);
   if (!tenantId) {
     console.warn(
-      `[stripe-webhook] subscription ${sub.id} has no tenantId metadata; skipping`
+      "[stripe-webhook] subscription has no tenantId metadata; skipping:",
+      safeLabel(sub.id)
     );
     return;
   }
@@ -222,10 +258,11 @@ async function clearSubscription(
   sub: StripeSubscriptionObject,
   eventId: string
 ): Promise<void> {
-  const tenantId = sub.metadata?.tenantId;
+  const tenantId = resolveTenantId(sub);
   if (!tenantId) {
     console.warn(
-      `[stripe-webhook] subscription ${sub.id} has no tenantId metadata; skipping cancellation`
+      "[stripe-webhook] subscription has no tenantId metadata; skipping cancellation:",
+      safeLabel(sub.id)
     );
     return;
   }

@@ -8,7 +8,7 @@
 // So the tests are adversarial: forged MAC, wrong secret, tampered body,
 // replayed timestamp, malformed header, non-hex garbage.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import {
   verifyAndParseWebhook,
@@ -171,5 +171,73 @@ describe("constantTimeHexEquals", () => {
   it("false when only the trailing half is garbage", () => {
     // "ab" decodes, "zz" does not — decoded length 1 != 2.
     expect(constantTimeHexEquals("abzz", "abzz")).toBe(false);
+  });
+});
+
+// ─── Stripe id validation (CodeQL SSRF finding on PR #318) ────────────
+//
+// getSubscription() takes an id straight from a webhook body
+// (checkout.session.completed → session.subscription) and interpolates
+// it into a request path. The body is signature-verified before we get
+// there, so this is defense in depth — but a path segment carrying a
+// separator is how a request to api.stripe.com stops being one.
+
+import {
+  getSubscription,
+  InvalidStripeIdError,
+} from "@/lib/billing/stripe-client";
+
+describe("getSubscription id validation", () => {
+  const ORIG = process.env.STRIPE_SECRET_KEY;
+  afterAll(() => {
+    if (ORIG != null) process.env.STRIPE_SECRET_KEY = ORIG;
+    else delete process.env.STRIPE_SECRET_KEY;
+  });
+
+  // A real key is set so the id check is what rejects these, not the
+  // missing-key throw. No request should ever leave: every id below is
+  // refused before fetch.
+  it.each([
+    ["path traversal", "../../../v1/account"],
+    ["encoded traversal", "..%2F..%2Faccount"],
+    ["leading slash", "/account"],
+    ["absolute url", "https://evil.example/x"],
+    ["protocol-relative", "//evil.example/x"],
+    ["query append", "sub_1?expand[]=customer"],
+    ["fragment", "sub_1#x"],
+    ["whitespace", "sub 1"],
+    ["newline", "sub_1\nx"],
+    ["empty", ""],
+  ])("rejects %s before any request", async (_label, id) => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_dummy_for_id_validation";
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await expect(getSubscription(id)).rejects.toThrow(InvalidStripeIdError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("does not echo the offending value in the error message", () => {
+    // The id came off the wire; repeating it puts attacker text into
+    // logs and error responses.
+    const e = new InvalidStripeIdError("subscription");
+    expect(e.message).toBe("Malformed Stripe subscription id");
+  });
+
+  it("accepts a well-formed id and calls Stripe with the expected URL", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_dummy_for_id_validation";
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "sub_1", status: "active" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      );
+    const sub = await getSubscription("sub_1PabcXYZ");
+    expect(sub.id).toBe("sub_1");
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      "https://api.stripe.com/v1/subscriptions/sub_1PabcXYZ"
+    );
+    fetchSpy.mockRestore();
   });
 });
