@@ -26,6 +26,7 @@ export type AuditEventType =
   | "ACCESS_DENIED"
   | "PRIVILEGED_ACTION"
   | "DATA_EXPORT"
+  | "DATA_ERASURE"
   | "TOKEN_USED"
   | "TOKEN_REJECTED"
   | "CONFIG_CHANGE"

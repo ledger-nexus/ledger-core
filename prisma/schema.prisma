@@ -2150,6 +2150,7 @@ enum AuditEventType {
   ACCESS_DENIED // requireAdmin failed; non-admin tried admin action
   PRIVILEGED_ACTION // period close, user lifecycle, admin reset, etc.
   DATA_EXPORT // CSV/PDF download, bulk read
+  DATA_ERASURE // GDPR Art. 17 PII redaction — regulator-queryable proof the request was honored
   TOKEN_USED // /api/internal/* request authenticated via INTERNAL_API_TOKEN
   TOKEN_REJECTED // /api/internal/* request failed Bearer-token check
   CONFIG_CHANGE // env-var change, schema migration applied

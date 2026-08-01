@@ -32,6 +32,12 @@ _No active claims._
 
 ## Recent completions
 
+### Session dsr · 2026-07-27
+- **Scope**: #46 harvest slice ⑥ — GDPR Art. 15 export + Art. 17 erasure. `buildUserDataExport` (v2 bundle w/ companion attribution that degrades to null), OWNER-only idempotent erasure-by-redaction (User + EmailDelivery.toEmail via search-hash rewrite + **JournalEntryNote.authorEmail by authorUserId** — post-#46 column, unfilterable by value), DATA_ERASURE audit event (migration 0036) carrying an email HASH never plaintext, Zod-validated subject ids, `/admin/data-subject-requests` queue + nav entry.
+- **Files**: `src/lib/privacy/{user-data,companion-attribution}.ts` (new), `src/app/actions/data-subject-request.ts` (new), `src/app/admin/data-subject-requests/*` (new ×2), `src/lib/audit/log.ts` (+DATA_ERASURE), `prisma/{schema.prisma,migrations/0036_dsr_erasure_event/}`, nav catalog, `tests/data-subject-requests.test.ts` (new, 6).
+- **Branch**: `feat/dsr` (worktree ~/Code/ledger-core-je-approvals).
+- **Outcome**: tsc 0; DSR suite 6/6; browser-verified (unauth gate + admin queue). Unblocks #47 retarget + #135 rewrite. Full suite at commit time — see PR.
+
 ### Session owner-transfer · 2026-07-27
 - **Scope**: #46 harvest slice ⑤ — two-step tenant ownership transfer. Pending-offer columns (migration 0035), pure lifecycle lib (OWNER-only initiate; target-only accept with identity-masking refusals; atomic role swap + ownerUserId rotation; either-party cancel), audited actions + bell + offered/accepted/cancelled emails, `/admin/team` Ownership card with the non-admin pending-target carve-out.
 - **Files**: `prisma/{schema.prisma,migrations/0035_owner_transfer/}`, `src/lib/auth/owner-transfer.ts` (new), `src/app/actions/owner-transfer.ts` (new), `src/app/admin/team/{page,owner-transfer-card}.tsx`, `src/lib/email/templates/owner-transfer-{offered,accepted,cancelled}.ts` (new ×3), `src/app/actions/team.ts` (message), `tests/owner-transfer.test.ts` (new).
