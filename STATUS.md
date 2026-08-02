@@ -26,7 +26,7 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session d069cc6b (tourkit lane) · started 2026-08-01 15:41 · heartbeat 15:41
+### Session d069cc6b (tourkit lane) · started 2026-08-01 15:41 · heartbeat 17:10
 - **Scope**: tourkit integration — /how-it-works tour gallery, vendored player, capture flow, hide-dev-chrome flag
 - **Files / globs**: `public/vendor/**`, `public/tours/**`, `flows/**`, `src/app/how-it-works/**`, `src/middleware.ts` (PUBLIC_PATH_PATTERNS only), `src/app/layout.tsx` (dev-stub gate only), `tsconfig.json` (exclude flows), README.md
 - **Branch**: feat/tourkit-how-it-works
