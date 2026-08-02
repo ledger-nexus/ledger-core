@@ -54,6 +54,12 @@ const isProd = () => process.env.NODE_ENV === "production";
 const PUBLIC_PATH_PATTERNS: RegExp[] = [
   /^\/sign-in(\/.*)?$/,
   /^\/sign-up(\/.*)?$/,
+  // Product-tour gallery: the one page a prospect sees BEFORE having an
+  // account, so it must survive the fail-closed 503 that guards
+  // everything else when Clerk is on. Read-only screenshots of seeded
+  // demo data; the tour assets themselves (/tours/*, /vendor/*) contain
+  // dots and never reach middleware (see config.matcher).
+  /^\/how-it-works$/,
   /^\/api\/internal\//,
   /^\/api\/health$/,
   /^\/_next\//,
@@ -133,6 +139,11 @@ export default async function middleware(req: NextRequest) {
   // and pass to <Script nonce={...}> for any inline-injected JS.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-nonce", nonce);
+  // Same mechanism for the pathname: the root layout reads it to skip
+  // the authenticated app shell (sidebar/header) on the public
+  // /how-it-works gallery. Overwrites any client-supplied value — this
+  // header is trustworthy only because middleware always stamps it.
+  requestHeaders.set("x-pathname", req.nextUrl.pathname);
   if (!isClerkEnabled()) {
     // Fail closed in production. Dev / CI without Clerk passes through
     // so local work doesn't require Clerk credentials, but the moment
@@ -158,9 +169,12 @@ export default async function middleware(req: NextRequest) {
   const { clerkMiddleware, createRouteMatcher } = await import(
     "@clerk/nextjs/server"
   );
+  // Keep in lockstep with PUBLIC_PATH_PATTERNS above — this is the
+  // Clerk-mode twin of the same allowlist.
   const isPublicRoute = createRouteMatcher([
     "/sign-in(.*)",
     "/sign-up(.*)",
+    "/how-it-works",
     "/api/internal/(.*)",
     "/api/health",
   ]);

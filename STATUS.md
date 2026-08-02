@@ -26,7 +26,6 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
 
 ---
 
@@ -37,6 +36,12 @@ _No active claims._
 - **Files**: `src/app/api/cron/{assertion-check,recurring-je-run,close-alerts-digest,close-alerts-dispatch}/route.ts`, `tests/{recurring-je-cron-route,close-alerts-digest-route}.test.ts`, `tests/cron-route-verbs.test.ts` (new), `docs/deployment.md`, `PROJECT_STATUS.md`. NO schema/migration/fingerprint change.
 - **Branch**: `fix/cron-routes-get-verb` (worktree `.claude/worktrees/amazing-nightingale-a4e30f`).
 - **Outcome**: tsc exit 0; `next build` green with all four routes registered ƒ; cron suites 31/31. ⚠️ **Two suites asserted `GET → 405`** — they pinned the defect as intended behavior; assertions replaced, not deleted. New static suite reads `vercel.json` and asserts every cron path resolves to a file exporting GET and not POST (verified to fail 5/13 pre-fix) — note 3 of the 4 pre-fix routes PASSED "exports GET" because of the 405 stub, so the "does not export POST" half is what catches them. ⚠️ `tests/{balance-assertions,close-alerts-assertion-pillar}.test.ts` fail at `beforeAll` on this shared Neon DB (`assertDisposableTestDatabase` refuses to disarm audit_log append-only rules) — **verified identical on a clean tree**, pre-existing and environmental; NOT worked around with `AUDIT_LOG_DDL_ALLOW=1`, which would disarm a control other concurrent suites assert.
+### Session d069cc6b · tourkit /how-it-works lane · completed 2026-08-01 17:27
+- Shipped #322 (gallery + capture pipeline, dark) and #323 (vendored player). Page verified live: player loads, tour advances, zero CSP violations.
+- Found and filed three product defects while shooting the tour: close-task calendar has no UI to instantiate it; close dashboard misdiagnoses that as "templates not seeded"; period reopen uses window.prompt() which throws in embedded browsers.
+- ⚠️ Gotcha for everyone: worktrees SHARE .git/hooks — the pre-commit symlink resolves to the MAIN checkout's copy of scripts/pre-commit-secrets-scan.sh. A hook change is only live after it merges AND ~/Code/ledger-core is pulled.
+- Left dark on purpose: frames 3–4 undersell the close pillar until the instantiate gap is fixed. Reshoot, then flip (drop robots block + add catalog row).
+
 
 ### Session dsr · 2026-07-27
 - **Scope**: #46 harvest slice ⑥ — GDPR Art. 15 export + Art. 17 erasure. `buildUserDataExport` (v2 bundle w/ companion attribution that degrades to null), OWNER-only idempotent erasure-by-redaction (User + EmailDelivery.toEmail via search-hash rewrite + **JournalEntryNote.authorEmail by authorUserId** — post-#46 column, unfilterable by value), DATA_ERASURE audit event (migration 0036) carrying an email HASH never plaintext, Zod-validated subject ids, `/admin/data-subject-requests` queue + nav entry.
