@@ -5,7 +5,7 @@
 //   1. Missing/bad CRON_SECRET → 401, no run
 //   2. Valid CRON_SECRET via Authorization header → 200, summary returned
 //   3. Valid CRON_SECRET via query param (manual trigger) → 200
-//   4. GET returns 405 (no accidental browser fires)
+//   4. The route exports GET and not POST (Vercel Cron only fires GET)
 //   5. Audit row is written with action=notifications.cron.digest + null actorUserId
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -13,7 +13,7 @@ import { NextRequest } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { randomBytes } from "crypto";
 
-import { POST, GET } from "@/app/api/cron/close-alerts-digest/route";
+import { GET } from "@/app/api/cron/close-alerts-digest/route";
 
 const prisma = new PrismaClient();
 const TEST_CRON_SECRET = randomBytes(16).toString("hex");
@@ -33,13 +33,12 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("POST /api/cron/close-alerts-digest", () => {
+describe("GET /api/cron/close-alerts-digest", () => {
   it("returns 401 without Authorization or query secret", async () => {
     const req = new NextRequest(
-      "http://localhost/api/cron/close-alerts-digest",
-      { method: "POST" }
+      "http://localhost/api/cron/close-alerts-digest"
     );
-    const res = await POST(req);
+    const res = await GET(req);
     expect(res.status).toBe(401);
   });
 
@@ -47,11 +46,10 @@ describe("POST /api/cron/close-alerts-digest", () => {
     const req = new NextRequest(
       "http://localhost/api/cron/close-alerts-digest",
       {
-        method: "POST",
         headers: { authorization: "Bearer wrong-secret-value" },
       }
     );
-    const res = await POST(req);
+    const res = await GET(req);
     expect(res.status).toBe(401);
   });
 
@@ -65,11 +63,10 @@ describe("POST /api/cron/close-alerts-digest", () => {
     const req = new NextRequest(
       "http://localhost/api/cron/close-alerts-digest",
       {
-        method: "POST",
         headers: { authorization: `Bearer ${TEST_CRON_SECRET}` },
       }
     );
-    const res = await POST(req);
+    const res = await GET(req);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -89,10 +86,9 @@ describe("POST /api/cron/close-alerts-digest", () => {
 
   it("returns 200 with ?cron_secret= query param (manual trigger)", async () => {
     const req = new NextRequest(
-      `http://localhost/api/cron/close-alerts-digest?cron_secret=${TEST_CRON_SECRET}`,
-      { method: "POST" }
+      `http://localhost/api/cron/close-alerts-digest?cron_secret=${TEST_CRON_SECRET}`
     );
-    const res = await POST(req);
+    const res = await GET(req);
     expect(res.status).toBe(200);
   });
 
@@ -100,11 +96,10 @@ describe("POST /api/cron/close-alerts-digest", () => {
     const req = new NextRequest(
       "http://localhost/api/cron/close-alerts-digest",
       {
-        method: "POST",
         headers: { authorization: `Bearer ${TEST_CRON_SECRET}` },
       }
     );
-    await POST(req);
+    await GET(req);
 
     const row = await prisma.auditLog.findFirst({
       where: {
@@ -118,12 +113,5 @@ describe("POST /api/cron/close-alerts-digest", () => {
     expect(row!.actorUserId).toBeNull();
     expect(row!.actorEmail).toBe("system:cron");
     expect(row!.tenantId).toBeNull();
-  });
-});
-
-describe("GET /api/cron/close-alerts-digest", () => {
-  it("returns 405 (no accidental browser fires)", () => {
-    const res = GET();
-    expect(res.status).toBe(405);
   });
 });
