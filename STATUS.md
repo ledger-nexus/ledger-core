@@ -26,7 +26,12 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session reopen-reason-modal · started 2026-08-01 · heartbeat 2026-08-01
+- **Scope**: Replace the `window.prompt()` reopen-reason collector at `src/app/periods/period-actions.tsx:51` with an in-app modal built from the repo's inlined UI primitives. `prompt()` throws `Error: prompt() is not supported` in sandboxed/embedded browser contexts (cross-origin iframes, automation/preview panes), which makes period reopen unusable there; it also gives no validation, styling, or consequence copy for a string that lands in the audit trail + `period_reopen_log` as SOC 2 evidence. Semantics preserved exactly: cancel aborts, empty/whitespace aborts, trimmed reason flows to `reopenPeriodAction`.
+- **Files / globs**: `src/components/ui/modal.tsx` (new), `src/app/periods/period-actions.tsx`, `tests/period-reopen-dialog.test.tsx` (new), `vitest.config.ts`, `package.json` + `package-lock.json` (jsdom + @testing-library devDeps for the first DOM test in this repo), `PROJECT_STATUS.md`, `STATUS.md`.
+- **Branch**: `fix/period-reopen-reason-modal`
+- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/mystifying-mclaren-8c5e6b`
+- **NOT touching**: `prisma/**` (no schema/migration), `src/app/actions/**` (the Server Action contract is already correct — it re-validates the reason server-side).
 
 ---
 
