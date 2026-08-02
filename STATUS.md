@@ -26,6 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
+### Session close-cal · started 2026-08-01 17:10 · heartbeat 17:10
+- **Scope**: Close-task calendar has no UI entry point — `instantiateCalendarForPeriod` has zero UI callers, and `/close` misdiagnoses "no tasks this period" as "templates not seeded". Adding the instantiate affordance, fixing the three-state branch, fixing stale empty-state copy.
+- **Files / globs**: `src/app/close/page.tsx`, `src/app/close/tasks/page.tsx`, `src/app/close/instantiate-calendar-button.tsx` (new), `src/lib/close-tasks/calendar-state.ts` (new), `tests/close-calendar-instantiate-ui.test.ts` (new), `PROJECT_STATUS.md`
+- **Branch**: `fix/close-calendar-instantiate-ui`
+- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/bold-curie-961bd4`
 
 ---
 
