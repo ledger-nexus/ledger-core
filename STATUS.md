@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session cron-get-verb · started 2026-08-01 10:00 · heartbeat 10:00
+- **Scope**: Fix the four `vercel.json`-registered cron routes that export only `POST` — Vercel Cron always issues GET, so every scheduled job would 405 forever. Rename POST→GET (matching the `/api/cron/retention` reference on `feat/retention-engine`, which documents the defect and declines to copy it). Update the two tests that assert 405-on-GET and the deployment docs.
+- **Files / globs**: `src/app/api/cron/{assertion-check,recurring-je-run,close-alerts-digest,close-alerts-dispatch}/route.ts`, `tests/{recurring-je-cron-route,close-alerts-digest-route}.test.ts`, `docs/deployment.md`, `PROJECT_STATUS.md`, `STATUS.md`
+- **Branch**: `fix/cron-routes-get-verb`
+- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/amazing-nightingale-a4e30f`
 
 ---
 
