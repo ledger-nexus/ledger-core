@@ -26,16 +26,17 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session d069cc6b (tourkit lane) · started 2026-08-01 15:41 · heartbeat 17:10
-- **Scope**: tourkit integration — /how-it-works tour gallery, vendored player, capture flow, hide-dev-chrome flag
-- **Files / globs**: `public/vendor/**`, `public/tours/**`, `flows/**`, `src/app/how-it-works/**`, `src/middleware.ts` (PUBLIC_PATH_PATTERNS only), `src/app/layout.tsx` (dev-stub gate only), `tsconfig.json` (exclude flows), README.md
-- **Branch**: feat/tourkit-how-it-works
-- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
-
 
 ---
 
 ## Recent completions
+
+### Session d069cc6b · tourkit /how-it-works lane · completed 2026-08-01 17:27
+- Shipped #322 (gallery + capture pipeline, dark) and #323 (vendored player). Page verified live: player loads, tour advances, zero CSP violations.
+- Found and filed three product defects while shooting the tour: close-task calendar has no UI to instantiate it; close dashboard misdiagnoses that as "templates not seeded"; period reopen uses window.prompt() which throws in embedded browsers.
+- ⚠️ Gotcha for everyone: worktrees SHARE .git/hooks — the pre-commit symlink resolves to the MAIN checkout's copy of scripts/pre-commit-secrets-scan.sh. A hook change is only live after it merges AND ~/Code/ledger-core is pulled.
+- Left dark on purpose: frames 3–4 undersell the close pillar until the instantiate gap is fixed. Reshoot, then flip (drop robots block + add catalog row).
+
 
 ### Session dsr · 2026-07-27
 - **Scope**: #46 harvest slice ⑥ — GDPR Art. 15 export + Art. 17 erasure. `buildUserDataExport` (v2 bundle w/ companion attribution that degrades to null), OWNER-only idempotent erasure-by-redaction (User + EmailDelivery.toEmail via search-hash rewrite + **JournalEntryNote.authorEmail by authorUserId** — post-#46 column, unfilterable by value), DATA_ERASURE audit event (migration 0036) carrying an email HASH never plaintext, Zod-validated subject ids, `/admin/data-subject-requests` queue + nav entry.
