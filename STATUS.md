@@ -26,15 +26,17 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session cron-get-verb · started 2026-08-01 10:00 · heartbeat 10:00
-- **Scope**: Fix the four `vercel.json`-registered cron routes that export only `POST` — Vercel Cron always issues GET, so every scheduled job would 405 forever. Rename POST→GET (matching the `/api/cron/retention` reference on `feat/retention-engine`, which documents the defect and declines to copy it). Update the two tests that assert 405-on-GET and the deployment docs.
-- **Files / globs**: `src/app/api/cron/{assertion-check,recurring-je-run,close-alerts-digest,close-alerts-dispatch}/route.ts`, `tests/{recurring-je-cron-route,close-alerts-digest-route}.test.ts`, `docs/deployment.md`, `PROJECT_STATUS.md`, `STATUS.md`
-- **Branch**: `fix/cron-routes-get-verb`
-- **Working dir**: `/Users/hosungson/Code/ledger-core/.claude/worktrees/amazing-nightingale-a4e30f`
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session cron-get-verb · 2026-08-01 (commit `5fd3c3f`)
+- **Scope**: All four `vercel.json`-registered cron routes exported only `POST`. Vercel Cron always issues a GET and cannot be configured otherwise, so every scheduled job would have 405'd on every fire once deployed — recurring JEs, assertion re-checks, and both Slack alert cadences, i.e. the entire unattended half of the product. Invisible because the app has never been deployed (no `CLERK_SECRET_KEY`; middleware fails closed in prod), and **disguised**: three of the four exported an explicit GET returning 405 "so accidental browser visits don't trigger a run" — a guard that on Vercel blocks only the scheduler. Renamed POST→GET in all four (no internal POST caller — grep found only vercel.json/docs/tests), matching `/api/cron/retention` on `feat/retention-engine`, which had already documented the trap and declined to copy it.
+- **Files**: `src/app/api/cron/{assertion-check,recurring-je-run,close-alerts-digest,close-alerts-dispatch}/route.ts`, `tests/{recurring-je-cron-route,close-alerts-digest-route}.test.ts`, `tests/cron-route-verbs.test.ts` (new), `docs/deployment.md`, `PROJECT_STATUS.md`. NO schema/migration/fingerprint change.
+- **Branch**: `fix/cron-routes-get-verb` (worktree `.claude/worktrees/amazing-nightingale-a4e30f`).
+- **Outcome**: tsc exit 0; `next build` green with all four routes registered ƒ; cron suites 31/31. ⚠️ **Two suites asserted `GET → 405`** — they pinned the defect as intended behavior; assertions replaced, not deleted. New static suite reads `vercel.json` and asserts every cron path resolves to a file exporting GET and not POST (verified to fail 5/13 pre-fix) — note 3 of the 4 pre-fix routes PASSED "exports GET" because of the 405 stub, so the "does not export POST" half is what catches them. ⚠️ `tests/{balance-assertions,close-alerts-assertion-pillar}.test.ts` fail at `beforeAll` on this shared Neon DB (`assertDisposableTestDatabase` refuses to disarm audit_log append-only rules) — **verified identical on a clean tree**, pre-existing and environmental; NOT worked around with `AUDIT_LOG_DDL_ALLOW=1`, which would disarm a control other concurrent suites assert.
 
 ### Session dsr · 2026-07-27
 - **Scope**: #46 harvest slice ⑥ — GDPR Art. 15 export + Art. 17 erasure. `buildUserDataExport` (v2 bundle w/ companion attribution that degrades to null), OWNER-only idempotent erasure-by-redaction (User + EmailDelivery.toEmail via search-hash rewrite + **JournalEntryNote.authorEmail by authorUserId** — post-#46 column, unfilterable by value), DATA_ERASURE audit event (migration 0036) carrying an email HASH never plaintext, Zod-validated subject ids, `/admin/data-subject-requests` queue + nav entry.
