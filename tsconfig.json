@@ -26,5 +26,9 @@
     "prisma/seed.ts",
     "tests/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  // "flows" excluded: tour-capture scripts import tourkit from a SIBLING
+  // checkout that exists only on dev machines. Including them in the Next
+  // build typecheck passes locally and fails on Vercel — this exact miss
+  // broke the RevRec marketing site's prod deploys for 10 hours.
+  "exclude": ["node_modules", "flows"]
 }
