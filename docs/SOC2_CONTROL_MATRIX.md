@@ -1,6 +1,6 @@
 # SOC 2 control matrix — evidence map
 
-**Version:** 1.1
+**Version:** 1.2
 **Effective date:** 2026-08-01
 **Owner:** Hosung Son (founder)
 **Framework:** SOC 2 Trust Services Criteria 2017 (revised 2022)
@@ -179,7 +179,7 @@ customer in EU or California scope onboards.
 |---|---|---|
 | GDPR Art. 15 (right of access) | `buildUserDataExport` in `src/lib/privacy/user-data.ts`; UI at `/admin/data-subject-requests`; self-export available to any member, cross-member export requires ADMIN+; the `DATA_EXPORT` audit row carries counts, never content; `tests/data-subject-requests.test.ts` | Mitigated |
 | GDPR Art. 17 (right to erasure) | `eraseUserPii` in `src/lib/privacy/user-data.ts`; OWNER-only, co-tenant-only, self-erasure refused. Redacts the `User` row, `EmailDelivery.toEmail`, and `JournalEntryNote.authorEmail` snapshots. Financial records and audit rows keep the bare user-id pointer under the Art. 17(3)(b/e) retention exemption. The `DATA_ERASURE` audit row carries a hash of the original email, never plaintext | Mitigated |
-| Data retention | `docs/policies/data-classification.md` retention table. **Retention is documented but not automated** — no scheduled purge job exists | **Open** |
+| Data retention | Windows declared in `docs/policies/data-classification.md`; executable form in `src/lib/retention/policies.ts`, run daily by `src/app/api/cron/retention/route.ts` (04:00 UTC, `vercel.json`). Four policies: seen notifications 365d, unseen 730d, terminal invites 30d, email deliveries 90d. Every run writes a `retention.purge` audit row with per-policy counts, so the append-only log IS the evidence that retention happens. `tests/retention.test.ts` proves each policy deletes past its window and leaves everything inside it alone. Financial records, audit rows, and users are explicitly excluded — user PII leaves only through the audited DSR erasure path | Mitigated |
 
 ---
 
@@ -213,6 +213,10 @@ append-only rule protects those writes regardless of source.
 
 ## Changelog
 
+- **1.2 (2026-08-01)** — Data retention Open → Mitigated: the retention
+  engine landed (`src/lib/retention/policies.ts` + daily cron). This is
+  the first status in this document to move *upward*, and it moved
+  because code shipped, not because the wording softened.
 - **1.1 (2026-08-01)** — First revision against a verified codebase. Every
   cited path machine-checked to resolve. Four dead citations fixed: the
   invite-acceptance action (moved to `src/lib/team/accept-invite.ts` with

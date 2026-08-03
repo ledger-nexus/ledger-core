@@ -17,6 +17,10 @@
     {
       "path": "/api/cron/assertion-check",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/retention",
+      "schedule": "0 4 * * *"
     }
   ]
 }

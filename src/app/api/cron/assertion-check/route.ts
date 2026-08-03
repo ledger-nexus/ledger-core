@@ -1,4 +1,4 @@
-// POST /api/cron/assertion-check
+// GET /api/cron/assertion-check
 //
 // Cron-only route. Re-checks every stored balance assertion against the books
 // and refreshes the result cache (lastCheckedAt / lastObservedAmount /
@@ -13,6 +13,16 @@
 // A FAIL becomes a high-severity close alert; acting on it stays a human,
 // explicit decision (pad, or a real correcting entry). "AI suggests; humans
 // approve; the system posts" applies to machines too — this machine reports.
+//
+// Verb: GET. Vercel Cron always issues a GET and cannot be configured to send
+// anything else, so a route registered in vercel.json that exports only POST is
+// scheduled on paper and 405s on every fire, silently, forever. See
+// /api/cron/retention for the long-form version of this reasoning.
+//
+// GET is safe here for the usual reason plus a stronger one: isAuthorizedCronRequest
+// gates it with a timing-safe CRON_SECRET check that fails closed when the secret
+// is unset or under 16 chars, AND this route is read-only with respect to the
+// ledger — the worst a triggered run does is refresh a result cache.
 //
 // Auth: `Authorization: Bearer <CRON_SECRET>` header (Vercel cron default) or
 // `?cron_secret=<...>` query param (manual trigger).
@@ -39,7 +49,7 @@ import { checkBalanceAssertions } from "@/lib/accounting/balance-assertions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

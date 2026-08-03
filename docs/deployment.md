@@ -197,13 +197,13 @@ Two env vars need to be set in **Vercel → Settings → Environment Variables**
 | Name | Purpose | Generate |
 |---|---|---|
 | `WEBHOOK_ENCRYPTION_KEY` | AES-256-GCM key that encrypts every channel's webhook URL at rest. Stored in the `notification_channel.webhookUrl` column as ciphertext; never logged. | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` (32 bytes, base64) |
-| `CRON_SECRET` | Shared secret that gates `POST /api/cron/close-alerts-dispatch`. The cron worker passes it as `Authorization: Bearer <CRON_SECRET>`. | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (32 bytes hex; min 16 chars required by `isAuthorizedCronRequest`) |
+| `CRON_SECRET` | Shared secret that gates `GET /api/cron/close-alerts-dispatch` (and every other `/api/cron/*` route). Vercel Cron passes it as `Authorization: Bearer <CRON_SECRET>`. | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (32 bytes hex; min 16 chars required by `isAuthorizedCronRequest`) |
 
 **Key rotation.** `WEBHOOK_ENCRYPTION_KEY` is single-version in v1 — rotating it means re-encrypting every channel under the new key (no automated path). For portfolio scale (~10 channels per tenant) one-shot manual rotation is acceptable; larger deployments would want a versioned KMS scheme.
 
 ### Configure the cron schedule
 
-`vercel.json` ships with two cron entries — one for each cadence:
+`vercel.json` ships with four cron entries — the two notification cadences plus the nightly recurring-JE run and the daily assertion check:
 
 ```json
 {
@@ -213,12 +213,27 @@ Two env vars need to be set in **Vercel → Settings → Environment Variables**
       "schedule": "*/15 9-18 * * 1-5"
     },
     {
+      "path": "/api/cron/recurring-je-run",
+      "schedule": "0 2 * * *"
+    },
+    {
       "path": "/api/cron/close-alerts-digest",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/assertion-check",
+      "schedule": "0 3 * * *"
     }
   ]
 }
 ```
+
+> **Cron routes must export `GET`.** Vercel Cron always issues a GET and
+> cannot be configured to send another verb. A route registered here that
+> exports only `POST` is scheduled on paper and returns 405 on every fire,
+> silently and forever. `tests/cron-route-verbs.test.ts` enforces this for
+> every path in `vercel.json`; adding a cron route with a POST handler will
+> fail CI rather than fail in production.
 
 Vercel cron times are **UTC**. Adjust the hours window if your team isn't on EU/UK time. The dedupe table (`notification_dispatch` with `@@unique([channelId, alertFingerprint])`) makes any cadence safe — every (channel, alert) tuple pings at most once regardless of how often the cron fires. Aggressive cadences waste compute but never double-page.
 

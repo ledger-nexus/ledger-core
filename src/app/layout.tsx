@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { CommandPalette, CommandPaletteHint } from "@/components/nav/command-palette";
 import { Sidebar } from "@/components/nav/sidebar";
@@ -73,6 +74,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         },
       })
     : 0;
+  // The public tour gallery renders WITHOUT the app shell: a signed-out
+  // prospect must not see the sidebar, switchers, or notification chrome
+  // wrapped around marketing content. Middleware stamps x-pathname
+  // (overwriting any client-supplied value) for exactly this branch.
+  // A full route-group restructure would be the textbook shape, but it
+  // moves every route file for the sake of one public page.
+  const pathname = headers().get("x-pathname") ?? "";
+  if (pathname === "/how-it-works") {
+    return (
+      <html lang="en" className={outfit.variable}>
+        <body className="bg-ink-50">{children}</body>
+      </html>
+    );
+  }
+
   // Conditionally wrap the app in ClerkProvider. We can't statically
   // import ClerkProvider at module scope because Clerk would try to
   // evaluate publishable key from env at build time even when unused.
@@ -123,8 +139,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <TenantSwitcher />
                 {/* Dev-stub user switcher only — hidden entirely under Clerk,
                     where impersonating another account is not a thing and the
-                    user list isn't fetched. */}
-                {!clerkOn && (
+                    user list isn't fetched. Also hidden under HIDE_DEV_CHROME:
+                    tour frames are published marketing assets, and a card
+                    labeled DEV AUTH STUB baked into every screenshot is the
+                    ledger-core equivalent of the dev N-badge that forced a
+                    full RevRec recapture. Set HIDE_DEV_CHROME=1 in .env only
+                    for a capture run. */}
+                {!clerkOn && process.env.HIDE_DEV_CHROME !== "1" && (
                   <div className="w-56">
                     <Card className="shadow-none">
                       <CardContent className="px-3 py-2">

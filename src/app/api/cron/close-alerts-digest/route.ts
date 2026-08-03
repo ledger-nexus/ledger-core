@@ -1,10 +1,22 @@
-// POST /api/cron/close-alerts-digest
+// GET /api/cron/close-alerts-digest
 //
 // Counterpart to /api/cron/close-alerts-dispatch. Walks every enabled
 // SLACK channel in DIGEST_DAILY mode and posts ONE batched Slack
 // message per channel summarizing every NEW close alert since the
 // last successful digest. Idempotent — a duplicate cron tick finds
 // every alert already in NotificationDispatch and sends nothing.
+//
+// Verb: GET. Vercel Cron always issues a GET and cannot be configured
+// to send anything else, so a route registered in vercel.json that
+// exports only POST is scheduled on paper and 405s on every fire,
+// silently, forever. See /api/cron/retention for the long-form version
+// of this reasoning.
+//
+// This route sends outbound Slack messages, so GET is doing real work.
+// It is acceptable because isAuthorizedCronRequest gates it with a
+// timing-safe CRON_SECRET check that fails closed when the secret is
+// unset or under 16 chars, and because the dispatch dedupe table makes
+// an extra fire a no-op rather than a double-page.
 //
 // Auth: same as the immediate dispatch route — `Authorization: Bearer
 // <CRON_SECRET>` header (Vercel cron default) or `?cron_secret=`
@@ -31,7 +43,7 @@ import { dispatchCloseDigests } from "@/lib/notifications/digest";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -69,11 +81,4 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     summary: result.summary,
     tenants: result.tenants,
   });
-}
-
-export function GET(): NextResponse {
-  return NextResponse.json(
-    { error: "Use POST with the Authorization: Bearer header" },
-    { status: 405 }
-  );
 }
