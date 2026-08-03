@@ -62,6 +62,30 @@ const ENV_SPECS: EnvSpec[] = [
     description:
       "Gates POST /api/admin/reset. If unset, the reset endpoint returns 503.",
   },
+  // Scheduled jobs. isAuthorizedCronRequest (src/lib/auth/cron.ts) fails
+  // CLOSED on a missing or under-16-char secret, so every cron 401s
+  // without this — silently, since a 401 to Vercel's scheduler surfaces
+  // nowhere in the app.
+  //
+  // This became load-bearing only in #324. Before it, all four legacy
+  // cron routes exported POST while Vercel Cron issues GET, so they
+  // 405'd regardless and the secret never mattered. Now the failure
+  // mode is subtler: configured-looking, still not running.
+  //
+  // Not requiredInProduction — the app serves correctly without crons,
+  // and refusing to boot over a scheduler secret is disproportionate.
+  // But read the blast radius before shipping without it.
+  {
+    name: "CRON_SECRET",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Shared secret for the 5 scheduled jobs in vercel.json (retention, " +
+      "recurring-JE run, assertion check, close-alert dispatch + digest). " +
+      "Unset → every cron returns 401 and none of them run. NOTE: the " +
+      "retention purge is claimed as Mitigated in docs/SOC2_CONTROL_MATRIX.md " +
+      "(Privacy TSC) — that control only OPERATES if this is set.",
+  },
   // Transactional email (Resend). When RESEND_API_KEY is unset, sendEmail
   // degrades to the LOGGED_ONLY path: the EmailDelivery row is still
   // written, nothing leaves the machine, callers keep working. When the
