@@ -23,7 +23,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate } from "@/lib/utils/format";
 import { getReconciliationRollup } from "@/lib/recon/rollup";
 import { getCloseTaskRollup, checkRequiredTasksComplete } from "@/lib/close-tasks/rollup";
+import { resolveCloseCalendarState } from "@/lib/close-tasks/calendar-state";
 import { getFluxRollup } from "@/lib/flux/rollup";
+import InstantiateCalendarButton from "./instantiate-calendar-button";
 
 export default async function CloseDashboardPage({
   searchParams,
@@ -103,7 +105,19 @@ export default async function CloseDashboardPage({
   const isClosed = !!close;
 
   // ── Three rollups in parallel ────────────────────────────────────────
-  const [reconRollup, taskRollup, fluxRollup, taskBlockers] = await Promise.all([
+  // ...plus the two counts the close-task card needs to tell "catalog
+  // never seeded" apart from "catalog never instantiated for THIS
+  // period". `anyPeriodClose` is period-wide (not scoped to this
+  // entity/book) because that's exactly the guard
+  // instantiateCalendarForPeriod applies.
+  const [
+    reconRollup,
+    taskRollup,
+    fluxRollup,
+    taskBlockers,
+    templateCount,
+    anyPeriodClose,
+  ] = await Promise.all([
     getReconciliationRollup(prisma, {
       tenantId: scope.tenantId,
       entityId: entity.id,
@@ -124,7 +138,20 @@ export default async function CloseDashboardPage({
       tenantId: scope.tenantId,
       periodId: selectedPeriod.id,
     }),
+    prisma.closeTaskTemplate.count({
+      where: { ...tenantFilter, active: true },
+    }),
+    prisma.periodClose.findFirst({
+      where: { ...tenantFilter, periodId: selectedPeriod.id },
+      select: { id: true },
+    }),
   ]);
+
+  const calendarState = resolveCloseCalendarState({
+    templateCount,
+    taskCount: taskRollup.total,
+    periodClosed: !!anyPeriodClose,
+  });
 
   // ── Gate readiness composition ───────────────────────────────────────
   // The period-close gate composes:
@@ -330,19 +357,42 @@ export default async function CloseDashboardPage({
               </Badge>
             </CardTitle>
             <span className="text-xs text-ink-500">
-              {taskRollup.total === 0
-                ? "Templates not seeded yet — see Periods page"
-                : `${taskRollup.done + taskRollup.waived} of ${taskRollup.total} done`}
+              {calendarState.kind === "NO_TEMPLATES"
+                ? "No close-task catalog for this workspace yet"
+                : calendarState.kind === "NOT_INSTANTIATED"
+                  ? `${calendarState.templateCount} templates ready — no checklist opened for this period`
+                  : calendarState.kind === "PERIOD_CLOSED"
+                    ? "Period is closed — no checklist was opened for it"
+                    : `${taskRollup.done + taskRollup.waived} of ${taskRollup.total} done`}
             </span>
           </CardHeader>
           <CardContent>
-            {taskRollup.total === 0 ? (
+            {calendarState.kind === "NO_TEMPLATES" ? (
               <Link
                 href="/periods"
                 className="text-sm text-accent-600 hover:underline"
               >
-                → Seed templates on Periods
+                → Seed the close-task catalog on Periods (admin)
               </Link>
+            ) : calendarState.kind === "NOT_INSTANTIATED" ? (
+              <InstantiateCalendarButton
+                periodId={selectedPeriod.id}
+                periodCode={selectedPeriod.code}
+                templateCount={calendarState.templateCount}
+                size="sm"
+              />
+            ) : calendarState.kind === "PERIOD_CLOSED" ? (
+              <p className="text-xs text-ink-500">
+                A checklist can only be opened while the period is open.
+                Reopen it from{" "}
+                <Link
+                  href="/periods"
+                  className="text-accent-600 hover:underline"
+                >
+                  Periods
+                </Link>{" "}
+                first.
+              </p>
             ) : (
               <ul className="flex flex-col gap-1.5 text-xs">
                 <li className="flex items-center justify-between">
