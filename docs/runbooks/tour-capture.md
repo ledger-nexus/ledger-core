@@ -58,13 +58,56 @@ Frames and `tour.json` land in `public/tours/<id>/`.
 
 ## Scan before committing
 
+Two passes. **Run both** — the first one cannot catch what the second does.
+
+**1. Name leaks.** The repo is public and the Northwind seed contains a
+real firm name.
+
 ```bash
 for f in public/tours/*/steps/*.webp; do tesseract "$f" - --psm 6 2>/dev/null | grep -inE "deloitte|@.*\.test|DEV AUTH|STUB" && echo "  ^^ in $f"; done
 ```
 
-Silence means clean. Any hit is a blocker — fix the seed or the flow and
-recapture. Do not crop or edit frames by hand; the hotspot coordinates
-in `tour.json` are normalized against the captured image.
+**2. Empty states.** A frame can be perfectly clean and still show an
+empty product.
+
+```bash
+for f in public/tours/*/steps/*.webp; do tesseract "$f" - --psm 6 2>/dev/null | grep -inE "no journal entries|not seeded yet|nothing to show|Post your first" && echo "  ^^ EMPTY in $f"; done
+```
+
+**Then open every frame and look at it.** Both greps are heuristics; the
+eye is the actual gate.
+
+This is not hypothetical. A reshoot shipped with an empty frame 1 —
+"No journal entries in this scope yet" — because the shared dev database
+had been wiped by a concurrent test run between the first capture and the
+second. The name-leak scan passed (nothing leaked), only frames 3 and 4
+were eyeballed (the ones expected to change), and the regression reached
+`main`. **Verifying the frames you expected to change is not verifying
+the frames.**
+
+## The dev database is shared and gets wiped
+
+`npm test` clears the ledger by design (see CLAUDE.md → Testing). Any
+concurrent session running the suite will empty Northwind mid-session.
+
+So, immediately before capturing:
+
+```bash
+npm run db:seed
+```
+
+and confirm the entity actually has data — the tour's first frame is the
+dashboard, which is the fastest place to spot an empty book:
+
+```bash
+npx tsx -e 'import { prisma } from "@/lib/db"; prisma.journalEntry.count().then(n => { console.log("JEs:", n); return prisma.$disconnect(); })'
+```
+
+Re-seeding resets the ledger but leaves close tasks intact, so an
+instantiated close calendar survives.
+
+Do not crop or edit frames by hand; the hotspot coordinates in
+`tour.json` are normalized against the captured image.
 
 ## Publishing
 
