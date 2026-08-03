@@ -26,6 +26,7 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
+_No active claims._
 
 ---
 
@@ -49,6 +50,11 @@ than 60 minutes, other sessions may consider your claim stale.
 - ⚠️ Gotcha for everyone: worktrees SHARE .git/hooks — the pre-commit symlink resolves to the MAIN checkout's copy of scripts/pre-commit-secrets-scan.sh. A hook change is only live after it merges AND ~/Code/ledger-core is pulled.
 - Left dark on purpose: frames 3–4 undersell the close pillar until the instantiate gap is fixed. Reshoot, then flip (drop robots block + add catalog row).
 
+### Session close-cal · 2026-08-03
+- **Scope**: Close-task calendar had no UI entry point — `instantiateCalendarForPeriod` shipped tested but with zero UI callers, and `/close` misdiagnosed "no tasks for this period" as "templates not seeded" (different tables). Added `InstantiateCalendarButton` (one client island, mounted on the dashboard task card + the `/close/tasks` empty state), a pure `resolveCloseCalendarState` resolving NO_TEMPLATES / NOT_INSTANTIATED / INSTANTIATED / PERIOD_CLOSED, and fixed the stale "wired in PR 5" empty-state copy. **Also fixed** `/close/tasks` period resolution: N entities ⇒ N rows per period code (12 for `2026-12` in `default`), so `?period=<code>` from the dashboard landed on another entity's period and the new CTA would have instantiated against it — now scope-entity-preferred with an `id` tiebreaker, chips deduped.
+- **Files**: `src/lib/close-tasks/calendar-state.ts` (new), `src/app/close/instantiate-calendar-button.tsx` (new), `src/app/close/page.tsx`, `src/app/close/tasks/page.tsx`, `tests/close-calendar-instantiate-ui.test.ts` (new, 12), `PROJECT_STATUS.md`.
+- **Branch**: `fix/close-calendar-instantiate-ui` (worktree `.claude/worktrees/bold-curie-961bd4`).
+- **Outcome**: tsc 0; new suite 12/12; close-task neighbours 45/45. Browser-verified end-to-end on the dev DB (all four states; seed → instantiate → 50 tasks / 41 dep edges / 0 dangling / 1 aggregate audit row). No schema change, no migration.
 
 ### Session dsr · 2026-07-27
 - **Scope**: #46 harvest slice ⑥ — GDPR Art. 15 export + Art. 17 erasure. `buildUserDataExport` (v2 bundle w/ companion attribution that degrades to null), OWNER-only idempotent erasure-by-redaction (User + EmailDelivery.toEmail via search-hash rewrite + **JournalEntryNote.authorEmail by authorUserId** — post-#46 column, unfilterable by value), DATA_ERASURE audit event (migration 0036) carrying an email HASH never plaintext, Zod-validated subject ids, `/admin/data-subject-requests` queue + nav entry.

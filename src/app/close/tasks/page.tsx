@@ -28,20 +28,23 @@
 //
 // Multi-tenant: tenant-scoped via getCurrentTenant + tenantId filter.
 //
-// Auto-instantiation (PR 2's instantiateCalendarForPeriod) is the
-// entry point — empty periods show a "Open tasks for this period"
-// CTA on the empty state.
+// A period with no tasks yet gets the instantiate CTA on the empty
+// state — that's the entry point to instantiateCalendarForPeriod, which
+// turns the tenant's template catalog into this period's checklist.
 
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getCurrentScope } from "@/lib/scope";
 import { tenantScopeOrNone } from "@/lib/db-sentinels";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate } from "@/lib/utils/format";
+import { resolveCloseCalendarState } from "@/lib/close-tasks/calendar-state";
+import InstantiateCalendarButton from "../instantiate-calendar-button";
 import type { CloseTaskStatus, CloseTaskCategory } from "@prisma/client";
 
 // Status tone — single source of truth shared with the detail page and
@@ -108,8 +111,17 @@ export default async function CloseTasksListPage({
   // (entity, book) tuples for the tenant.
   const allPeriods = await prisma.period.findMany({
     where: { ...tenantFilter },
-    orderBy: { startsOn: "desc" },
-    select: { id: true, code: true, startsOn: true, endsOn: true },
+    // `id` breaks ties between the N same-code rows one per entity
+    // calendar produces — without it Postgres may return them in any
+    // order and the "which 2026-12?" pick would drift between requests.
+    orderBy: [{ startsOn: "desc" }, { id: "asc" }],
+    select: {
+      id: true,
+      code: true,
+      startsOn: true,
+      endsOn: true,
+      calendar: { select: { entityId: true } },
+    },
   });
 
   if (allPeriods.length === 0) {
@@ -121,9 +133,45 @@ export default async function CloseTasksListPage({
     );
   }
 
-  let selectedPeriod = allPeriods[0];
+  // A Period belongs to exactly ONE entity's fiscal calendar, so a
+  // tenant with N entities has N distinct rows sharing each code —
+  // "2026-12" is 12 different rows here, not one. `?period=<code>` is
+  // therefore ambiguous, and picking the first match by insertion order
+  // meant a click-through from /close (which scopes periods to the
+  // viewer's entity) could land on ANOTHER entity's identically-coded
+  // period: the list showed the wrong period's tasks, and the
+  // instantiate CTA would have opened a checklist against it. Resolve
+  // to the current scope's entity when it has a row with that code.
+  const scope = await getCurrentScope();
+  const scopedEntityId = scope?.entityId ?? null;
+  function preferScoped<T extends { calendar: { entityId: string } | null }>(
+    candidates: T[]
+  ): T | undefined {
+    if (scopedEntityId) {
+      const scoped = candidates.find(
+        (p) => p.calendar?.entityId === scopedEntityId
+      );
+      if (scoped) return scoped;
+    }
+    return candidates[0];
+  }
+
+  // One chip per CODE — deduped the same way, so the chip a user clicks
+  // resolves to the same row the chip was built from.
+  const periodChips: typeof allPeriods = [];
+  const seenCodes = new Set<string>();
+  for (const p of allPeriods) {
+    if (seenCodes.has(p.code)) continue;
+    seenCodes.add(p.code);
+    const chosen = preferScoped(allPeriods.filter((q) => q.code === p.code));
+    if (chosen) periodChips.push(chosen);
+  }
+
+  let selectedPeriod = periodChips[0];
   if (searchParams.period) {
-    const match = allPeriods.find((p) => p.code === searchParams.period);
+    const match = preferScoped(
+      allPeriods.filter((p) => p.code === searchParams.period)
+    );
     if (!match) {
       return (
         <EmptyState
@@ -143,7 +191,15 @@ export default async function CloseTasksListPage({
       },
       orderBy: { period: { startsOn: "desc" } },
       select: {
-        period: { select: { id: true, code: true, startsOn: true, endsOn: true } },
+        period: {
+          select: {
+            id: true,
+            code: true,
+            startsOn: true,
+            endsOn: true,
+            calendar: { select: { entityId: true } },
+          },
+        },
       },
     });
     if (latestWithOpen?.period) selectedPeriod = latestWithOpen.period;
@@ -189,6 +245,25 @@ export default async function CloseTasksListPage({
     orderBy: [{ dueAt: "asc" }, { name: "asc" }],
   });
 
+  // Calendar readiness for the empty state. `periodTaskCount` is the
+  // UNFILTERED count for the period — the filtered `tasks.length` below
+  // can be zero simply because the operator picked a category, which is
+  // a different empty state than "this period was never instantiated".
+  const [templateCount, periodTaskCount, anyPeriodClose] = await Promise.all([
+    prisma.closeTaskTemplate.count({
+      where: { ...tenantFilter, active: true },
+    }),
+    categoryFilter || statusFilter || mineOnly
+      ? prisma.closeTask.count({
+          where: { ...tenantFilter, periodId: selectedPeriod.id },
+        })
+      : Promise.resolve(null), // unfiltered — tasks.length already is it
+    prisma.periodClose.findFirst({
+      where: { ...tenantFilter, periodId: selectedPeriod.id },
+      select: { id: true },
+    }),
+  ]);
+
   // Rollup the histogram + progress in-page (groupBy would be one more
   // round-trip when tasks is already in memory).
   const histogram: Record<CloseTaskStatus, number> = {
@@ -202,6 +277,12 @@ export default async function CloseTasksListPage({
   const total = tasks.length;
   const done = histogram.DONE + histogram.WAIVED;
   const pctDone = total === 0 ? 0 : Math.round((done / total) * 100);
+
+  const calendarState = resolveCloseCalendarState({
+    templateCount,
+    taskCount: periodTaskCount ?? total,
+    periodClosed: !!anyPeriodClose,
+  });
 
   // Group tasks by status for the swimlanes.
   const tasksByStatus: Record<CloseTaskStatus, typeof tasks> = {
@@ -261,7 +342,7 @@ export default async function CloseTasksListPage({
       {/* Period switcher chips */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-ink-500">Period:</span>
-        {allPeriods.slice(0, 12).map((p) => {
+        {periodChips.slice(0, 12).map((p) => {
           const active = p.id === selectedPeriod.id;
           return (
             <Link
@@ -320,22 +401,47 @@ export default async function CloseTasksListPage({
         </span>
       </div>
 
-      {/* Empty state — when zero rows, surface the auto-open CTA. */}
+      {/* Empty state. Three distinct reasons the list can be blank, and
+          they need different exits: the filters hide everything, the
+          workspace has no template catalog, or the catalog was never
+          instantiated for this period (the common one — that's the CTA). */}
       {total === 0 ? (
         <Card>
-          <CardContent>
-            <EmptyState
-              title={
-                categoryFilter || statusFilter || mineOnly
-                  ? "No tasks match these filters"
-                  : "No tasks for this period yet"
-              }
-              description={
-                categoryFilter || statusFilter || mineOnly
-                  ? "Try clearing the filters."
-                  : "Instantiate the tenant's close-task templates for this period from the Periods page (or the Server Action wired in PR 5)."
-              }
-            />
+          <CardContent className="flex flex-col items-center gap-3">
+            {calendarState.kind === "INSTANTIATED" ? (
+              <EmptyState
+                title="No tasks match these filters"
+                description="This period has a checklist — the current filters just exclude every row. Try clearing them."
+                className="w-full"
+              />
+            ) : calendarState.kind === "NO_TEMPLATES" ? (
+              <EmptyState
+                title="No close-task catalog yet"
+                description="Close tasks come from a workspace-wide template catalog. A workspace admin seeds it once, then each period's checklist is opened from it."
+                action={{ href: "/periods", label: "Seed the catalog on Periods" }}
+                className="w-full"
+              />
+            ) : calendarState.kind === "PERIOD_CLOSED" ? (
+              <EmptyState
+                title={`${selectedPeriod.code} is closed`}
+                description="No checklist was opened for this period before it closed, and a closed period can't take one. Reopen the period first if you need it."
+                action={{ href: "/periods", label: "Go to Periods" }}
+                className="w-full"
+              />
+            ) : (
+              <>
+                <EmptyState
+                  title="No checklist opened for this period yet"
+                  description={`The workspace has ${calendarState.templateCount} close-task template${calendarState.templateCount === 1 ? "" : "s"}. Open the checklist to create this period's tasks, with due dates and dependencies carried over from the catalog.`}
+                  className="w-full"
+                />
+                <InstantiateCalendarButton
+                  periodId={selectedPeriod.id}
+                  periodCode={selectedPeriod.code}
+                  templateCount={calendarState.templateCount}
+                />
+              </>
+            )}
           </CardContent>
         </Card>
       ) : (
