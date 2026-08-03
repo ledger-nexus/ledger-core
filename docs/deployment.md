@@ -32,10 +32,40 @@ cd ledger-core
 npm install
 cp .env.example .env
 # Paste the Neon connection string into DATABASE_URL in .env
-npm run db:push       # creates all the ledger-core tables
-npm run db:seed       # loads the Northwind multi-book demo
-npm test          # confirms invariants hold against the live DB
+npm run db:push          # creates all the ledger-core tables
+npm run db:restore-ddl   # ⚠️ NOT OPTIONAL — see below
+npm run db:seed          # loads the Northwind multi-book demo
+npm test                 # confirms invariants hold against the live DB
 ```
+
+> ### ⚠️ `db:restore-ddl` is a required step, not a repair tool
+>
+> `prisma db push` creates tables and indexes. It **cannot** create the
+> DDL Prisma's schema language can't express, and all of it is
+> load-bearing:
+>
+> - the silent append-only **RULE pair on `audit_log`** — a SOC 2 control
+>   (CC5.1 / CC7.3) that the control matrix claims as Mitigated
+> - the append-only triggers on `close_task_state_change`
+> - the ledger **CHECK constraints** — debit XOR credit, no negative
+>   amounts, transaction-currency sign agreement
+> - the RLS Phase 1 policies, GIN indexes, and the lineage partial
+>   unique index
+>
+> A database built with `db:push` alone looks completely normal and
+> silently accepts `UPDATE`/`DELETE` on the audit log. **This exact
+> omission caused the 2026-06-10 production incident.**
+
+> ### ⚠️ Never `prisma migrate deploy` against a fresh database
+>
+> The reasonable instinct is wrong here. This schema is **`db push`-managed
+> with no baseline migration**: the 37 folders under `prisma/migrations/`
+> are all *incremental* (constraints, tenancy columns, enum values). None
+> of them creates `gl_entry_header` or any other core table.
+>
+> `prisma migrate deploy` on an empty database fails on `0001_constraints`,
+> which tries to `ALTER` tables that do not exist. Use `db:push` +
+> `db:restore-ddl`, as above.
 
 The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS) with all sub-ledgers populated. The headline assertions (multi-book divergence, AR/AP reconciliation, book-tax difference) verify in under 30 seconds.
 
@@ -44,11 +74,32 @@ The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS
 1. Open [vercel.com/new](https://vercel.com/new) and import the GitHub repo.
 2. Framework: **Next.js** (auto-detected).
 3. Environment Variables:
-   - `DATABASE_URL` — paste the same Neon **pooled** connection string.
+
+   | Variable | Needed | Without it |
+   |---|---|---|
+   | `DATABASE_URL` | **required** | Build fails. Use the Neon **pooled** string. |
+   | `AUTH_STUB_SECRET` | **required** | Boot throws (min 16 chars). |
+   | `CLERK_SECRET_KEY` + `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | strongly advised | Middleware fails **closed**: every non-public route returns 503. Set both or neither — half-configured is an error. |
+   | `CRON_SECRET` | advised | All 5 scheduled jobs 401 silently. Includes the retention purge, which the control matrix carries as a Privacy TSC control. Min 16 chars. |
+   | `APP_BASE_URL` | advised | See the build-time note below. |
+   | `STRIPE_*`, `RESEND_API_KEY` | optional | Billing and email stay dark by design. |
+
+   > **`APP_BASE_URL` must be set as a BUILD-time variable, not just at
+   > runtime.** `/sitemap.xml` and `/robots.txt` are statically prerendered
+   > (`○` in the build output), so they read it at build time and bake the
+   > result in. Set only at runtime, the sitemap ships as an empty
+   > `<urlset>` and robots omits its `Sitemap:` line — `/how-it-works`
+   > ends up public, indexable, and undiscoverable. Changing the value
+   > later requires a **redeploy**, not just an env update.
+
 4. Build settings (defaults are correct):
    - Build command: `prisma generate && next build`
    - Install command: `npm install`
 5. Click **Deploy**.
+
+Cron schedules come from `vercel.json` automatically — five jobs, all
+issuing `GET` (Vercel Cron cannot send any other verb). They authenticate
+with `CRON_SECRET`; without it they run on schedule and 401.
 
 First deploy takes ~2 minutes. Subsequent pushes auto-deploy on the `main` branch.
 
