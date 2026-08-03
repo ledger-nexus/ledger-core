@@ -154,7 +154,11 @@ const ENV_SPECS: EnvSpec[] = [
     requiredInProduction: false,
     description:
       "Absolute origin (https://…) used to build Stripe return URLs and " +
-      "invite/approval links. Checkout and portal 503 without it.",
+      "invite/approval links. Checkout and portal 503 without it. ALSO " +
+      "gates discoverability: /sitemap.xml emits an EMPTY urlset and " +
+      "/robots.txt omits its Sitemap line without it, because a sitemap " +
+      "cannot carry relative URLs — so the public tour page exists but " +
+      "no crawler is told where to find it.",
   },
 ];
 

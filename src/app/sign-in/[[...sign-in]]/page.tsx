@@ -36,8 +36,17 @@ export default async function SignInPage() {
   // Clerk handles the boundary internally.
   const { SignIn } = await import("@clerk/nextjs");
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ink-50">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-ink-50">
       <SignIn />
+      {/* The one place a signed-out visitor reliably lands. Everything
+          else 503s without a session, so if the tour isn't reachable
+          from here it is only reachable from a search result. */}
+      <Link
+        href="/how-it-works"
+        className="text-sm text-ink-600 underline hover:text-ink-900"
+      >
+        New here? See a two-minute tour of the month-end close →
+      </Link>
     </div>
   );
 }

@@ -21,8 +21,25 @@ export const metadata: Metadata = {
   title: "How it works — ledger-core",
   description:
     "A guided tour of the month-end close in ledger-core: close dashboard, task calendar, reconciliation sign-off, and the month-end review packet.",
-  // DARK: lift this with the frame-review flip, not before.
-  robots: { index: false, follow: false },
+  // Indexable as of the frame review. This is the only route in the app
+  // that should be — see src/app/robots.ts.
+  //
+  // metadataBase resolves the canonical and OG URLs to absolute. Without
+  // it Next emits `<link rel="canonical" href="/how-it-works">`, which is
+  // relative and therefore useless to a crawler — a canonical tag that
+  // does not name an origin cannot deduplicate anything. Undefined when
+  // APP_BASE_URL is unset, which is the same condition that empties the
+  // sitemap; both are inert together rather than half-configured.
+  metadataBase: process.env.APP_BASE_URL
+    ? new URL(process.env.APP_BASE_URL)
+    : undefined,
+  alternates: { canonical: "/how-it-works" },
+  openGraph: {
+    title: "See the close, before you sign up",
+    description:
+      "A two-minute guided walkthrough of a real month-end close in ledger-core.",
+    type: "website",
+  },
 };
 
 export default function HowItWorksPage() {
