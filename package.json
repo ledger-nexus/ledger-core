@@ -2,7 +2,7 @@
   "name": "ledger-core",
   "version": "0.2.0",
   "private": true,
-  "description": "Universal accounting substrate — Layers 1 & 2 of a multi-book general ledger, exercised on QBO-grade SaaS data, schema-compatible with NetSuite/Intacct.",
+  "description": "Universal accounting substrate \u2014 Layers 1 & 2 of a multi-book general ledger, exercised on QBO-grade SaaS data, schema-compatible with NetSuite/Intacct.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -37,6 +37,8 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/react": "16.3.2",
     "@types/node": "22.19.20",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
@@ -44,6 +46,7 @@
     "eslint": "8.57.1",
     "eslint-config-next": "14.2.35",
     "fast-check": "3.23.2",
+    "jsdom": "25.0.1",
     "postcss": "8.5.15",
     "prisma": "5.22.0",
     "tailwindcss": "3.4.19",

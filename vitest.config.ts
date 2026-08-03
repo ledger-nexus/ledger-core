@@ -18,6 +18,11 @@ export default defineConfig({
     // for fast in-process hooks, not Neon-latency cleanup chains.
     hookTimeout: 30_000,
   },
+  // tsconfig.json sets jsx: "preserve" for Next's compiler, which leaves
+  // esbuild nothing to do with a .tsx test file. Component tests opt into the
+  // automatic runtime here (react/jsx-runtime); the app build is unaffected —
+  // Next never reads this config.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
