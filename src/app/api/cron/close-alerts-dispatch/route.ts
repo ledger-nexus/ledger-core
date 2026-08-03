@@ -1,15 +1,27 @@
-// POST /api/cron/close-alerts-dispatch
+// GET /api/cron/close-alerts-dispatch
 //
 // Cron-only route. Walks all tenants' enabled SLACK channels and
 // dispatches new close alerts. Idempotent — a duplicate cron tick
 // surfaces as DEDUPED, not a re-send.
 //
+// Verb: GET. Vercel Cron always issues a GET and cannot be configured
+// to send anything else, so a route registered in vercel.json that
+// exports only POST is scheduled on paper and 405s on every fire,
+// silently, forever. See /api/cron/retention for the long-form version
+// of this reasoning.
+//
+// This route sends outbound Slack messages, so GET is doing real work.
+// It is acceptable because isAuthorizedCronRequest gates it with a
+// timing-safe CRON_SECRET check that fails closed when the secret is
+// unset or under 16 chars, and because the dedupe table makes an extra
+// fire a no-op rather than a double-page.
+//
 // Auth: `Authorization: Bearer <CRON_SECRET>` header (Vercel cron
 // default) or `?cron_secret=<CRON_SECRET>` query param (manual).
 //
-// Schedule: vercel.json adds this in PR 4/4. Recommended cadence is
-// every 15 minutes during business hours; the dedupe table makes
-// even a 1-minute cadence safe but it's wasteful.
+// Schedule: vercel.json fires this every 15 minutes during business
+// hours (`*/15 9-18 * * 1-5`); the dedupe table makes even a 1-minute
+// cadence safe but it's wasteful.
 //
 // Response: aggregate counters across all tenants. The route returns
 // 200 even when individual dispatches fail; errors are reflected in
@@ -30,7 +42,7 @@ import { dispatchCloseAlerts } from "@/lib/notifications/dispatch";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -70,13 +82,4 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     summary: result.summary,
     tenants: result.tenants,
   });
-}
-
-// GET returns 405 so accidental browser visits don't trigger a
-// dispatch. Cron-only.
-export function GET(): NextResponse {
-  return NextResponse.json(
-    { error: "Use POST with the Authorization: Bearer header" },
-    { status: 405 }
-  );
 }

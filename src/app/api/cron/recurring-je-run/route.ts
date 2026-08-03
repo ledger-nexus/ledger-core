@@ -1,4 +1,4 @@
-// POST /api/cron/recurring-je-run
+// GET /api/cron/recurring-je-run
 //
 // Cron-only route. Drives the recurring-JE engine against today as
 // the throughDate. Walks every active template across every tenant
@@ -6,6 +6,20 @@
 // (sourceSystem, sourceRecordType, sourceRecordId) lineage triple
 // dedupes against the partial unique index on journal_entry, so
 // re-firing the cron is safe.
+//
+// Verb: GET. Vercel Cron always issues a GET and cannot be configured
+// to send anything else, so a route registered in vercel.json that
+// exports only POST is scheduled on paper and 405s on every fire,
+// silently, forever. See /api/cron/retention for the long-form version
+// of this reasoning.
+//
+// This route DOES post journal entries, so GET is doing real work. It
+// is acceptable because isAuthorizedCronRequest gates it with a
+// timing-safe CRON_SECRET check that fails closed when the secret is
+// unset or under 16 chars — the URL alone triggers nothing — and
+// because the run is idempotent: the lineage triple dedupes, so an
+// extra fire posts nothing new. There is no ambient-authority CSRF
+// surface here; the route reads no cookie and no session.
 //
 // Auth: `Authorization: Bearer <CRON_SECRET>` header (Vercel cron
 // default) or `?cron_secret=<...>` query param (manual trigger).
@@ -37,7 +51,7 @@ import { runRecurringEntries } from "@/lib/accounting/recurring";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -82,13 +96,4 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
     templates: result.templates,
   });
-}
-
-// GET returns 405 so accidental browser visits don't trigger a run.
-// Cron-only.
-export function GET(): NextResponse {
-  return NextResponse.json(
-    { error: "Use POST with the Authorization: Bearer header" },
-    { status: 405 }
-  );
 }
