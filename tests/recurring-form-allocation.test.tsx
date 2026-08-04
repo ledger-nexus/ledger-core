@@ -19,11 +19,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-const createRecurringEntryAction = vi.fn(async () => ({ ok: true as const, id: "new-id" }));
+const createRecurringEntryAction = vi.fn(async (_input: unknown) => ({
+  ok: true as const,
+  id: "new-id",
+}));
 
 vi.mock("@/app/actions/recurring-entries", () => ({
-  createRecurringEntryAction: (...args: unknown[]) =>
-    createRecurringEntryAction(...(args as [])),
+  createRecurringEntryAction: (input: unknown) => createRecurringEntryAction(input),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -118,7 +120,7 @@ describe("new recurring template — ALLOCATION mode", () => {
     fireEvent.click(submitButton());
     await vi.waitFor(() => expect(createRecurringEntryAction).toHaveBeenCalled());
 
-    const payload = createRecurringEntryAction.mock.calls[0][0] as {
+    const payload = createRecurringEntryAction.mock.calls[0]?.[0] as {
       kind: string;
       allocationSourceAccountCode: string;
       lines: Array<Record<string, unknown>>;
