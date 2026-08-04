@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session translation-phase-bc · 2026-08-04
+- **Scope**: Translation Phases B/C — `reports/translation.ts` (functional-balance translation at #149/#150 category rates; HISTORICAL per-line walk; CTA = credit-positive balancing plug, sign re-derived), consolidation `periodStart` + synthetic CTA equity row + rate map, page/CSV with #152's default derivation, two-mode banner, FxRateNotFoundError → graceful naïve fallback.
+- **Verification**: 23 tests green (new suite pins #151's 1950-not-2463.50 double-application refutation + reval-invisibility + HISTORICAL freeze + CTA balance); tsc 0; build clean; browser regression on all-USD Acme (translation inert, new control renders).
+- **Branch**: feat/consolidation-translation-b (worktree ~/Code/ledger-core-je-approvals).
+
 ### Session translation-phase-a · 2026-08-04
 - **Scope**: Translation arc Phase A — per-line `functionalAmount`/`functionalCurrencyId` (migration 0039 + backfill), postJournalEntry derivation (txn==functional → txn amount; functional==reporting → reporting amount; three-way → resolveFxRate or throw; explicit override), revaluation poster stamps functional 0 ONLY when functional ≠ reporting (real remeasurement income keeps its amount when functional==reporting).
 - **Verification**: 38 tests green across functional-amount (6, incl. the #151 1000-GBP/1200-USD trap pinned) + invariants + fx-reval ×2; tsc 0; build clean. Dev DB migrated via `db execute`. Schema fingerprint updated.

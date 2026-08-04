@@ -11,6 +11,17 @@ import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
+import { FxRateNotFoundError } from "@/lib/accounting/fx";
+
+// #152's derivation: a quarter back from asOf, day 1 — a sensible
+// default window for the WEIGHTED_AVG rate so translation runs without
+// the operator hand-picking a start date.
+function deriveDefaultPeriodStart(asOf: string): string {
+  const d = new Date(asOf);
+  d.setUTCMonth(d.getUTCMonth() - 3);
+  d.setUTCDate(1);
+  return d.toISOString().slice(0, 10);
+}
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -21,7 +32,7 @@ import { formatDate, formatMoney, moneyClass } from "@/lib/utils/format";
 export default async function ConsolidationPage({
   searchParams,
 }: {
-  searchParams: { root?: string; asOf?: string };
+  searchParams: { root?: string; asOf?: string; periodStart?: string };
 }) {
   // Tenant-verified scope (closes the cross-tenant read leak the raw
   // lc-scope cookie used to enable).
@@ -35,6 +46,10 @@ export default async function ConsolidationPage({
     );
   }
   const asOf = searchParams.asOf ?? "2026-06-30";
+  // Period start drives WEIGHTED_AVG translation rates. Default: quarter
+  // back from asOf, day 1 (#152's derivation) — so mixed-currency groups
+  // get ASC 830 translation by default instead of the naïve sum.
+  const periodStart = searchParams.periodStart ?? deriveDefaultPeriodStart(asOf);
 
   // List entities that have at least one descendant — those are the only
   // sensible roots. Tenant-scoped (Phase 4c): only show the current
@@ -73,14 +88,34 @@ export default async function ConsolidationPage({
   // tenantId from the session, never from the URL: ?root= is
   // client-controlled, and without the tenant pin it could name another
   // tenant's entity code and consolidate that tenant's books.
-  const report = await getConsolidatedTrialBalance(prisma, {
-    rootEntityCode: root,
-    bookCode: scope.bookCode,
-    asOf: new Date(asOf),
-    tenantId: tenant.id,
-  });
+  //
+  // Translation degrades gracefully: a mixed-currency group whose FX
+  // table lacks the needed CLOSE rates falls back to the naïve-sum
+  // report (with the disclosure banner + a rates-missing note) instead
+  // of a 500. A translated statement at a guessed rate would be worse
+  // than either.
+  let report;
+  let translationRatesMissing = false;
+  try {
+    report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: root,
+      bookCode: scope.bookCode,
+      asOf: new Date(asOf),
+      periodStart: new Date(periodStart),
+      tenantId: tenant.id,
+    });
+  } catch (e) {
+    if (!(e instanceof FxRateNotFoundError)) throw e;
+    translationRatesMissing = true;
+    report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: root,
+      bookCode: scope.bookCode,
+      asOf: new Date(asOf),
+      tenantId: tenant.id,
+    });
+  }
 
-  const csvUrl = `/api/reports/consolidation/csv?root=${root}&asOf=${asOf}`;
+  const csvUrl = `/api/reports/consolidation/csv?root=${root}&asOf=${asOf}&periodStart=${periodStart}`;
   const subEntityCodes = report.entitiesIncluded
     .filter((e) => !e.isRoot)
     .map((e) => e.code);
@@ -108,6 +143,15 @@ export default async function ConsolidationPage({
               </Select>
             </div>
             <div>
+              <Label htmlFor="periodStart">Period start</Label>
+              <Input
+                type="date"
+                name="periodStart"
+                id="periodStart"
+                defaultValue={periodStart}
+              />
+            </div>
+            <div>
               <Label htmlFor="asOf">As of</Label>
               <Input type="date" name="asOf" id="asOf" defaultValue={asOf} />
             </div>
@@ -127,13 +171,51 @@ export default async function ConsolidationPage({
         </div>
       </div>
 
-      {/* Multi-currency disclosure (CPA credibility). When the included
-          entities span more than one functional currency, the
-          consolidated totals are NOT FX-translated — they're naïve sums
-          of debit/credit values in each entity's own currency. Show the
-          limitation rather than hide it. The proper ASC 830 translation
-          (current rate / temporal / CTA accounting) is a follow-up arc. */}
-      {report.hasMultiCurrency && (
+      {/* Translation status. ACTIVE: per-line functional balances were
+          translated at category rates (#334 Phase A → Phase B) and the
+          CTA plug balances the statement — positive-tone banner with the
+          per-entity CLOSE rates. NOT active on a mixed-currency group:
+          the original naïve-sum disclosure, plus the reason when it's a
+          missing FX rate. */}
+      {report.translationActive && (
+        <Card>
+          <CardContent className="border-l-4 border-positive bg-positive/5 px-5 py-4">
+            <div className="flex items-start gap-3">
+              <Badge tone="positive">FX translation active</Badge>
+              <div className="text-sm text-ink-900">
+                <div>
+                  Foreign entities translated from{" "}
+                  <strong>functional-currency balances</strong> (ASC 830
+                  current-rate method):{" "}
+                  {Object.entries(report.translationRateByEntity)
+                    .filter(([, rate]) => rate !== null)
+                    .map(([code, rate], i, arr) => (
+                      <span key={code}>
+                        <code className="rounded bg-white px-1.5 py-0.5 text-xs ring-1 ring-ink-200">
+                          {code} @ {rate}
+                        </code>
+                        {i < arr.length - 1 ? ", " : ""}
+                      </span>
+                    ))}
+                  . Cumulative translation adjustment:{" "}
+                  <span className="font-mono">
+                    {formatMoney(report.cumulativeTranslationAdjustment)}
+                  </span>{" "}
+                  (credit-positive, in equity as the CTA row).
+                </div>
+                <div className="mt-1.5 text-xs text-ink-500">
+                  BS accounts at the period-end CLOSE rate, P&amp;L at the
+                  period average, HISTORICAL equity frozen at contribution
+                  rates. FX revaluation true-ups carry zero functional
+                  amount, so the temporal-method adjustment never
+                  compounds into this view.
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {report.hasMultiCurrency && !report.translationActive && (
         <Card>
           <CardContent className="border-l-4 border-warning bg-warning/5 px-5 py-4">
             <div className="flex items-start gap-3">
@@ -157,9 +239,15 @@ export default async function ConsolidationPage({
                   — they are NOT FX-translated to a single reporting
                   currency.
                 </div>
+                {translationRatesMissing && (
+                  <div className="mt-1.5 text-xs font-medium text-negative">
+                    Translation could not run: the FX table is missing a
+                    CLOSE rate for at least one functional-currency pair
+                    in [{periodStart} … {asOf}]. Add the rates and re-run.
+                  </div>
+                )}
                 <div className="mt-1.5 text-xs text-ink-500">
-                  Proper ASC 830 translation (current rate / temporal /
-                  CTA accounting) is on the roadmap. Until then, treat
+                  Until translation runs, treat
                   cross-currency consolidated balances as indicative
                   only. Per-entity TBs (in their own currency) are
                   accurate.

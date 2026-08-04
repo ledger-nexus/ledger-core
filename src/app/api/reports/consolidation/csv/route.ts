@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
+import { FxRateNotFoundError } from "@/lib/accounting/fx";
 import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
@@ -30,12 +31,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!tenant) {
     return new NextResponse("No tenant available — sign in and select a tenant", { status: 403 });
   }
-  const report = await getConsolidatedTrialBalance(prisma, {
-    rootEntityCode: root,
-    bookCode: scope.bookCode,
-    asOf: new Date(asOf),
-    tenantId: tenant.id,
-  });
+  // periodStart activates ASC 830 translation (Phase B), mirroring the
+  // page. Same graceful degradation: missing FX rates fall back to the
+  // naïve-sum report rather than a 500 — the CSV then matches what the
+  // page shows in that state.
+  const periodStartParam = url.searchParams.get("periodStart");
+  let report;
+  try {
+    report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: root,
+      bookCode: scope.bookCode,
+      asOf: new Date(asOf),
+      ...(periodStartParam ? { periodStart: new Date(periodStartParam) } : {}),
+      tenantId: tenant.id,
+    });
+  } catch (e) {
+    if (!(e instanceof FxRateNotFoundError)) throw e;
+    report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: root,
+      bookCode: scope.bookCode,
+      asOf: new Date(asOf),
+      tenantId: tenant.id,
+    });
+  }
 
   const subCodes = report.entitiesIncluded.filter((e) => !e.isRoot).map((e) => e.code);
 
