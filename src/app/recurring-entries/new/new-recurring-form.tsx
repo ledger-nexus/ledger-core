@@ -88,6 +88,28 @@ export default function NewRecurringForm({
     return { debit, credit, diff: debit.minus(credit), balanced: debit.equals(credit) && debit.greaterThan(0) };
   }, [lines]);
 
+  // Allocation lines carry percents, not amounts, so the debit/credit
+  // totals above are structurally 0 and "balanced" is never true for
+  // them. Their readiness test is the one the engine enforces: every
+  // target named, percents summing to exactly 100.
+  const allocation = useMemo(() => {
+    let percent = new Decimal(0);
+    let incomplete = false;
+    for (const l of lines) {
+      if (!l.accountCode || !l.percent || isNaN(Number(l.percent))) {
+        incomplete = true;
+        continue;
+      }
+      percent = percent.plus(new Decimal(l.percent));
+    }
+    return {
+      percent,
+      complete: !incomplete && percent.equals(100) && Boolean(sourceAccountCode),
+    };
+  }, [lines, sourceAccountCode]);
+
+  const canSubmit = kind === "ALLOCATION" ? allocation.complete : totals.balanced;
+
   function updateLine(uid: string, patch: Partial<DraftLine>) {
     setLines((prev) => prev.map((l) => (l.uid === uid ? { ...l, ...patch } : l)));
   }
@@ -364,25 +386,49 @@ export default function NewRecurringForm({
           </Table>
           <div className="flex items-center justify-between mt-3">
             <div className="flex gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => addLine("DEBIT")}>
-                + Debit line
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => addLine("CREDIT")}>
-                + Credit line
-              </Button>
+              {kind === "ALLOCATION" ? (
+                <Button type="button" variant="ghost" size="sm" onClick={() => addLine("DEBIT")}>
+                  + Target line
+                </Button>
+              ) : (
+                <>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => addLine("DEBIT")}>
+                    + Debit line
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => addLine("CREDIT")}>
+                    + Credit line
+                  </Button>
+                </>
+              )}
             </div>
             <div className="text-sm">
-              <span className="text-ink-500">Debits </span>
-              <span className="font-mono">{formatMoney(totals.debit)}</span>
-              <span className="text-ink-500"> · Credits </span>
-              <span className="font-mono">{formatMoney(totals.credit)}</span>
-              <span className="ml-3">
-                {totals.balanced ? (
-                  <Badge tone="positive">Balanced</Badge>
-                ) : (
-                  <Badge tone="warning">Δ {formatMoney(totals.diff)}</Badge>
-                )}
-              </span>
+              {kind === "ALLOCATION" ? (
+                <>
+                  <span className="text-ink-500">Allocated </span>
+                  <span className="font-mono">{allocation.percent.toFixed(2)}%</span>
+                  <span className="ml-3">
+                    {allocation.complete ? (
+                      <Badge tone="positive">Fully allocated</Badge>
+                    ) : (
+                      <Badge tone="warning">Must total 100%</Badge>
+                    )}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-ink-500">Debits </span>
+                  <span className="font-mono">{formatMoney(totals.debit)}</span>
+                  <span className="text-ink-500"> · Credits </span>
+                  <span className="font-mono">{formatMoney(totals.credit)}</span>
+                  <span className="ml-3">
+                    {totals.balanced ? (
+                      <Badge tone="positive">Balanced</Badge>
+                    ) : (
+                      <Badge tone="warning">Δ {formatMoney(totals.diff)}</Badge>
+                    )}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </CardContent>
@@ -390,7 +436,7 @@ export default function NewRecurringForm({
 
       {error && <p className="text-sm text-negative">{error}</p>}
       <div className="flex justify-end gap-2">
-        <Button type="submit" disabled={pending || !totals.balanced}>
+        <Button type="submit" disabled={pending || !canSubmit}>
           {pending ? "Creating…" : "Create template"}
         </Button>
       </div>
