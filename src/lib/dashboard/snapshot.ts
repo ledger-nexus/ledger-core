@@ -105,6 +105,7 @@ export async function getDashboardSnapshot(
       },
       select: {
         cadence: true,
+        kind: true,
         startDate: true,
         endDate: true,
         lastPostedDate: true,
@@ -236,6 +237,7 @@ export async function getDashboardSnapshot(
       lastPostedDate: t.lastPostedDate,
       endDate: t.endDate,
       throughDate: today,
+      snapToMonthEnd: t.kind === "ALLOCATION",
     });
     return sum + due.length;
   }, 0);

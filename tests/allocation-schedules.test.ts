@@ -335,10 +335,11 @@ describe("allocation through the recurring runner (DB)", () => {
     expect(count).toBe(1);
   });
 
-  it("a mid-month-anchored template stops with a named error, never a partial allocation", async () => {
-    // The create action refuses this shape, so reaching it takes a
-    // seed, a script, or a restored row — exactly the cases where a
-    // silent half-month allocation would go unnoticed for a quarter.
+  it("a 30-June anchor runs consecutive months — the step lands on 31 July, not 30 July", async () => {
+    // The cadence anchors on the start date's DAY, so a 30 Jun template
+    // would step to 30 Jul: not a month end, so the window would cover
+    // 1–30 Jul and the run would refuse. Every month-end anchor except
+    // the 31st was affected. Both months must post.
     const book = await prisma.book.findUniqueOrThrow({
       where: { code: BOOK },
       select: { id: true },
@@ -347,18 +348,50 @@ describe("allocation through the recurring runner (DB)", () => {
       where: { tenantId, code: E },
       select: { id: true },
     });
-    const bad = await prisma.recurringEntry.create({
+    await prisma.period.createMany({
+      data: [
+        {
+          tenantId,
+          calendarId: (
+            await prisma.fiscalCalendar.findFirstOrThrow({
+              where: { tenantId, entityId: ent.id },
+              select: { id: true },
+            })
+          ).id,
+          code: "2026-06",
+          ordinal: 6,
+          startsOn: new Date("2026-06-01"),
+          endsOn: new Date("2026-06-30"),
+        },
+      ],
+      skipDuplicates: true,
+    });
+    // June activity on a fresh pool so the second month has something
+    // to allocate.
+    await postJournalEntry(prisma, {
+      tenantId,
+      entityCode: E,
+      bookCode: BOOK,
+      documentDate: new Date("2026-06-10"),
+      memo: "June overhead",
+      source: "MANUAL",
+      lines: [
+        { accountCode: A.d3, debit: 500 },
+        { accountCode: A.cash, credit: 500 },
+      ],
+    });
+    const tpl = await prisma.recurringEntry.create({
       data: {
         tenantId,
         entityId: ent.id,
         bookId: book.id,
-        code: `ALCX_MID_${SUFFIX}`.toUpperCase().slice(0, 40),
-        memo: "Mid-month allocation",
+        code: `ALCX_JUN30_${SUFFIX}`.toUpperCase().slice(0, 40),
+        memo: "June-30 anchored allocation",
         currencyId: "USD",
         cadence: "MONTHLY",
-        startDate: new Date("2026-05-15"),
+        startDate: new Date("2026-05-31"),
         kind: "ALLOCATION",
-        allocationSourceAccountCode: A.src,
+        allocationSourceAccountCode: A.d3,
         lines: { create: [{ lineNo: 1, accountCode: A.d1, allocationPercent: "100.0000" }] },
       },
       select: { id: true },
@@ -366,20 +399,106 @@ describe("allocation through the recurring runner (DB)", () => {
 
     const run = await runRecurringEntries(prisma, {
       tenantId,
-      templateId: bad.id,
+      templateId: tpl.id,
+      throughDate: new Date("2026-06-30"),
+      triggeredBy: "test",
+    });
+    expect(run.templates[0].errors).toEqual([]);
+
+    const after = await prisma.recurringEntry.findUniqueOrThrow({
+      where: { id: tpl.id },
+      select: { lastPostedDate: true },
+    });
+    // May 31 (nothing to allocate) then June 30 — NOT June 31-as-30.
+    expect(after.lastPostedDate!.toISOString().slice(0, 10)).toBe("2026-06-30");
+    const june = await prisma.journalEntry.findFirst({
+      where: { tenantId, sourceRecordId: `${tpl.id}:2026-06-30` },
+      include: { lines: { include: { account: true } } },
+    });
+    expect(june).not.toBeNull();
+    expect(
+      new Decimal(
+        june!.lines.find((l) => l.account.code === A.d1)!.debit.toString()
+      ).toNumber()
+    ).toBeCloseTo(500, 2);
+  });
+
+  it("a mid-month-anchored template still allocates the WHOLE month", async () => {
+    // The create action refuses this shape, so reaching it takes a
+    // seed, a script, or a restored row. The hazard is the window:
+    // anchored on the 15th it would run [1st, 15th] and nothing would
+    // ever pick up the 16th–EOM. Snapping the run to month end means
+    // the late-month activity below is allocated rather than orphaned.
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { code: BOOK },
+      select: { id: true },
+    });
+    const ent = await prisma.legalEntity.findFirstOrThrow({
+      where: { tenantId, code: E },
+      select: { id: true },
+    });
+    const lateCode = `AL80${SUFFIX}`.slice(0, 12);
+    await prisma.account.create({
+      data: {
+        tenantId,
+        entityId: ent.id,
+        code: lateCode,
+        name: "Late-month pool",
+        type: "EXPENSE",
+        normalBalance: "DEBIT",
+      },
+    });
+    // Dated the 20th — AFTER the template's mid-month anchor.
+    await postJournalEntry(prisma, {
+      tenantId,
+      entityCode: E,
+      bookCode: BOOK,
+      documentDate: new Date("2026-05-20"),
+      memo: "Late-month overhead",
+      source: "MANUAL",
+      lines: [
+        { accountCode: lateCode, debit: 640 },
+        { accountCode: A.cash, credit: 640 },
+      ],
+    });
+
+    const mid = await prisma.recurringEntry.create({
+      data: {
+        tenantId,
+        entityId: ent.id,
+        bookId: book.id,
+        code: `ALCX_MID_${SUFFIX}`.toUpperCase().slice(0, 40),
+        memo: "Mid-month anchored allocation",
+        currencyId: "USD",
+        cadence: "MONTHLY",
+        startDate: new Date("2026-05-15"),
+        kind: "ALLOCATION",
+        allocationSourceAccountCode: lateCode,
+        lines: { create: [{ lineNo: 1, accountCode: A.d1, allocationPercent: "100.0000" }] },
+      },
+      select: { id: true },
+    });
+
+    const run = await runRecurringEntries(prisma, {
+      tenantId,
+      templateId: mid.id,
       throughDate: new Date("2026-05-31"),
       triggeredBy: "test",
     });
-    expect(run.entriesPosted).toBe(0);
-    expect(run.templates[0].errors).toHaveLength(1);
-    expect(run.templates[0].errors[0].message).toMatch(/month-end/);
+    expect(run.templates[0].errors).toEqual([]);
+    expect(run.entriesPosted).toBe(1);
 
-    // Nothing posted, and the bookmark did NOT advance past the bad
-    // date — fixing the template resumes from where it stopped.
-    const after = await prisma.recurringEntry.findUniqueOrThrow({
-      where: { id: bad.id },
-      select: { lastPostedDate: true },
+    // Posted on the 31st, not the 15th, and it carries the full 640 —
+    // the amount a [1st, 15th] window would have missed entirely.
+    const posted = await prisma.journalEntry.findFirst({
+      where: { tenantId, sourceRecordId: `${mid.id}:2026-05-31` },
+      include: { lines: { include: { account: true } } },
     });
-    expect(after.lastPostedDate).toBeNull();
+    expect(posted).not.toBeNull();
+    expect(
+      new Decimal(
+        posted!.lines.find((l) => l.account.code === lateCode)!.credit.toString()
+      ).toNumber()
+    ).toBeCloseTo(640, 2);
   });
 });
