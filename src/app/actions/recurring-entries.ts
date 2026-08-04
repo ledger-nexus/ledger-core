@@ -57,10 +57,17 @@ export interface CreateRecurringEntryInput {
   startDate: string; // ISO date "YYYY-MM-DD"
   /** Optional sunset (inclusive). */
   endDate?: string;
+  /** STANDARD (default) posts lines verbatim; ALLOCATION computes them
+   *  from the source account's window activity by line percents. */
+  kind?: "STANDARD" | "ALLOCATION";
+  /** ALLOCATION only: the account whose activity gets allocated. */
+  allocationSourceAccountCode?: string;
   lines: Array<{
     accountCode: string;
     debit?: string | number;
     credit?: string | number;
+    /** ALLOCATION only: this target's share, 0–100. */
+    allocationPercent?: string | number;
     description?: string;
     partyCode?: string;
     itemCode?: string;
@@ -97,7 +104,46 @@ export async function createRecurringEntryAction(
     if (memo.length < 1 || memo.length > 200) {
       return { ok: false, message: "Memo must be 1–200 chars." };
     }
-    if (!input.lines || input.lines.length < 2) {
+    const kind = input.kind ?? "STANDARD";
+    if (kind === "ALLOCATION") {
+      // Allocation templates: lines are TARGETS (percent, no amounts);
+      // the clearing line against the source is generated per run.
+      const source = input.allocationSourceAccountCode?.trim();
+      if (!source) {
+        return { ok: false, message: "Allocation templates need a source account." };
+      }
+      if (!input.lines || input.lines.length < 1) {
+        return { ok: false, message: "Allocation template needs at least 1 target line." };
+      }
+      let percentSum = new Decimal(0);
+      for (const [i, l] of input.lines.entries()) {
+        if (!l.accountCode) {
+          return { ok: false, message: `Line ${i + 1}: accountCode required.` };
+        }
+        if (l.accountCode === source) {
+          return { ok: false, message: `Line ${i + 1}: a target cannot be the source account.` };
+        }
+        let pct: Decimal;
+        try {
+          pct = new Decimal(l.allocationPercent ?? 0);
+        } catch {
+          return { ok: false, message: `Line ${i + 1}: invalid percent.` };
+        }
+        if (!pct.isFinite() || pct.lessThanOrEqualTo(0) || pct.greaterThan(100)) {
+          return { ok: false, message: `Line ${i + 1}: percent must be in (0, 100].` };
+        }
+        if (new Decimal(l.debit ?? 0).greaterThan(0) || new Decimal(l.credit ?? 0).greaterThan(0)) {
+          return { ok: false, message: `Line ${i + 1}: allocation lines carry percents, not amounts.` };
+        }
+        percentSum = percentSum.plus(pct);
+      }
+      if (!percentSum.equals(100)) {
+        return {
+          ok: false,
+          message: `Allocation percents must sum to exactly 100 (got ${percentSum.toString()}).`,
+        };
+      }
+    } else if (!input.lines || input.lines.length < 2) {
       return { ok: false, message: "Template needs at least 2 lines." };
     }
 
@@ -111,6 +157,9 @@ export async function createRecurringEntryAction(
     const currencyCode = input.currencyCode ?? "USD";
 
     // ── Validate lines: balanced + non-negative + non-empty ─────────────
+    // (STANDARD only — allocation lines were validated above and carry
+    // no amounts.)
+    if (kind === "STANDARD") {
     let debitTotal = new Decimal(0);
     let creditTotal = new Decimal(0);
     for (const [i, l] of input.lines.entries()) {
@@ -142,6 +191,7 @@ export async function createRecurringEntryAction(
         ok: false,
         message: `Template unbalanced: debits ${debitTotal.toFixed(2)} ≠ credits ${creditTotal.toFixed(2)}.`,
       };
+    }
     }
 
     // ── Validate dates ───────────────────────────────────────────────────
@@ -188,12 +238,17 @@ export async function createRecurringEntryAction(
           startDate,
           endDate,
           createdBy: admin.email,
+          kind,
+          allocationSourceAccountCode:
+            kind === "ALLOCATION" ? input.allocationSourceAccountCode!.trim() : null,
           lines: {
             create: input.lines.map((l, idx) => ({
               lineNo: idx + 1,
               accountCode: l.accountCode,
               debit: new Decimal(l.debit ?? 0).toFixed(4),
               credit: new Decimal(l.credit ?? 0).toFixed(4),
+              allocationPercent:
+                kind === "ALLOCATION" ? new Decimal(l.allocationPercent ?? 0).toFixed(4) : null,
               description: l.description,
               partyCode: l.partyCode,
               itemCode: l.itemCode,
