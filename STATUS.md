@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session ic-pairing · 2026-08-04
+- **Scope**: Intercompany auto-pairing shipped — `src/lib/accounting/intercompany.ts` (pure deriveMirrorPlan + prepareIntercompanyMirror via postJournalEntry; lineage triple INTERCOMPANY/gl_entry_mirror/<source-id> is link + idempotency lock, NO schema change), `prepareMirrorAction`, JE-detail Intercompany card + mirror banner, automation-registry REVIEW entry with live count.
+- **Verification**: tsc 0; 8/8 new tests + je-approvals + consolidation green; `next build` clean; browser-driven ACME_US→ACME_UK mirror (posted, flipped 2400/5900 lines, audit row, registry count). Demo data note: ACME_US-US_GAAP-00007 + its mirror ACME_UK-US_GAAP-00007 now exist in the default tenant — intentional, they demo the feature.
+- **Branch**: feat/intercompany-pairing (worktree ~/Code/ledger-core-je-approvals).
+
 ### Session netsuite-parity-201 · 2026-08-04
 - **Scope**: Landed PR #201 (Report Builder) after merging 247 commits of main drift into it. Conflict story: the PR's tenantId threading of the legacy reports was superseded by main's #237/#238 (took main for 6 files); deficiency-log entries renumbered #30/#31 with a cross-ref marking #30 as the same finding as #15/#16. Post-June alignment: builder balances now filter `LEDGER_EFFECTIVE_STATUSES` (pending JEs were reaching builder reports — e2e regression added), template mutations gate on new `canManageReportTemplates` (ADMIN; VIEWER could previously mutate), `isBank` threaded through AccountBalance/compat, migration renumbered 0013→0038, schema fingerprint updated, nav catalog row added.
 - **Verification**: tsc 0; 127 builder-adjacent tests green (incl. authz-policy + soc2-control-matrix); `next build` clean; browser-verified clone → render (live Northwind numbers) → CSV → VIEWER affordance hiding → delete, with clone/delete audit rows confirmed in audit_log.
