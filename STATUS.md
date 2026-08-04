@@ -26,15 +26,17 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session recurring-idempotency · started 2026-08-04 · heartbeat 2026-08-04
-- **Scope**: Code-review follow-ups from the parity arc — recurring-runner lineage pre-check (a crashed run between post and bookmark wedged STANDARD templates forever), allocation month-anchor + negative-remainder guards, and one entity-scope resolver replacing the per-file copies.
-- **Files / globs**: `src/lib/accounting/{lineage,entity-scope,allocation,recurring,post-journal,intercompany}.ts`, `src/lib/accounting/reports/translation.ts`, `src/lib/automation/registry.ts`, `src/app/actions/recurring-entries.ts`, `tests/{allocation-schedules,recurring-idempotency,entity-scope}.test.ts`, `PROJECT_STATUS.md`
-- **Branch**: fix/recurring-idempotency-allocation-guards
-- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session recurring-idempotency · 2026-08-04
+- **Scope**: Code-review follow-ups on the parity arc (PR #337). Recurring runner: a crash between the post and the bookmark used to wedge a STANDARD template permanently (postJournalEntry has no dedup branch — the header claimed one — so the re-run raised P2002 forever); it now pre-checks the lineage triple and catches only the lineage-index conflict, never the entryNumber race. Allocation: month-end/MONTHLY anchor enforced at creation AND run time (a mid-month anchor silently dropped the rest of every month), plus a refusal when rounding would drive the last target negative. **The allocation form could never be submitted** — the gate wanted balanced debits/credits that allocation lines structurally don't have; now mode-aware, with percent-vocabulary footer and "+ Target line". New `entity-scope.ts` (entity shadows shared — three copies lived inside postJournalEntry alone) and `source-lineage.ts` (triple construction + conflict detection).
+- **Verification**: CI green on the merge commit (full suite + production build against a fresh DB with the lineage index). Both new regression suites verified to FAIL against the pre-fix tree — the runner test with the exact unique violation, the DOM suite 4-of-6. Browser-driven end to end: mid-month allocation refused with the guard's message, month-end accepted and the template created (the first one ever created through the UI).
+- **⚠️ For the next session**: logged-not-fixed — `entryNumber` via `count()+1` races under concurrent posts; `Decimal.set()` is an import side effect of post-journal.ts; `createRecurringEntryAction` still hand-rolls validation instead of Zod and never checks `cadence` against the enum; `getTranslatedTrialBalance` loads every line when only HISTORICAL needs them.
+- **Branch**: fix/recurring-idempotency-allocation-guards (worktree ~/Code/ledger-core-je-approvals), merged via PR #337.
 
 ### Session allocation-schedules · 2026-08-04
 - **Scope**: ALLOCATION recurring templates — migration 0040, `accounting/allocation.ts` (percent-sum-100 or refuse; last-target remainder penny invariant), runner branch (zero activity advances without posting), create action + form (kind selector, source picker, percent column), registry AUTO note.
