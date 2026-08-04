@@ -15,6 +15,11 @@
 
 import type { PrismaClient } from "@prisma/client";
 
+import {
+  IC_MIRROR_SOURCE_SYSTEM,
+  IC_MIRROR_RECORD_TYPE,
+} from "../accounting/source-lineage";
+
 export type GovernanceLevel = "SUGGEST" | "REVIEW" | "AUTO";
 export type AutomationCategory =
   | "recurring"
@@ -137,11 +142,13 @@ export async function resolveAutomationStatuses(
     }),
     // Tenant-wide by design: the mirror lands in a DIFFERENT entity than
     // the current scope, so an entity-scoped count would always miss it.
+    // Constants, not literals — this count silently zeroed if the
+    // intercompany module ever renamed its triple.
     prisma.journalEntry.count({
       where: {
         tenantId: scope.tenantId,
-        sourceSystem: "INTERCOMPANY",
-        sourceRecordType: "gl_entry_mirror",
+        sourceSystem: IC_MIRROR_SOURCE_SYSTEM,
+        sourceRecordType: IC_MIRROR_RECORD_TYPE,
       },
     }),
   ]);

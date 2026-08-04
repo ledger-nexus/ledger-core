@@ -45,6 +45,7 @@ import type { PrismaClient, Prisma, AccountType } from "@prisma/client";
 
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { getTranslationRate, resolveFxRate } from "@/lib/accounting/fx";
+import { indexEntityScopedByCode } from "@/lib/accounting/entity-scope";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -112,13 +113,7 @@ export async function getTranslatedTrialBalance(
   });
 
   // Entity-specific shadows shared (same dedup rule as getTrialBalance).
-  const byCode = new Map<string, (typeof accounts)[number]>();
-  for (const a of accounts) {
-    const existing = byCode.get(a.code);
-    if (!existing || (a.entityId !== null && existing.entityId === null)) {
-      byCode.set(a.code, a);
-    }
-  }
+  const byCode = indexEntityScopedByCode(accounts, input.entityId);
 
   const ctx = {
     fromCurrencyId: input.functionalCurrencyId,
