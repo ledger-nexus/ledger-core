@@ -40,6 +40,7 @@ import {
   EntityMissingTenantError,
 } from "./types";
 import { fireInsertRules, type FireRulesResult } from "../rules/integration";
+import { resolveFxRate } from "./fx";
 import { toDecimal } from "../utils/decimal";
 
 // Accepts either a full PrismaClient or an active TransactionClient so
@@ -142,6 +143,34 @@ export async function postJournalEntry(
   const currencyCode = input.currencyCode ?? entity.functionalCurrencyId;
   const fxRate = toDecimal(input.fxRate ?? 1);
 
+  // ---- 1b. Functional-currency measurement basis --------------------------
+  //
+  // Every line stores a functionalAmount in the ENTITY's functional
+  // currency — the balance ASC 830 current-rate translation starts from
+  // (#151's postmortem: translating the stored reporting-currency pair
+  // double-applies rates). Three derivations, cheapest first:
+  //   - entry currency == functional → the transaction amount IS the
+  //     functional measurement (rate 1, no lookup);
+  //   - functional == book reporting → the reporting amount IS it;
+  //   - three-way (txn ≠ functional ≠ reporting) → resolve txn→functional
+  //     at documentDate; FxRateNotFoundError propagates rather than
+  //     posting a silently mismeasured line.
+  // Lines may override explicitly (revaluation passes 0 — an FX true-up
+  // of the reporting view has no functional-currency substance).
+  let txnToFunctionalRate: Decimal | null = null;
+  if (
+    currencyCode !== entity.functionalCurrencyId &&
+    entity.functionalCurrencyId !== book.reportingCurrencyId &&
+    input.lines.some((l) => l.functionalAmount == null)
+  ) {
+    const resolved = await resolveFxRate(prisma, {
+      fromCurrency: currencyCode,
+      toCurrency: entity.functionalCurrencyId,
+      asOf: input.documentDate,
+    });
+    txnToFunctionalRate = resolved.rate;
+  }
+
   // ---- 2. Validate lines + compute debit/credit totals ---------------------
 
   let debitTotal = new Decimal(0);
@@ -178,6 +207,17 @@ export async function postJournalEntry(
     const txnAmount = toDecimal(line.transactionAmount ?? signed);
     const reportingAmount = toDecimal(line.reportingAmount ?? signed.times(fxRate));
 
+    // Functional measurement (see 1b). Explicit override wins so the
+    // revaluation poster can stamp 0.
+    const functionalAmount =
+      line.functionalAmount != null
+        ? toDecimal(line.functionalAmount)
+        : currencyCode === entity.functionalCurrencyId
+          ? txnAmount
+          : entity.functionalCurrencyId === book.reportingCurrencyId
+            ? reportingAmount
+            : txnAmount.times(txnToFunctionalRate!);
+
     return {
       lineNo: idx + 1,
       accountCode: line.accountCode,
@@ -187,6 +227,7 @@ export async function postJournalEntry(
       credit,
       transactionAmount: txnAmount,
       reportingAmount,
+      functionalAmount,
       description: line.description,
       extensions: line.extensions,
     };
@@ -437,6 +478,8 @@ export async function postJournalEntry(
             transactionCurrencyId: currencyCode,
             reportingAmount: l.reportingAmount.toFixed(4),
             reportingCurrencyId: book.reportingCurrencyId,
+            functionalAmount: l.functionalAmount.toFixed(4),
+            functionalCurrencyId: entity.functionalCurrencyId,
             description: l.description,
             extensions: (l.extensions as any) ?? undefined,
           })),

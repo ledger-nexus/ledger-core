@@ -109,7 +109,7 @@ export async function postRevaluation(
       code: scope.entityCode,
       ...(scope.tenantId ? { tenantId: scope.tenantId } : {}),
     },
-    select: { id: true, tenantId: true },
+    select: { id: true, tenantId: true, functionalCurrencyId: true },
   });
   if (!entity) throw new RevaluationScopeError(`Unknown entity: ${scope.entityCode}`);
 
@@ -170,14 +170,31 @@ export async function postRevaluation(
 
   const reportingDecimals = await reportingCurrencyDecimals(prisma, computed.reportingCurrency);
 
-  const adjustmentLines = [...accountLines, offsetLine].map((l) =>
-    signedToLine(l, reportingDecimals)
-  );
+  // Functional-currency measurement of a revaluation line:
+  //   functional == reporting (the usual USD/USD case): remeasurement
+  //     gain/loss on foreign-denominated monetary items is REAL
+  //     functional income — let postJournalEntry derive it normally.
+  //   functional ≠ reporting (foreign sub under the temporal method):
+  //     the adjustment trues the REPORTING view only; in the entity's
+  //     own functional currency nothing happened — stamp 0 explicitly,
+  //     or current-rate translation would double-count the true-up
+  //     (the #151 compounding case: 1200 × 1.30 on top of a CLOSE-rate
+  //     revaluation → 1690 vs the correct 1300).
+  const functionalOverride =
+    entity.functionalCurrencyId === computed.reportingCurrency
+      ? {}
+      : { functionalAmount: 0 };
+
+  const adjustmentLines = [...accountLines, offsetLine].map((l) => ({
+    ...signedToLine(l, reportingDecimals),
+    ...functionalOverride,
+  }));
   // Reversal flips debit <-> credit on every line.
   const reversalLines = adjustmentLines.map((l) => ({
     accountCode: l.accountCode,
     debit: l.credit,
     credit: l.debit,
+    ...functionalOverride,
   }));
 
   const reversalDate =
