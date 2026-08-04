@@ -133,6 +133,7 @@ export async function getIncomeStatementViaBuilder(
         amount,
         parentCode: b.parentCode,
         isContra: b.isContra,
+        isBank: false, // legacy IS rows never carry the flag
       });
     } else if (b.type === "EXPENSE") {
       // legacy: amount = debit - credit
@@ -143,6 +144,7 @@ export async function getIncomeStatementViaBuilder(
         amount,
         parentCode: b.parentCode,
         isContra: b.isContra,
+        isBank: false, // legacy IS rows never carry the flag
       });
     }
   }
@@ -248,6 +250,7 @@ export async function getBalanceSheetViaBuilder(
         amount,
         parentCode: b.parentCode,
         isContra: b.isContra,
+        isBank: b.isBank,
       });
     } else if (b.type === "LIABILITY") {
       const amount = b.credit.minus(b.debit);
@@ -257,6 +260,7 @@ export async function getBalanceSheetViaBuilder(
         amount,
         parentCode: b.parentCode,
         isContra: b.isContra,
+        isBank: b.isBank,
       });
     } else if (b.type === "EQUITY") {
       const amount = b.credit.minus(b.debit);
@@ -266,6 +270,7 @@ export async function getBalanceSheetViaBuilder(
         amount,
         parentCode: b.parentCode,
         isContra: b.isContra,
+        isBank: b.isBank,
       });
     }
   }
@@ -277,6 +282,7 @@ export async function getBalanceSheetViaBuilder(
     amount: retainedEarnings,
     parentCode: null,
     isContra: false,
+    isBank: false,
   });
 
   return {

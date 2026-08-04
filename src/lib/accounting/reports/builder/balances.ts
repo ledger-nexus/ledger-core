@@ -37,6 +37,8 @@ export interface AccountBalance {
   /** Signed balance: debit-positive for ASSET/EXPENSE, credit-positive for LIABILITY/EQUITY/REVENUE. */
   balance: Decimal;
   isContra: boolean;
+  /** Mirrors Account.isBank — compat shims need it for legacy BS rows. */
+  isBank: boolean;
   parentCode: string | null;
 }
 
@@ -183,6 +185,7 @@ export async function getAccountBalances(
       credit,
       balance,
       isContra: acct.isContra,
+      isBank: acct.isBank,
       parentCode: acct.parent?.code ?? null,
     });
   }

@@ -41,6 +41,7 @@ function makeBalance(over: Partial<AccountBalance> & { code: string; balance: De
     credit: over.credit ?? new Decimal(0),
     balance: over.balance,
     isContra: over.isContra ?? false,
+    isBank: over.isBank ?? false,
     parentCode: over.parentCode ?? null,
   };
 }
