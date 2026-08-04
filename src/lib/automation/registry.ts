@@ -20,7 +20,8 @@ export type AutomationCategory =
   | "recurring"
   | "categorization"
   | "matching"
-  | "notification";
+  | "notification"
+  | "intercompany";
 
 export interface AutomationDef {
   id: string;
@@ -77,6 +78,20 @@ export const AUTOMATIONS: AutomationDef[] = [
     provenance: "Sends notifications only; never posts to the ledger.",
     href: "/admin/notification-channels",
   },
+  {
+    id: "intercompany-mirror",
+    name: "Intercompany mirror",
+    category: "intercompany",
+    // REVIEW, not AUTO: a human clicks it on a specific entry, the
+    // derivation is mechanical (pair the subtype, flip the side), and
+    // the result follows the tenant's normal approval routing — it is
+    // never a background job.
+    description:
+      "Derives the counterparty half of an intercompany entry — due-from becomes due-to, IC revenue becomes IC expense — when you ask for it on the entry page.",
+    governanceLevel: "REVIEW",
+    provenance: "Stamped SYSTEM with INTERCOMPANY lineage back to the source entry.",
+    href: "/journal-entries",
+  },
 ];
 
 export interface AutomationStatus {
@@ -106,7 +121,7 @@ export async function resolveAutomationStatuses(
     book: { code: scope.bookCode },
   };
 
-  const [recurringActive, learnedRules, matched, channels] = await Promise.all([
+  const [recurringActive, learnedRules, matched, channels, icMirrors] = await Promise.all([
     prisma.recurringEntry.count({
       where: { tenantId: scope.tenantId, isActive: true, ...scoped },
     }),
@@ -116,6 +131,15 @@ export async function resolveAutomationStatuses(
     }),
     prisma.notificationChannel.count({
       where: { tenantId: scope.tenantId, enabled: true },
+    }),
+    // Tenant-wide by design: the mirror lands in a DIFFERENT entity than
+    // the current scope, so an entity-scoped count would always miss it.
+    prisma.journalEntry.count({
+      where: {
+        tenantId: scope.tenantId,
+        sourceSystem: "INTERCOMPANY",
+        sourceRecordType: "gl_entry_mirror",
+      },
     }),
   ]);
 
@@ -148,6 +172,14 @@ export async function resolveAutomationStatuses(
         channels > 0
           ? `${channels} channel${channels === 1 ? "" : "s"} connected`
           : "Not configured — no channels connected, so no alerts are sent",
+    },
+    "intercompany-mirror": {
+      // Like bank-match: an on-demand offer, not a stored rule.
+      active: true,
+      detail:
+        icMirrors > 0
+          ? `${icMirrors} mirror${icMirrors === 1 ? "" : "s"} prepared in this workspace`
+          : "Ready — open a posted intercompany entry to prepare its counterparty half",
     },
   };
 }

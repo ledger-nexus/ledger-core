@@ -11,13 +11,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
-import { canModerateNotes, canApproveJournalEntries } from "@/lib/auth/policy";
+import {
+  canModerateNotes,
+  canApproveJournalEntries,
+  canPostJournalEntries,
+} from "@/lib/auth/policy";
 import { ApprovalActions } from "./approval-actions";
 import { WithdrawAction } from "./withdraw-action";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { getEntryLineage } from "@/lib/accounting/lineage";
+import { resolveApprovalRoute } from "@/lib/accounting/approval-threshold";
+import {
+  IC_SUBTYPE_PAIR,
+  IC_MIRROR_SOURCE_SYSTEM,
+  IC_MIRROR_RECORD_TYPE,
+  findMirrorOfEntry,
+} from "@/lib/accounting/intercompany";
 import ReverseButton from "./reverse-button";
 import NotesCard from "./notes-card";
+import PrepareMirrorButton from "./prepare-mirror-button";
 
 export default async function JournalEntryDetailPage({
   params,
@@ -39,7 +51,7 @@ export default async function JournalEntryDetailPage({
       currency: { select: { code: true } },
       lines: {
         include: {
-          account: { select: { code: true, name: true } },
+          account: { select: { code: true, name: true, subtype: true } },
           party: { select: { code: true, displayName: true } },
         },
         orderBy: { lineNo: "asc" },
@@ -79,6 +91,55 @@ export default async function JournalEntryDetailPage({
     (acc, l) => acc.plus(new Decimal(l.credit.toString())),
     new Decimal(0)
   );
+
+  // ---- Intercompany pairing state ---------------------------------------
+  // A mirror knows its source via lineage; a source with IC-subtype lines
+  // gets the pairing card (link to the mirror if one exists, otherwise
+  // the prepare affordance with a mechanical preview of the derivation).
+  const isMirror =
+    entry.sourceSystem === IC_MIRROR_SOURCE_SYSTEM &&
+    entry.sourceRecordType === IC_MIRROR_RECORD_TYPE;
+  const mirrorSource =
+    isMirror && entry.sourceRecordId
+      ? await prisma.journalEntry.findFirst({
+          where: { id: entry.sourceRecordId, tenantId: entry.tenantId },
+          select: { id: true, entryNumber: true, entity: { select: { code: true } } },
+        })
+      : null;
+  const icLines = entry.lines.filter(
+    (l) => l.account.subtype && IC_SUBTYPE_PAIR[l.account.subtype]
+  );
+  const existingMirror =
+    !isMirror && icLines.length > 0
+      ? await findMirrorOfEntry(prisma, { tenantId: entry.tenantId, entryId: entry.id })
+      : null;
+  const showPrepareCard =
+    !isMirror && icLines.length > 0 && entry.status === "POSTED" && !existingMirror;
+  let counterpartyOptions: { code: string; name: string }[] = [];
+  let mirrorPostsDirectly = false;
+  if (showPrepareCard && tenant) {
+    const siblings = await prisma.legalEntity.findMany({
+      where: { tenantId: entry.tenantId, id: { not: entry.entityId } },
+      select: { code: true, name: true },
+      orderBy: { code: "asc" },
+    });
+    counterpartyOptions = siblings;
+    // Same routing the mirror will actually take, so the button label
+    // ("Post" vs "Submit for approval") never lies.
+    const tenantConfig = await prisma.tenant.findUnique({
+      where: { id: entry.tenantId },
+      select: { requireJeApproval: true, jeApprovalMinAmount: true },
+    });
+    mirrorPostsDirectly =
+      resolveApprovalRoute({
+        requireJeApproval: tenantConfig?.requireJeApproval ?? false,
+        jeApprovalMinAmount: tenantConfig?.jeApprovalMinAmount
+          ? new Decimal(tenantConfig.jeApprovalMinAmount.toString())
+          : null,
+        entryTotal: totalDebit,
+        actorIsApprover: canApproveJournalEntries(tenant.role),
+      }) === "POSTED";
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -177,6 +238,27 @@ export default async function JournalEntryDetailPage({
         </div>
       )}
 
+      {isMirror && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+          <span className="font-medium">Intercompany mirror</span> — the
+          counterparty half of{" "}
+          {mirrorSource ? (
+            <>
+              <Link
+                href={`/journal-entries/${mirrorSource.id}`}
+                className="font-mono text-link hover:underline"
+              >
+                {mirrorSource.entryNumber}
+              </Link>{" "}
+              ({mirrorSource.entity.code})
+            </>
+          ) : (
+            <span className="font-mono">{entry.sourceRecordId}</span>
+          )}
+          . Lines are subtype-paired and side-flipped from the source.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Field label="Entity" value={entry.entity.code} />
         <Field label="Book" value={entry.book.code} />
@@ -259,6 +341,96 @@ export default async function JournalEntryDetailPage({
           </Table>
         </CardContent>
       </Card>
+
+      {(existingMirror || showPrepareCard) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Intercompany</CardTitle>
+            <span className="text-xs text-ink-500">
+              {icLines.length} intercompany line{icLines.length === 1 ? "" : "s"} on this entry
+            </span>
+          </CardHeader>
+          <CardContent>
+            {existingMirror ? (
+              <p className="text-sm text-ink-700">
+                Mirror{" "}
+                <Link
+                  href={`/journal-entries/${existingMirror.id}`}
+                  className="font-mono text-link hover:underline"
+                >
+                  {existingMirror.entryNumber}
+                </Link>{" "}
+                in <span className="font-mono">{existingMirror.entityCode}</span>{" "}
+                <Badge
+                  tone={
+                    existingMirror.status === "PENDING_APPROVAL"
+                      ? "warning"
+                      : existingMirror.status === "VOID"
+                        ? "negative"
+                        : "positive"
+                  }
+                >
+                  {existingMirror.status}
+                </Badge>
+                {existingMirror.status === "VOID" && (
+                  <span className="ml-2 text-xs text-ink-500">
+                    The prepared mirror was rejected — that decision stands; post the
+                    counterparty half manually if it is still needed.
+                  </span>
+                )}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {/* Mechanical preview — counterparty-independent: the
+                    subtype pairing and side flip are fixed; only the
+                    account CODE resolves per counterparty (or refuses). */}
+                <ul className="flex flex-col gap-1 text-xs text-ink-600">
+                  {entry.lines.map((l) => {
+                    const paired = l.account.subtype
+                      ? IC_SUBTYPE_PAIR[l.account.subtype]
+                      : undefined;
+                    const debit = new Decimal(l.debit.toString());
+                    const isDebit = debit.greaterThan(0);
+                    const amount = isDebit ? l.debit.toString() : l.credit.toString();
+                    return (
+                      <li key={l.id} className="font-mono">
+                        {l.account.code} {isDebit ? "DR" : "CR"} {formatMoney(amount)} →{" "}
+                        {paired ? (
+                          <>
+                            counterparty {paired} {isDebit ? "CR" : "DR"} {formatMoney(amount)}
+                          </>
+                        ) : (
+                          <span className="text-red-600">
+                            no intercompany subtype — blocks the mirror
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {tenant && canPostJournalEntries(tenant.role) ? (
+                  counterpartyOptions.length > 0 ? (
+                    <PrepareMirrorButton
+                      sourceEntryId={entry.id}
+                      counterpartyOptions={counterpartyOptions}
+                      postsDirectly={mirrorPostsDirectly}
+                    />
+                  ) : (
+                    <p className="text-xs text-ink-500">
+                      This tenant has no other entity to mirror into.
+                    </p>
+                  )
+                ) : (
+                  <p className="text-xs text-ink-500">
+                    Preparing the mirror posts a journal entry — a MEMBER or above can
+                    do it.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <NotesCard
         entryId={entry.id}
