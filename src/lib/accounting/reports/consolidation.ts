@@ -19,6 +19,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { getTrialBalance } from "../reports";
+import { getTranslatedTrialBalance } from "./translation";
 import { signFor } from "../types";
 
 const IC_ASSET_SUBTYPES = ["DUE_FROM_AFFILIATE"];
@@ -87,6 +88,22 @@ export interface ConsolidationReport {
   netIcImbalance: Decimal;
 
   /**
+   * ASC 830 current-rate translation (Phase B). Active when the caller
+   * supplied `periodStart` AND at least one included entity's functional
+   * currency differs from the book's reporting currency. Foreign
+   * entities' balances are translated from their per-line FUNCTIONAL
+   * amounts (#334) at category rates; the balancing plug appears both
+   * here and as the synthetic "CTA" equity row so the consolidated
+   * totals still balance.
+   */
+  translationActive: boolean;
+  /** Per-entity CLOSE rate used for CURRENT_RATE accounts; null for
+   *  same-currency entities (no translation ran). */
+  translationRateByEntity: Record<string, string | null>;
+  /** Total CTA plug, credit-positive (equity presentation). */
+  cumulativeTranslationAdjustment: Decimal;
+
+  /**
    * True iff the included entities have more than one distinct
    * functional currency. When true, the consolidated totals are NOT
    * FX-translated — they're naïve sums of each entity's debit/credit
@@ -105,6 +122,13 @@ export async function getConsolidatedTrialBalance(
     rootEntityCode: string;
     bookCode?: string;
     asOf: Date;
+    /**
+     * First day of the consolidation period. Supplying it turns on
+     * ASC 830 current-rate translation for foreign-functional entities
+     * (WEIGHTED_AVG needs the period's start rate). Omitted → the
+     * legacy naïve-sum behavior with the disclosure banner.
+     */
+    periodStart?: Date;
     /**
      * Tenant the root entity must belong to. UI/API callers MUST pass
      * this (from the session, never from client input) — the root code
@@ -173,15 +197,49 @@ export async function getConsolidatedTrialBalance(
   // entity resolution to the root's tenant — entity codes are only
   // unique per tenant (Phase 4b), so an unscoped lookup could resolve a
   // same-code entity in another tenant.
+  //
+  // Translation branch (Phase B): with periodStart supplied, every
+  // entity whose functional currency differs from the book's reporting
+  // currency contributes a TRANSLATED TB — per-line functional amounts
+  // (#334) at category rates — instead of its stored reporting values.
+  // Same-currency entities pass through getTrialBalance unchanged, so a
+  // single-currency group is byte-identical with or without periodStart.
+  const book = await prisma.book.findUniqueOrThrow({
+    where: { code: bookCode },
+    select: { id: true, reportingCurrencyId: true },
+  });
+  const translationActive =
+    input.periodStart != null &&
+    included.some((e) => e.functionalCurrencyId !== book.reportingCurrencyId);
+  const translationRateByEntity: Record<string, string | null> = {};
+  const ctaByEntity = new Map<string, Decimal>();
+
   const perEntityTbs = await Promise.all(
-    included.map(async (e) => ({
-      entity: e,
-      tb: await getTrialBalance(
+    included.map(async (e) => {
+      if (translationActive && e.functionalCurrencyId !== book.reportingCurrencyId) {
+        const translated = await getTranslatedTrialBalance(prisma, {
+          tenantId: root.tenantId,
+          entityId: e.id,
+          functionalCurrencyId: e.functionalCurrencyId,
+          bookId: book.id,
+          reportingCurrencyId: book.reportingCurrencyId,
+          periodStart: input.periodStart!,
+          asOf: input.asOf,
+        });
+        translationRateByEntity[e.code] = translated.currentRate.toString();
+        if (!translated.ctaCreditPositive.isZero()) {
+          ctaByEntity.set(e.code, translated.ctaCreditPositive);
+        }
+        return { entity: e, rows: translated.rows };
+      }
+      translationRateByEntity[e.code] = null;
+      const tb = await getTrialBalance(
         prisma,
         { entityCode: e.code, bookCode, tenantId: root.tenantId },
         input.asOf
-      ),
-    }))
+      );
+      return { entity: e, rows: tb.rows };
+    })
   );
 
   // Aggregate by accountCode.
@@ -194,8 +252,8 @@ export async function getConsolidatedTrialBalance(
   };
   const aggregates = new Map<string, Aggregate>();
 
-  for (const { entity, tb } of perEntityTbs) {
-    for (const row of tb.rows) {
+  for (const { entity, rows: entityRows } of perEntityTbs) {
+    for (const row of entityRows) {
       const existing = aggregates.get(row.accountCode);
       const debit = row.debit;
       const credit = row.credit;
@@ -211,6 +269,28 @@ export async function getConsolidatedTrialBalance(
         });
       }
     }
+  }
+
+  // Synthetic CTA row — the translation plug lives IN the trial balance
+  // (like the BS's computed "RE" row) so the consolidated totals still
+  // balance; the field on the report carries the same number for the
+  // banner. No subtype → never classified as an elimination.
+  const totalCta = Array.from(ctaByEntity.values()).reduce(
+    (a, v) => a.plus(v),
+    new Decimal(0)
+  );
+  if (translationActive && !totalCta.isZero()) {
+    aggregates.set("CTA", {
+      code: "CTA",
+      name: "Cumulative translation adjustment (computed)",
+      type: "EQUITY",
+      isContra: false,
+      perEntity: Array.from(ctaByEntity.entries()).map(([entityCode, v]) => ({
+        entityCode,
+        debit: v.lessThan(0) ? v.negated() : new Decimal(0),
+        credit: v.greaterThan(0) ? v : new Decimal(0),
+      })),
+    });
   }
 
   // Pull account metadata (subtype + isContra) for classification.
@@ -333,6 +413,9 @@ export async function getConsolidatedTrialBalance(
     consolidatedTotalCredit: consolTotalCredit,
     balances: consolTotalDebit.equals(consolTotalCredit),
     netIcImbalance,
+    translationActive,
+    translationRateByEntity,
+    cumulativeTranslationAdjustment: totalCta,
     hasMultiCurrency: distinctCurrencies.length > 1,
     distinctCurrencies,
   };
