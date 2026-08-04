@@ -41,6 +41,7 @@ export default async function RecurringEntriesPage() {
       code: true,
       memo: true,
       cadence: true,
+      kind: true,
       startDate: true,
       endDate: true,
       lastPostedDate: true,
@@ -65,6 +66,7 @@ export default async function RecurringEntriesPage() {
           lastPostedDate: t.lastPostedDate,
           endDate: t.endDate,
           throughDate: today,
+          snapToMonthEnd: t.kind === "ALLOCATION",
         })
       : [];
     return { ...t, dueCount: due.length, nextDueDate: due[0] ?? null };

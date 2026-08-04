@@ -62,6 +62,7 @@ export default async function RecurringDetail({
         lastPostedDate: t.lastPostedDate,
         endDate: t.endDate,
         throughDate: today,
+        snapToMonthEnd: t.kind === "ALLOCATION",
       })
     : [];
 

@@ -224,6 +224,43 @@ describe("enumerateDueDates", () => {
     ]);
   });
 
+  it("snapToMonthEnd keeps an allocation schedule on month ends", () => {
+    // Without the snap, a 30 Jun start anchors on day 30 and steps to
+    // 30 Jul — not a month end, so the allocation window would cover
+    // 1–30 Jul and the run would refuse. Only a 31st start survived.
+    const dates = enumerateDueDates({
+      cadence: "MONTHLY",
+      startDate: new Date("2026-06-30"),
+      lastPostedDate: null,
+      endDate: null,
+      throughDate: new Date("2026-09-30"),
+      snapToMonthEnd: true,
+    });
+    expect(dates.map((d) => d.toISOString().slice(0, 10))).toEqual([
+      "2026-06-30",
+      "2026-07-31",
+      "2026-08-31",
+      "2026-09-30",
+    ]);
+  });
+
+  it("snapToMonthEnd is inert on a schedule already anchored to the 31st", () => {
+    const snapped = enumerateDueDates({
+      cadence: "MONTHLY",
+      startDate: new Date("2026-01-31"),
+      lastPostedDate: null,
+      endDate: null,
+      throughDate: new Date("2026-04-30"),
+      snapToMonthEnd: true,
+    });
+    expect(snapped.map((d) => d.toISOString().slice(0, 10))).toEqual([
+      "2026-01-31",
+      "2026-02-28",
+      "2026-03-31",
+      "2026-04-30",
+    ]);
+  });
+
   it("no due dates when current state is already past throughDate", () => {
     const dates = enumerateDueDates({
       cadence: "MONTHLY",

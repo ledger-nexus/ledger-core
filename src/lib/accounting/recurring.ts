@@ -43,7 +43,11 @@
 import type { PrismaClient, Cadence } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "./post-journal";
-import { computeAllocationLines, resolveSourceActivity } from "./allocation";
+import {
+  computeAllocationLines,
+  endOfMonth,
+  resolveSourceActivity,
+} from "./allocation";
 import {
   findEntryBySourceLineage,
   isSourceLineageConflict,
@@ -131,16 +135,31 @@ export function enumerateDueDates(input: {
   lastPostedDate: Date | null;
   endDate: Date | null;
   throughDate: Date;
+  /**
+   * ALLOCATION templates are month-END schedules — they clear a whole
+   * month — but the cadence anchors on the start date's DAY, so a
+   * template starting 30 Jun would otherwise step to 30 Jul, which is
+   * not a month end. Snapping each step to its month end keeps every
+   * run aligned with the window it allocates. Idempotent: a date
+   * already at month end is unchanged, so 31 Jan → 28 Feb → 31 Mar
+   * behaves exactly as before.
+   *
+   * Every projection of the schedule (list page, detail page, dashboard
+   * "due today") must pass the same flag as the runner, or the UI
+   * promises a date the engine will not use.
+   */
+  snapToMonthEnd?: boolean;
 }): Date[] {
   const { cadence, startDate, lastPostedDate, endDate, throughDate } = input;
+  const step = (d: Date) => (input.snapToMonthEnd ? endOfMonth(d) : d);
   const out: Date[] = [];
-  let cursor = nextDocDate(cadence, startDate, lastPostedDate);
+  let cursor = step(nextDocDate(cadence, startDate, lastPostedDate));
   const stopAt = endDate && endDate < throughDate ? endDate : throughDate;
   // Safety: cap at 1000 iterations so a misconfigured template can't
   // hang the runner. Real cadences hit this only after centuries.
   for (let i = 0; i < 1000 && cursor <= stopAt; i++) {
     out.push(cursor);
-    cursor = nextDocDate(cadence, startDate, cursor);
+    cursor = step(nextDocDate(cadence, startDate, cursor));
   }
   return out;
 }
@@ -179,6 +198,7 @@ export async function runRecurringEntries(
       lastPostedDate: template.lastPostedDate,
       endDate: template.endDate,
       throughDate: input.throughDate,
+      snapToMonthEnd: template.kind === "ALLOCATION",
     });
 
     if (dueDates.length === 0) {

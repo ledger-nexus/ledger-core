@@ -57,12 +57,14 @@ export function allocationWindowStart(docDate: Date): Date {
   return new Date(Date.UTC(docDate.getUTCFullYear(), docDate.getUTCMonth(), 1));
 }
 
+/** Last day of `d`'s month (UTC). Idempotent on a date already month-end. */
+export function endOfMonth(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+}
+
 /** True when `d` is the last day of its month (UTC). */
 export function isMonthEnd(d: Date): boolean {
-  const lastDay = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
-  ).getUTCDate();
-  return d.getUTCDate() === lastDay;
+  return d.getUTCDate() === endOfMonth(d).getUTCDate();
 }
 
 /**
