@@ -40,6 +40,7 @@ import {
   runRecurringEntries,
   enumerateDueDates,
 } from "@/lib/accounting/recurring";
+import { isMonthEnd } from "@/lib/accounting/allocation";
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
@@ -205,6 +206,27 @@ export async function createRecurringEntryAction(
     }
     if (endDate && endDate < startDate) {
       return { ok: false, message: "endDate must be on or after startDate." };
+    }
+    // Allocation windows run [first of month, run date], so anything but
+    // a month-end MONTHLY anchor leaves part of every month unallocated
+    // with nothing to show for it. Refuse at creation — the runner
+    // refuses too, but a user should never get a template that can only
+    // fail. (v1 bound; a period-derived window would lift it.)
+    if (kind === "ALLOCATION") {
+      if (input.cadence !== "MONTHLY") {
+        return {
+          ok: false,
+          message:
+            "Allocation templates run monthly — a quarterly or annual cadence would skip the months in between.",
+        };
+      }
+      if (!isMonthEnd(startDate)) {
+        return {
+          ok: false,
+          message:
+            "Allocation templates must start on a month-end date — the schedule allocates a full month at a time.",
+        };
+      }
     }
 
     // ── Create ───────────────────────────────────────────────────────────

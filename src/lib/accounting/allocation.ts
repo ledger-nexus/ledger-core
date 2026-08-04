@@ -27,6 +27,7 @@ import { Decimal } from "decimal.js";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { LEDGER_EFFECTIVE_STATUSES } from "./types";
+import { pickEntityScoped } from "./entity-scope";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -54,6 +55,37 @@ export interface AllocationLine {
 /** First day of the docDate's month — the run window opens here. */
 export function allocationWindowStart(docDate: Date): Date {
   return new Date(Date.UTC(docDate.getUTCFullYear(), docDate.getUTCMonth(), 1));
+}
+
+/** True when `d` is the last day of its month (UTC). */
+export function isMonthEnd(d: Date): boolean {
+  const lastDay = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  return d.getUTCDate() === lastDay;
+}
+
+/**
+ * The window is [first of month, docDate], so a template anchored
+ * anywhere but month-end allocates only part of each month and the
+ * rest is never picked up by anything — silent under-allocation, the
+ * worst failure a close task can have. v1 refuses instead: allocation
+ * templates are month-end MONTHLY schedules (a quarterly cadence would
+ * drop the quarter's first two months for the same reason). Enforced
+ * at template creation AND here, because a template edited around the
+ * action — a seed, a script, a restored row — must still refuse rather
+ * than quietly allocate a fraction.
+ *
+ * Lifting this means deriving the window from the fiscal period rather
+ * than the calendar month; the follow-up is noted in PROJECT_STATUS.
+ */
+export function assertMonthEndAnchor(docDate: Date): void {
+  if (!isMonthEnd(docDate)) {
+    throw new AllocationTemplateError(
+      `Allocation runs must be anchored to month-end (got ${docDate.toISOString().slice(0, 10)}); ` +
+        `a mid-month anchor would leave the rest of each month unallocated.`
+    );
+  }
 }
 
 /**
@@ -97,6 +129,19 @@ export function computeAllocationLines(input: {
     const portion = isLast
       ? magnitude.minus(allocated)
       : magnitude.times(t.percent).dividedBy(100).toDecimalPlaces(2);
+    // Each non-last portion rounds independently, so on a pool small
+    // relative to the target count they can round UP past the pool:
+    // 0.05 across eight targets is 0.00625 each, which rounds to 0.01,
+    // and the first seven already consume 0.07. The remainder would
+    // then go negative and postJournalEntry would refuse it as a
+    // negative amount — an error about the wrong thing. Refuse here,
+    // in the vocabulary of what is actually wrong.
+    if (portion.isNegative()) {
+      throw new AllocationTemplateError(
+        `Allocation of ${magnitude.toFixed(2)} across ${input.targets.length} targets rounds to more ` +
+          `than the amount available — the pool is too small to split at these percents.`
+      );
+    }
     allocated = allocated.plus(portion);
     if (portion.isZero()) return;
     lines.push({
@@ -133,6 +178,8 @@ export async function resolveSourceActivity(
     docDate: Date;
   }
 ): Promise<Decimal> {
+  assertMonthEndAnchor(input.docDate);
+
   const candidates = await prisma.account.findMany({
     where: {
       tenantId: input.tenantId,
@@ -142,13 +189,12 @@ export async function resolveSourceActivity(
     },
     select: { id: true, entityId: true },
   });
-  if (candidates.length === 0) {
+  const account = pickEntityScoped(candidates, input.entityId);
+  if (!account) {
     throw new AllocationTemplateError(
       `Allocation source account ${input.sourceAccountCode} not found.`
     );
   }
-  const account =
-    candidates.find((c) => c.entityId === input.entityId) ?? candidates[0];
 
   const sums = await prisma.journalLine.aggregate({
     where: {
