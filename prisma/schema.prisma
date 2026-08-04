@@ -170,6 +170,7 @@ model Tenant {
   bankTransactions          BankTransaction[]
   emailDeliveries           EmailDelivery[]
   invites                   TenantInvite[]
+  reportTemplates           ReportTemplate[]
 
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
@@ -2305,6 +2306,37 @@ enum NotificationCategory {
   APPROVAL_NEEDED // record is in your queue awaiting action
   ORPHAN_DETECTED // a record you previously owned is now an orphan
   SYSTEM // catch-all for engine-level events
+}
+
+// ---- Report Builder (v0.10) ----
+//
+// User-saved + system-default report templates. Definition is a Json
+// blob serialized from the ReportTemplateDefinition type in
+// src/lib/accounting/reports/builder/types.ts. System templates (the 4
+// GAAP financial statements) seed per-tenant via seedSystemTemplates;
+// isSystem rows are owner-protected (only admins clone/edit; tenant
+// admins can clone but not edit the system originals).
+//
+// See docs/report-builder-design.md for the full DSL spec.
+model ReportTemplate {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String @db.Uuid
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code      String // "IS" / "BS" / "CF" / "EQ" / "MY-CUSTOM-1"
+  name      String
+  isSystem  Boolean @default(false)
+  // Serialized ReportTemplateDefinition — rows + columns + presentation.
+  // Validated at write-time by the Server Action / route handler that
+  // creates or updates the template.
+  definition Json
+  version   Int     @default(1)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("report_template")
 }
 
 // =========================================================================

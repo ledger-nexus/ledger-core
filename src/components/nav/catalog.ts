@@ -87,6 +87,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/reports/m3-detail", label: "M-3 detail", hint: "Form 1120" },
       { href: "/reports/fx-revaluation", label: "FX revaluation", hint: "ASC 830" },
       { href: "/reports/consolidation", label: "Consolidation", hint: "multi-entity" },
+      { href: "/reports/builder", label: "Report builder", hint: "custom statements" },
     ],
   },
   {

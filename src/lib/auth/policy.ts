@@ -122,6 +122,15 @@ export const canModerateNotes = (role: TenantRole | undefined | null): boolean =
 export const canManageNotificationChannels = (role: TenantRole | undefined | null): boolean =>
   meets(role, "ADMIN");
 
+// Report templates are tenant-wide statement presentation: a bad edit
+// changes what every reader's financials LOOK like (row labels, sign
+// flips, subtotal membership). Same floor as canEditAccounts — and like
+// it, relaxing to MEMBER is a one-line policy decision if customization
+// becomes an accountant workflow. Viewing/rendering templates stays
+// VIEWER+ via canViewReports.
+export const canManageReportTemplates = (role: TenantRole | undefined | null): boolean =>
+  meets(role, "ADMIN");
+
 // Consumer arrives with the team-invites slice.
 export const canManageMemberships = (role: TenantRole | undefined | null): boolean =>
   meets(role, "ADMIN");
