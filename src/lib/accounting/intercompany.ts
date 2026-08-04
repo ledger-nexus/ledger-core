@@ -33,11 +33,19 @@ import { Decimal } from "decimal.js";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { postJournalEntry } from "./post-journal";
+import { entityScopedPool } from "./entity-scope";
+import {
+  findEntryBySourceLineage,
+  sourceLineage,
+  IC_MIRROR_SOURCE_SYSTEM,
+  IC_MIRROR_RECORD_TYPE,
+} from "./source-lineage";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
-export const IC_MIRROR_SOURCE_SYSTEM = "INTERCOMPANY";
-export const IC_MIRROR_RECORD_TYPE = "gl_entry_mirror";
+// Re-exported: the JE detail page and the automation registry read
+// these, and the canonical definition now lives with the other triples.
+export { IC_MIRROR_SOURCE_SYSTEM, IC_MIRROR_RECORD_TYPE };
 
 /** Subtype pairing — the accounting identity of the two halves. */
 export const IC_SUBTYPE_PAIR: Record<string, string> = {
@@ -105,10 +113,10 @@ export function deriveMirrorPlan(
       continue;
     }
 
+    // Entity-scoped beats shared; ties within a tier are ambiguous, so
+    // this takes the whole winning tier rather than a single winner.
     const matches = candidates.filter((c) => c.subtype === paired);
-    // Entity-scoped beats shared; ties within a tier are ambiguous.
-    const entityScoped = matches.filter((c) => c.entityId === counterpartyEntityId);
-    const pool = entityScoped.length > 0 ? entityScoped : matches;
+    const pool = entityScopedPool(matches, counterpartyEntityId);
 
     if (pool.length === 0) {
       blockers.push(
@@ -255,15 +263,11 @@ export async function prepareIntercompanyMirror(
   // Idempotency pre-check for a friendly error; the lineage unique index
   // on (tenantId, bookId, sourceSystem, sourceRecordType, sourceRecordId)
   // is the structural backstop under a true race.
-  const existing = await prisma.journalEntry.findFirst({
-    where: {
-      tenantId: input.tenantId,
-      bookId: source.book.id,
-      sourceSystem: IC_MIRROR_SOURCE_SYSTEM,
-      sourceRecordType: IC_MIRROR_RECORD_TYPE,
-      sourceRecordId: source.id,
-    },
-    select: { id: true, entryNumber: true, status: true },
+  const mirrorLineage = sourceLineage.icMirror(source.id);
+  const existing = await findEntryBySourceLineage(prisma, {
+    tenantId: input.tenantId,
+    bookId: source.book.id,
+    lineage: mirrorLineage,
   });
   if (existing) {
     throw new IntercompanyMirrorError(
@@ -326,9 +330,7 @@ export async function prepareIntercompanyMirror(
     ownerUserId: input.actor.id,
     initialStatus: input.route,
     submittedByUserId: input.route === "PENDING_APPROVAL" ? input.actor.id : undefined,
-    sourceSystem: IC_MIRROR_SOURCE_SYSTEM,
-    sourceRecordType: IC_MIRROR_RECORD_TYPE,
-    sourceRecordId: source.id,
+    ...mirrorLineage,
     extensions: {
       intercompany: {
         role: "mirror",

@@ -18,6 +18,8 @@ import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { runRecurringEntries } from "@/lib/accounting/recurring";
 import {
   computeAllocationLines,
+  assertMonthEndAnchor,
+  isMonthEnd,
   AllocationTemplateError,
 } from "@/lib/accounting/allocation";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
@@ -239,6 +241,43 @@ describe("computeAllocationLines (pure)", () => {
       })
     ).toThrow(AllocationTemplateError);
   });
+
+  it("refuses a pool too small to split instead of emitting a negative line", () => {
+    // 0.05 across 8 targets: each 12.5% share is 0.00625, which rounds
+    // UP to 0.01, so the first seven consume 0.07 and the remainder
+    // would be −0.02. postJournalEntry would reject that as a negative
+    // amount — an error about the wrong thing. Refuse in allocation's
+    // own vocabulary instead.
+    expect(() =>
+      computeAllocationLines({
+        sourceAccountCode: "SRC",
+        sourceActivity: new Decimal("0.05"),
+        targets: targets(
+          Array.from({ length: 8 }, (_, i) => [`D${i + 1}`, "12.5"] as [string, string])
+        ),
+      })
+    ).toThrow(/too small to split/);
+  });
+});
+
+describe("month-end anchoring", () => {
+  it("accepts month-ends (including a short February) and refuses mid-month", () => {
+    expect(isMonthEnd(new Date("2026-05-31"))).toBe(true);
+    expect(isMonthEnd(new Date("2026-02-28"))).toBe(true);
+    expect(isMonthEnd(new Date("2028-02-29"))).toBe(true); // leap
+    expect(isMonthEnd(new Date("2026-02-27"))).toBe(false);
+    expect(isMonthEnd(new Date("2026-05-15"))).toBe(false);
+  });
+
+  it("a mid-month run refuses — the window would drop the rest of the month", () => {
+    // The window is [first of month, docDate]. Anchored on the 15th,
+    // May 16–31 is never allocated by anything, silently. Refusing is
+    // the whole point: a wrong number is worse than a stopped schedule.
+    expect(() => assertMonthEndAnchor(new Date("2026-05-15"))).toThrow(
+      AllocationTemplateError
+    );
+    expect(() => assertMonthEndAnchor(new Date("2026-05-31"))).not.toThrow();
+  });
 });
 
 describe("allocation through the recurring runner (DB)", () => {
@@ -294,5 +333,53 @@ describe("allocation through the recurring runner (DB)", () => {
       where: { tenantId, sourceRecordType: "RecurringEntry" },
     });
     expect(count).toBe(1);
+  });
+
+  it("a mid-month-anchored template stops with a named error, never a partial allocation", async () => {
+    // The create action refuses this shape, so reaching it takes a
+    // seed, a script, or a restored row — exactly the cases where a
+    // silent half-month allocation would go unnoticed for a quarter.
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { code: BOOK },
+      select: { id: true },
+    });
+    const ent = await prisma.legalEntity.findFirstOrThrow({
+      where: { tenantId, code: E },
+      select: { id: true },
+    });
+    const bad = await prisma.recurringEntry.create({
+      data: {
+        tenantId,
+        entityId: ent.id,
+        bookId: book.id,
+        code: `ALCX_MID_${SUFFIX}`.toUpperCase().slice(0, 40),
+        memo: "Mid-month allocation",
+        currencyId: "USD",
+        cadence: "MONTHLY",
+        startDate: new Date("2026-05-15"),
+        kind: "ALLOCATION",
+        allocationSourceAccountCode: A.src,
+        lines: { create: [{ lineNo: 1, accountCode: A.d1, allocationPercent: "100.0000" }] },
+      },
+      select: { id: true },
+    });
+
+    const run = await runRecurringEntries(prisma, {
+      tenantId,
+      templateId: bad.id,
+      throughDate: new Date("2026-05-31"),
+      triggeredBy: "test",
+    });
+    expect(run.entriesPosted).toBe(0);
+    expect(run.templates[0].errors).toHaveLength(1);
+    expect(run.templates[0].errors[0].message).toMatch(/month-end/);
+
+    // Nothing posted, and the bookmark did NOT advance past the bad
+    // date — fixing the template resumes from where it stopped.
+    const after = await prisma.recurringEntry.findUniqueOrThrow({
+      where: { id: bad.id },
+      select: { lastPostedDate: true },
+    });
+    expect(after.lastPostedDate).toBeNull();
   });
 });

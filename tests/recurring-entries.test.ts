@@ -331,6 +331,58 @@ describe("runRecurringEntries — engine", () => {
     expect(totalProduced).toBe(3); // Still 3, not 6.
   });
 
+  it("crash between the post and the bookmark: the re-run resumes instead of wedging", async () => {
+    // The post and the lastPostedDate update are deliberately separate
+    // transactions, so a process that dies between them leaves entries
+    // whose docDates the next run re-enumerates. postJournalEntry does
+    // not dedupe — it inserts — so before the lineage pre-check that
+    // re-run raised a unique violation, recorded it as an error, and
+    // left the bookmark null. EVERY subsequent nightly run repeated it:
+    // one crash wedged the template permanently.
+    const tpl = await createTemplate({
+      code: `WEDGE-${SUFFIX}`,
+      cadence: "MONTHLY",
+      startDate: new Date("2026-01-01"),
+    });
+    const first = await runRecurringEntries(prisma, {
+      throughDate: new Date("2026-02-28"),
+      templateId: tpl.id,
+    });
+    expect(first.entriesPosted).toBe(2);
+
+    // Rewind only the bookmark — the JEs stay committed.
+    await prisma.recurringEntry.update({
+      where: { id: tpl.id },
+      data: { lastPostedDate: null },
+    });
+
+    const second = await runRecurringEntries(prisma, {
+      throughDate: new Date("2026-02-28"),
+      templateId: tpl.id,
+    });
+    expect(second.templates[0].errors).toEqual([]);
+    expect(second.entriesPosted).toBe(0);
+
+    // No duplicates, and the bookmark caught back up.
+    const total = await prisma.journalEntry.count({
+      where: { sourceSystem: "SUBSTRATE", sourceRecordId: { startsWith: `${tpl.id}:` } },
+    });
+    expect(total).toBe(2);
+    const refreshed = await prisma.recurringEntry.findUnique({
+      where: { id: tpl.id },
+      select: { lastPostedDate: true },
+    });
+    expect(refreshed!.lastPostedDate!.toISOString().slice(0, 10)).toBe("2026-02-01");
+
+    // The template still moves forward — recovery, not just survival.
+    const third = await runRecurringEntries(prisma, {
+      throughDate: new Date("2026-03-31"),
+      templateId: tpl.id,
+    });
+    expect(third.entriesPosted).toBe(1);
+    expect(third.templates[0].errors).toEqual([]);
+  });
+
   it("forward run: extending throughDate posts only NEW periods", async () => {
     const tpl = await createTemplate({
       code: `FWD-${SUFFIX}`,

@@ -11,11 +11,19 @@
 //   sourceSystem     = "SUBSTRATE"
 //   sourceRecordType = "RecurringEntry"
 //   sourceRecordId   = "<templateId>:<docDateISO>"
-// which uniquely identifies the (template, period) pair. ledger-core's
-// existing partial unique index on (sourceSystem, sourceRecordType,
-// sourceRecordId) means a repeated run with the same throughDate is
-// a no-op — the second post hits the dedup branch in postJournalEntry
-// and returns the existing entry's id.
+// which uniquely identifies the (template, period) pair, and the
+// partial unique index gl_entry_header_lineage_uniq on
+// (tenantId, bookId, + that triple) enforces it at the DB.
+//
+// postJournalEntry does NOT dedupe — it inserts, and a repeat insert
+// raises the unique violation. So the runner checks the triple before
+// posting each docDate and treats an existing entry as "already done".
+// That check is what makes the crash window survivable: the post and
+// the lastPostedDate bookmark are deliberately separate transactions
+// (see below), so a process that dies between them leaves a posted
+// entry whose docDate the next run re-enumerates. Without the check
+// that re-run raised P2002 forever and the bookmark never advanced —
+// one crash wedged a STANDARD template permanently.
 //
 // Edge cases handled:
 //   - Inactive template:   skipped, no work done.
@@ -36,6 +44,12 @@ import type { PrismaClient, Cadence } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "./post-journal";
 import { computeAllocationLines, resolveSourceActivity } from "./allocation";
+import {
+  findEntryBySourceLineage,
+  isSourceLineageConflict,
+  isoDate,
+  sourceLineage,
+} from "./source-lineage";
 import { withTenantContext } from "../tenant-context";
 
 export interface RunRecurringInput {
@@ -132,14 +146,6 @@ export function enumerateDueDates(input: {
 }
 
 /**
- * Format a Date as "YYYY-MM-DD" in UTC. Used for the lineage triple's
- * sourceRecordId so re-runs produce the identical string and hit dedup.
- */
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/**
  * The runner. Walks active templates (filtered per input), posts JEs for
  * every cadence step up to throughDate, updates lastPostedDate.
  */
@@ -196,7 +202,19 @@ export async function runRecurringEntries(
         // the runner — "all-or-NONE within a template's batch, but
         // per-period atomicity across the batch." Per-template
         // lastPostedDate advances to the highest SUCCEEDED docDate.
+        const entryLineage = sourceLineage.recurring(template.id, docDate);
         const didPost = await withTenantContext(prisma, template.tenantId, async (tx) => {
+          // Already posted for this cadence step? Then this run is a
+          // re-run (same throughDate, or a crash between the post and
+          // the bookmark update). Nothing to do — and critically NOT an
+          // error, or the bookmark below would never advance past it.
+          const already = await findEntryBySourceLineage(tx, {
+            tenantId: template.tenantId,
+            bookId: template.bookId,
+            lineage: entryLineage,
+          });
+          if (already) return false;
+
           // ALLOCATION templates compute their lines per run from the
           // source account's window activity; zero activity is a
           // completed no-op (advance the bookmark, post nothing) — NOT
@@ -255,9 +273,7 @@ export async function runRecurringEntries(
             currencyCode: template.currencyId,
             source: "SYSTEM",
             createdBy: input.triggeredBy,
-            sourceSystem: "SUBSTRATE",
-            sourceRecordType: "RecurringEntry",
-            sourceRecordId: `${template.id}:${isoDate(docDate)}`,
+            ...entryLineage,
             lines,
           });
           return true;
@@ -271,6 +287,14 @@ export async function runRecurringEntries(
         // template.
         lastSuccessfulDocDate = docDate;
       } catch (e) {
+        // A concurrent run won the race for this docDate between our
+        // check and our write. The ledger holds exactly one entry for
+        // the (template, period) pair — the invariant we wanted — so
+        // this run treats the step as done and keeps going.
+        if (isSourceLineageConflict(e)) {
+          lastSuccessfulDocDate = docDate;
+          continue;
+        }
         // Don't abort the whole template on one bad period — record it,
         // advance lastPostedDate only up to the last SUCCESS, and stop
         // this template (later periods would also fail).

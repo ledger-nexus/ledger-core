@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session recurring-idempotency · started 2026-08-04 · heartbeat 2026-08-04
+- **Scope**: Code-review follow-ups from the parity arc — recurring-runner lineage pre-check (a crashed run between post and bookmark wedged STANDARD templates forever), allocation month-anchor + negative-remainder guards, and one entity-scope resolver replacing the per-file copies.
+- **Files / globs**: `src/lib/accounting/{lineage,entity-scope,allocation,recurring,post-journal,intercompany}.ts`, `src/lib/accounting/reports/translation.ts`, `src/lib/automation/registry.ts`, `src/app/actions/recurring-entries.ts`, `tests/{allocation-schedules,recurring-idempotency,entity-scope}.test.ts`, `PROJECT_STATUS.md`
+- **Branch**: fix/recurring-idempotency-allocation-guards
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
 
 ---
 

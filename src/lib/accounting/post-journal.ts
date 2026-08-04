@@ -41,6 +41,7 @@ import {
 } from "./types";
 import { fireInsertRules, type FireRulesResult } from "../rules/integration";
 import { resolveFxRate } from "./fx";
+import { indexEntityScopedByCode } from "./entity-scope";
 import { toDecimal } from "../utils/decimal";
 
 // Accepts either a full PrismaClient or an active TransactionClient so
@@ -266,29 +267,8 @@ export async function postJournalEntry(
     },
   });
 
-  // Build code -> account map. Prefer entity-specific over shared if both exist.
-  const codeToAccount = new Map<
-    string,
-    {
-      id: string;
-      bookScope: string[];
-      allowedCurrencies: string[];
-      openedOn: Date | null;
-      closedOn: Date | null;
-    }
-  >();
-  for (const a of accounts) {
-    const existing = codeToAccount.get(a.code);
-    if (!existing || (a.entityId !== null && existing && a.entityId === entity.id)) {
-      codeToAccount.set(a.code, {
-        id: a.id,
-        bookScope: a.bookScope,
-        allowedCurrencies: a.allowedCurrencies,
-        openedOn: a.openedOn,
-        closedOn: a.closedOn,
-      });
-    }
-  }
+  // code -> account, entity-specific shadowing shared (see entity-scope.ts).
+  const codeToAccount = indexEntityScopedByCode(accounts, entity.id);
 
   for (const line of normalizedLines) {
     const acct = codeToAccount.get(line.accountCode);
@@ -329,41 +309,35 @@ export async function postJournalEntry(
   const partyCodes = Array.from(
     new Set(normalizedLines.map((l) => l.partyCode).filter((c): c is string => !!c))
   );
-  const partyMap = new Map<string, string>();
-  if (partyCodes.length > 0) {
-    // Same tenant filter as the account lookup above.
-    const parties = await prisma.party.findMany({
-      where: {
-        tenantId,
-        code: { in: partyCodes },
-        OR: [{ entityId: null }, { entityId: entity.id }],
-      },
-      select: { id: true, code: true, entityId: true },
-    });
-    for (const p of parties) {
-      const existing = partyMap.get(p.code);
-      if (!existing || p.entityId === entity.id) partyMap.set(p.code, p.id);
-    }
-  }
+  // Same tenant filter and same shadowing rule as the account lookup above.
+  const parties =
+    partyCodes.length > 0
+      ? await prisma.party.findMany({
+          where: {
+            tenantId,
+            code: { in: partyCodes },
+            OR: [{ entityId: null }, { entityId: entity.id }],
+          },
+          select: { id: true, code: true, entityId: true },
+        })
+      : [];
+  const partyMap = indexEntityScopedByCode(parties, entity.id);
 
   const itemCodes = Array.from(
     new Set(normalizedLines.map((l) => l.itemCode).filter((c): c is string => !!c))
   );
-  const itemMap = new Map<string, string>();
-  if (itemCodes.length > 0) {
-    const items = await prisma.item.findMany({
-      where: {
-        tenantId,
-        code: { in: itemCodes },
-        OR: [{ entityId: null }, { entityId: entity.id }],
-      },
-      select: { id: true, code: true, entityId: true },
-    });
-    for (const it of items) {
-      const existing = itemMap.get(it.code);
-      if (!existing || it.entityId === entity.id) itemMap.set(it.code, it.id);
-    }
-  }
+  const items =
+    itemCodes.length > 0
+      ? await prisma.item.findMany({
+          where: {
+            tenantId,
+            code: { in: itemCodes },
+            OR: [{ entityId: null }, { entityId: entity.id }],
+          },
+          select: { id: true, code: true, entityId: true },
+        })
+      : [];
+  const itemMap = indexEntityScopedByCode(items, entity.id);
 
   // ---- 5. Resolve period from the document date ---------------------------
 
@@ -470,8 +444,8 @@ export async function postJournalEntry(
             tenantId,
             lineNo: l.lineNo,
             accountId: codeToAccount.get(l.accountCode)!.id,
-            partyId: l.partyCode ? partyMap.get(l.partyCode) ?? null : null,
-            itemId: l.itemCode ? itemMap.get(l.itemCode) ?? null : null,
+            partyId: l.partyCode ? partyMap.get(l.partyCode)?.id ?? null : null,
+            itemId: l.itemCode ? itemMap.get(l.itemCode)?.id ?? null : null,
             debit: l.debit.toFixed(4),
             credit: l.credit.toFixed(4),
             transactionAmount: l.transactionAmount.toFixed(4),
