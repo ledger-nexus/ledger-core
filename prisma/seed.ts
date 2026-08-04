@@ -20,7 +20,7 @@ async function main() {
   console.log("Seeding Northwind Cloud (multi-book, sub-ledgers, ASC 842, BTD)...");
   await seedNorthwind(prisma);
 
-  console.log("Seeding consolidation demo (Acme Group + 2 subs with intercompany)...");
+  console.log("Seeding consolidation demo (Acme Group + 3 subs, one EUR-functional)...");
   await seedConsolidationDemo(prisma);
 
   const [entryCount, arOpen, apOpen, assetCount, consolEntries] = await Promise.all([
@@ -39,7 +39,7 @@ async function main() {
   console.log(
     `\nDone.\n` +
       `  Northwind: ${entryCount} JEs across 3 books, ${arOpen} open AR, ${apOpen} open AP, ${assetCount} fixed asset(s)\n` +
-      `  Acme Group: ${consolEntries} JEs across 3 entities (parent + 2 subs)\n`
+      `  Acme Group: ${consolEntries} JEs across 4 entities (parent + 3 subs, ACME_EU in EUR)\n`
   );
 }
 

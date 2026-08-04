@@ -7,12 +7,39 @@
 //
 //   ACME_GROUP   (parent — non-operating)
 //     ├── ACME_US   ($10k revenue from external customer, $3k IC sale to UK)
-//     └── ACME_UK   ($3k IC purchase from US, $5k revenue from external customer)
+//     ├── ACME_UK   ($3k IC purchase from US, $5k revenue from external customer)
+//     └── ACME_EU   (EUR-functional — €20k capital, €8k external revenue)
 //
 // At consolidation the IC revenue ($3k) + IC expense ($3k) eliminate,
 // plus the Due-from / Due-to balances ($3k each) cancel. The group's
-// consolidated revenue = $15k (NOT $18k); group AR = $0 IC + external
-// receivables.
+// consolidated revenue = $15k from the USD subs (NOT $18k), plus the
+// translated EUR revenue; group AR = $0 IC + external receivables.
+//
+// ACME_EU exists to make ASC 830 current-rate translation OBSERVABLE.
+// Without a genuinely foreign subsidiary the translation engine and the
+// CTA row are dead UI: correct per their tests, but impossible to see in
+// the product — which is exactly how they shipped. It carries NO
+// intercompany balances on purpose, so the US/UK elimination math above
+// is unchanged.
+//
+// Its CTA is deliberately non-zero, which takes more than one rate: a
+// single uniform rate scales the whole trial balance evenly and leaves
+// a CTA of exactly zero, demonstrating nothing. All three ASC 830
+// treatments land in this one entity, and the seed only has to set the
+// equity one — 4000 already carries WEIGHTED_AVG.
+//
+//   cash     €28,000 × 1.11500  CURRENT_RATE   30 Jun close  = $31,220 DR
+//   capital  €20,000 × 1.05000  HISTORICAL     2 Jan, the
+//                               day it was contributed       = $21,000 CR
+//   revenue   €8,000 × 1.10625  WEIGHTED_AVG   mean of the
+//                               31 Mar 1.0975 open and the
+//                               1.115 close                  =  $8,850 CR
+//   CTA (the balancing plug)                                 =  $1,370 CR
+//
+// Read: the euros bought more dollars at the 30 Jun close than at the
+// 2 Jan contribution rate, and that unrealized gain sits in equity
+// rather than income. Consolidated revenue becomes $15,000 from the
+// USD subs + $8,850 translated = $23,850.
 
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "../accounting/post-journal";
@@ -21,15 +48,43 @@ import { getDefaultTenantId } from "./default-tenant";
 const PARENT_CODE = "ACME_GROUP";
 const SUB_US_CODE = "ACME_US";
 const SUB_UK_CODE = "ACME_UK";
+const SUB_EU_CODE = "ACME_EU";
 const BOOK_CODE = "US_GAAP";
 
-export const CONSOLIDATION_DEMO_ENTITIES = [PARENT_CODE, SUB_US_CODE, SUB_UK_CODE];
+export const CONSOLIDATION_DEMO_ENTITIES = [
+  PARENT_CODE,
+  SUB_US_CODE,
+  SUB_UK_CODE,
+  SUB_EU_CODE,
+];
+
+/** EUR→USD for the demo's three dates. The contribution rate and the
+ *  close rate differ, which is what gives ACME_EU a non-zero CTA. */
+const EU_RATES: Array<[string, string]> = [
+  ["2026-01-02", "1.0500"], // capital contributed here — the HISTORICAL rate
+  ["2026-05-15", "1.1050"], // revenue earned here (sits on the existing curve)
+  ["2026-06-30", "1.1150"], // period-end CLOSE
+];
 
 export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void> {
+  // Clear this demo's own transactions first. Without it every db:seed
+  // run RE-POSTS all of them and the demo's numbers inflate silently —
+  // observed going 6 → 14 → 22 entries across three runs. The lineage
+  // unique index doesn't catch the duplicates because these entries set
+  // sourceRecordType/sourceRecordId but no sourceSystem, and the index
+  // is partial on all three being non-null. clearConsolidationDemo was
+  // written for exactly this and then never called.
+  await clearConsolidationDemo(prisma);
+
   // Ensure currencies + book exist (no-op if Northwind seed already ran).
   await prisma.currency.upsert({
     where: { code: "USD" },
     create: { code: "USD", name: "US Dollar", decimals: 2, symbol: "$" },
+    update: {},
+  });
+  await prisma.currency.upsert({
+    where: { code: "EUR" },
+    create: { code: "EUR", name: "Euro", decimals: 2, symbol: "\u20ac" },
     update: {},
   });
   await prisma.book.upsert({
@@ -75,9 +130,50 @@ export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void>
     },
     update: { tenantId, parentEntityId: parent.id },
   });
+  // The one genuinely foreign subsidiary — the reason the translation
+  // engine has anything to do.
+  const euSub = await prisma.legalEntity.upsert({
+    where: { tenantId_code: { tenantId, code: SUB_EU_CODE } },
+    create: {
+      tenantId,
+      code: SUB_EU_CODE,
+      name: "Acme Europe SARL",
+      functionalCurrencyId: "EUR",
+      parentEntityId: parent.id,
+    },
+    update: { tenantId, parentEntityId: parent.id, functionalCurrencyId: "EUR" },
+  });
+
+  for (const [asOf, rate] of EU_RATES) {
+    await prisma.fxRate.upsert({
+      where: {
+        fromCurrencyId_toCurrencyId_asOf_rateType: {
+          fromCurrencyId: "EUR",
+          toCurrencyId: "USD",
+          asOf: new Date(asOf),
+          rateType: "CLOSE",
+        },
+      },
+      create: {
+        fromCurrencyId: "EUR",
+        toCurrencyId: "USD",
+        asOf: new Date(asOf),
+        rateType: "CLOSE",
+        rate,
+      },
+      update: { rate },
+    });
+  }
+
+  // Contributed capital is frozen at the rate on the day it was
+  // contributed (ASC 830) — and it is what makes the CTA non-zero.
+  await prisma.account.updateMany({
+    where: { tenantId, code: "3100" },
+    data: { translationCategory: "HISTORICAL" },
+  });
 
   // Fiscal calendar + Q1 period for each sub (needed by postJournalEntry).
-  for (const ent of [parent, usSub, ukSub]) {
+  for (const ent of [parent, usSub, ukSub, euSub]) {
     const cal = await prisma.fiscalCalendar.upsert({
       where: { entityId_code: { entityId: ent.id, code: "STANDARD_2026" } },
       create: {
@@ -185,6 +281,40 @@ export async function seedConsolidationDemo(prisma: PrismaClient): Promise<void>
     lines: [
       { accountCode: "1000", debit: 25_000 },
       { accountCode: "3100", credit: 25_000 },
+    ],
+  });
+
+  // ---- ACME_EU: posted in EUR, its own functional currency ----------
+  //
+  // fxRate is the transaction-date EUR→USD rate, so the stored
+  // reporting amounts are the transaction-date conversion. The stored
+  // FUNCTIONAL amounts stay in euros, which is what the translation
+  // engine reads — translating the reporting pair instead would
+  // double-apply FX (the #151 postmortem).
+  await postJournalEntry(prisma, {
+    entityCode: SUB_EU_CODE,
+    bookCode: BOOK_CODE,
+    currencyCode: "EUR",
+    fxRate: EU_RATES[0][1],
+    documentDate: new Date("2026-01-02"),
+    memo: "Capital from parent (EUR)",
+    source: "SEED",
+    lines: [
+      { accountCode: "1000", debit: 20_000 },
+      { accountCode: "3100", credit: 20_000 },
+    ],
+  });
+  await postJournalEntry(prisma, {
+    entityCode: SUB_EU_CODE,
+    bookCode: BOOK_CODE,
+    currencyCode: "EUR",
+    fxRate: EU_RATES[1][1],
+    documentDate: new Date("2026-05-15"),
+    memo: "External customer revenue (EUR)",
+    source: "SEED",
+    lines: [
+      { accountCode: "1000", debit: 8_000 },
+      { accountCode: "4000", credit: 8_000 },
     ],
   });
 }
