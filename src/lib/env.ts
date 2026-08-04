@@ -62,6 +62,50 @@ const ENV_SPECS: EnvSpec[] = [
     description:
       "Gates POST /api/admin/reset. If unset, the reset endpoint returns 503.",
   },
+  // Scheduled jobs. isAuthorizedCronRequest (src/lib/auth/cron.ts) fails
+  // CLOSED on a missing or under-16-char secret, so every cron 401s
+  // without this — silently, since a 401 to Vercel's scheduler surfaces
+  // nowhere in the app.
+  //
+  // This became load-bearing only in #324. Before it, all four legacy
+  // cron routes exported POST while Vercel Cron issues GET, so they
+  // 405'd regardless and the secret never mattered. Now the failure
+  // mode is subtler: configured-looking, still not running.
+  //
+  // Not requiredInProduction — the app serves correctly without crons,
+  // and refusing to boot over a scheduler secret is disproportionate.
+  // But read the blast radius before shipping without it.
+  {
+    name: "CRON_SECRET",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Shared secret for the 5 scheduled jobs in vercel.json (retention, " +
+      "recurring-JE run, assertion check, close-alert dispatch + digest). " +
+      "Unset → every cron returns 401 and none of them run. NOTE: the " +
+      "retention purge is claimed as Mitigated in docs/SOC2_CONTROL_MATRIX.md " +
+      "(Privacy TSC) — that control only OPERATES if this is set.",
+  },
+  // Transactional email (Resend). When RESEND_API_KEY is unset, sendEmail
+  // degrades to the LOGGED_ONLY path: the EmailDelivery row is still
+  // written, nothing leaves the machine, callers keep working. When the
+  // key IS set, EMAIL_FROM_ADDRESS must be a sender verified on the
+  // Resend domain or every send records FAILED.
+  {
+    name: "RESEND_API_KEY",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Resend API key for transactional email. Unset → sendEmail logs " +
+      "deliveries with LOGGED_ONLY status instead of sending.",
+  },
+  {
+    name: "EMAIL_FROM_ADDRESS",
+    requiredInProduction: false,
+    description:
+      "Verified from-address for Resend sends. Required whenever " +
+      "RESEND_API_KEY is set; sends record FAILED without it.",
+  },
   // Clerk auth — when both keys are present, the Clerk path activates
   // (see src/lib/auth/clerk.ts isClerkEnabled). When either is missing,
   // we fall back to the dev cookie stub. Marked REQUIRED_FOR_FEATURE
@@ -82,6 +126,39 @@ const ENV_SPECS: EnvSpec[] = [
     description:
       "Clerk client-side publishable key (pk_test_... or pk_live_...). " +
       "Required whenever CLERK_SECRET_KEY is set.",
+  },
+  // Stripe billing. Every one of these is optional and the whole feature
+  // is dark without them: /admin/billing renders a read-only free-tier
+  // view, the checkout/portal routes 503, and the webhook 503s (fail
+  // closed — an unverifiable webhook must not write entitlement).
+  // See docs/billing-setup.md for the Stripe-side setup.
+  {
+    name: "STRIPE_SECRET_KEY",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Stripe secret key (sk_test_... or sk_live_...). Unset → the " +
+      "checkout and portal routes return 503 and billing stays dark.",
+  },
+  {
+    name: "STRIPE_WEBHOOK_SECRET",
+    requiredInProduction: false,
+    minLength: 16,
+    description:
+      "Signing secret (whsec_...) for POST /api/billing/webhook. Unset → " +
+      "the endpoint returns 503. Required whenever STRIPE_SECRET_KEY is set, " +
+      "or subscriptions will never activate.",
+  },
+  {
+    name: "APP_BASE_URL",
+    requiredInProduction: false,
+    description:
+      "Absolute origin (https://…) used to build Stripe return URLs and " +
+      "invite/approval links. Checkout and portal 503 without it. ALSO " +
+      "gates discoverability: /sitemap.xml emits an EMPTY urlset and " +
+      "/robots.txt omits its Sitemap line without it, because a sitemap " +
+      "cannot carry relative URLs — so the public tour page exists but " +
+      "no crawler is told where to find it.",
   },
 ];
 

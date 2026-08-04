@@ -92,7 +92,18 @@ Stored exclusively in:
 **Gaps to close:**
 - [ ] **Automated retention enforcement.** Today retention is policy-only; no cron job purges old data. A SOC 2 auditor will ask "show me the eviction job" and we'll have to admit we don't have one.
 - [ ] **Soft-delete enforcement.** `User.deactivatedAt` exists but other models lack it. Add `deletedAt` to `JournalEntry`, etc., for non-financial-record models that should be subject to deletion.
-- [ ] **GDPR / CCPA data subject requests.** When a customer asks "what do you have on me?", we need a procedure to answer (data export) and to delete (right-to-be-forgotten). Today no procedure exists.
+- [x] **GDPR / CCPA data subject requests** (2026-06-02). Procedure
+  documented at `docs/policies/data-subject-requests.md` covering
+  Art. 15 (access) + Art. 17 (erasure) + Art. 16 (rectification) + the
+  CPRA equivalents. Per-channel identity verification, 30-day SLA
+  with documented extension path, OWNER-only erasure gate, edge
+  cases (OWNER trying to erase themselves, conflicting tenant/subject
+  requests). Executable artifacts: `src/lib/privacy/user-data.ts`
+  (`buildUserDataExport` + `eraseUserPii`), Server Actions in
+  `src/app/actions/data-subject-request.ts`, UI at
+  `/admin/data-subject-requests`. Every request emits a `DATA_EXPORT`
+  or `DATA_ERASURE` row to the append-only `audit_log` (the
+  regulator's evidence trail).
 
 ## Annual review
 

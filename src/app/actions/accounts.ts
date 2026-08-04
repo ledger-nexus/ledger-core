@@ -20,18 +20,21 @@
 // who added the new "Director Bonus" expense account in November?
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
-import type { AccountType, NormalBalance } from "@prisma/client";
-import {
-  requireAdmin,
-  NotAuthenticatedError,
-  NotAuthorizedError,
-} from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+import type { AccountType, NormalBalance, Prisma, PrismaClient } from "@prisma/client";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
+import { canEditAccounts, PermissionDeniedError } from "@/lib/auth/policy";
 import {
   auditPrivilegedAction,
   auditAccessDenied,
 } from "@/lib/audit/log";
+import { prisma } from "@/lib/db";
+import { withTenantContext } from "@/lib/tenant-context";
+
+// RLS Phase 2b widening — local helpers take either PrismaClient OR
+// TransactionClient. Used by wouldCreateCycle which is called from
+// inside withTenantContext.
+type Db = PrismaClient | Prisma.TransactionClient;
 
 // Account codes are short, alphanumeric-ish: 1000, 1010-A, RE, etc.
 // 2-15 chars; letters / digits / single hyphen between alphanumerics.
@@ -65,8 +68,10 @@ export async function createAccountAction(
   input: CreateAccountInput
 ): Promise<CreateAccountState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "account.manage",
+      canEditAccounts
+    );
 
     // ── Validate code shape ────────────────────────────────────────────
     const code = input.code?.trim().toUpperCase() ?? "";
@@ -90,82 +95,98 @@ export async function createAccountAction(
       return { ok: false, message: "Invalid normal balance." };
     }
 
-    // ── Resolve entity (optional) ──────────────────────────────────────
-    let entityId: string | null = null;
-    if (input.entityCode) {
-      const entity = await prisma.legalEntity.findFirst({
-        where: { tenantId: tenant.id, code: input.entityCode },
-        select: { id: true },
-      });
-      if (!entity) {
-        return { ok: false, message: `Unknown entity: ${input.entityCode}` };
-      }
-      entityId = entity.id;
-    }
+    // RLS Phase 2b shape T2: entity-resolve + parent-resolve + uniqueness
+    // + create all run inside one withTenantContext tx.
+    type CreateOutcome =
+      | { kind: "unknownEntity" }
+      | { kind: "unknownParent" }
+      | { kind: "duplicateCode" }
+      | { kind: "ok"; id: string };
 
-    // ── Resolve parent (optional) ──────────────────────────────────────
-    let parentAccountId: string | null = null;
-    if (input.parentCode) {
-      const parent = await prisma.account.findFirst({
+    const outcome = await withTenantContext(prisma, tenant.id, async (tx): Promise<CreateOutcome> => {
+      // ── Resolve entity (optional) ──────────────────────────────────────
+      let entityId: string | null = null;
+      if (input.entityCode) {
+        const entity = await tx.legalEntity.findFirst({
+          where: { tenantId: tenant.id, code: input.entityCode },
+          select: { id: true },
+        });
+        if (!entity) return { kind: "unknownEntity" };
+        entityId = entity.id;
+      }
+
+      // ── Resolve parent (optional) ──────────────────────────────────────
+      let parentAccountId: string | null = null;
+      if (input.parentCode) {
+        const parent = await tx.account.findFirst({
+          where: {
+            tenantId: tenant.id,
+            code: input.parentCode,
+            // Parent must be in same scope (shared OR same entity).
+            OR: [{ entityId: null }, { entityId: entityId ?? undefined }],
+          },
+          select: { id: true, type: true },
+        });
+        if (!parent) return { kind: "unknownParent" };
+        // Soft-enforce: parent's type should match (a Cash account doesn't
+        // make sense under a Revenue parent). We warn but don't block —
+        // some shops use unusual rollups for reporting flexibility.
+        if (parent.type !== input.type) {
+          // Could return an error, but instead just allow it (real CPAs
+          // sometimes nest mixed types for management reporting).
+        }
+        parentAccountId = parent.id;
+      }
+
+      // ── Uniqueness check (better message than the DB constraint) ───────
+      const existing = await tx.account.findFirst({
         where: {
           tenantId: tenant.id,
-          code: input.parentCode,
-          // Parent must be in same scope (shared OR same entity).
-          OR: [{ entityId: null }, { entityId: entityId ?? undefined }],
+          code,
+          // Match the (entityId, code) unique key — null is treated as
+          // distinct in Postgres, so this query naturally scopes per
+          // entity. For shared accounts entityId is null.
+          entityId,
         },
-        select: { id: true, type: true },
+        select: { id: true },
       });
-      if (!parent) {
-        return {
-          ok: false,
-          message: `Parent account "${input.parentCode}" not found in this scope.`,
-        };
-      }
-      // Soft-enforce: parent's type should match (a Cash account doesn't
-      // make sense under a Revenue parent). We warn but don't block —
-      // some shops use unusual rollups for reporting flexibility.
-      if (parent.type !== input.type) {
-        // Could return an error, but instead just allow it (real CPAs
-        // sometimes nest mixed types for management reporting).
-      }
-      parentAccountId = parent.id;
-    }
+      if (existing) return { kind: "duplicateCode" };
 
-    // ── Uniqueness check (better message than the DB constraint) ───────
-    const existing = await prisma.account.findFirst({
-      where: {
-        tenantId: tenant.id,
-        code,
-        // Match the (entityId, code) unique key — null is treated as
-        // distinct in Postgres, so this query naturally scopes per
-        // entity. For shared accounts entityId is null.
-        entityId,
-      },
-      select: { id: true },
+      const created = await tx.account.create({
+        data: {
+          tenantId: tenant.id,
+          entityId,
+          code,
+          name,
+          type: input.type,
+          normalBalance: input.normalBalance,
+          parentAccountId,
+          subtype: input.subtype?.trim() || null,
+          isContra: input.isContra ?? false,
+          isControlAccount: input.isControlAccount ?? false,
+          isBank: input.isBank ?? false,
+        },
+        select: { id: true },
+      });
+      return { kind: "ok", id: created.id };
     });
-    if (existing) {
+
+    if (outcome.kind === "unknownEntity") {
+      return { ok: false, message: `Unknown entity: ${input.entityCode}` };
+    }
+    if (outcome.kind === "unknownParent") {
+      return {
+        ok: false,
+        message: `Parent account "${input.parentCode}" not found in this scope.`,
+      };
+    }
+    if (outcome.kind === "duplicateCode") {
       return {
         ok: false,
         message: `An account with code "${code}" already exists in this scope.`,
       };
     }
-
-    const created = await prisma.account.create({
-      data: {
-        tenantId: tenant.id,
-        entityId,
-        code,
-        name,
-        type: input.type,
-        normalBalance: input.normalBalance,
-        parentAccountId,
-        subtype: input.subtype?.trim() || null,
-        isContra: input.isContra ?? false,
-        isControlAccount: input.isControlAccount ?? false,
-        isBank: input.isBank ?? false,
-      },
-      select: { id: true },
-    });
+    const created = { id: outcome.id };
 
     await auditPrivilegedAction({
       actor: admin,
@@ -224,19 +245,13 @@ export async function updateAccountAction(
   input: UpdateAccountInput
 ): Promise<UpdateAccountState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "account.manage",
+      canEditAccounts
+    );
 
-    const target = await prisma.account.findFirst({
-      where: { id: input.id, tenantId: tenant.id },
-      select: { id: true, code: true, entityId: true, parentAccountId: true },
-    });
-    if (!target) {
-      return { ok: false, message: "Account not found in this tenant." };
-    }
-
+    // Pre-tx validation that doesn't need DB access.
     const data: Record<string, unknown> = {};
-
     if (input.name !== undefined) {
       const name = input.name.trim();
       if (name.length < 1 || name.length > 200) {
@@ -252,51 +267,78 @@ export async function updateAccountAction(
     if (input.isBank !== undefined) data.isBank = input.isBank;
     if (input.active !== undefined) data.active = input.active;
 
-    // Parent update: special handling for cycle prevention.
-    if (input.parentCode !== undefined) {
-      if (input.parentCode === null || input.parentCode === "") {
-        data.parentAccountId = null;
-      } else {
-        const parent = await prisma.account.findFirst({
-          where: {
-            tenantId: tenant.id,
-            code: input.parentCode,
-            OR: [{ entityId: null }, { entityId: target.entityId ?? undefined }],
-          },
-          select: { id: true },
-        });
-        if (!parent) {
-          return {
-            ok: false,
-            message: `Parent account "${input.parentCode}" not found in this scope.`,
-          };
-        }
-        if (parent.id === target.id) {
-          return { ok: false, message: "An account cannot be its own parent." };
-        }
-        // Cycle prevention: walk up parent.parentAccountId chain. If we
-        // hit `target.id`, the proposed parent has target as an ancestor —
-        // setting target.parent = parent would create a cycle.
-        const cycleHit = await wouldCreateCycle(target.id, parent.id);
-        if (cycleHit) {
-          return {
-            ok: false,
-            message:
-              "Cannot set parent: this would create a cycle in the account hierarchy.",
-          };
-        }
-        data.parentAccountId = parent.id;
-      }
-    }
+    // RLS Phase 2b shape T2: target-find + parent-resolve + cycle-check
+    // (calls widened wouldCreateCycle) + update inside one withTenantContext tx.
+    type UpdateOutcome =
+      | { kind: "notFound" }
+      | { kind: "noChanges" }
+      | { kind: "unknownParent" }
+      | { kind: "selfParent" }
+      | { kind: "cycle" }
+      | { kind: "ok"; code: string };
 
-    if (Object.keys(data).length === 0) {
+    const outcome = await withTenantContext(prisma, tenant.id, async (tx): Promise<UpdateOutcome> => {
+      const target = await tx.account.findFirst({
+        where: { id: input.id, tenantId: tenant.id },
+        select: { id: true, code: true, entityId: true, parentAccountId: true },
+      });
+      if (!target) return { kind: "notFound" };
+
+      // Parent update: special handling for cycle prevention.
+      if (input.parentCode !== undefined) {
+        if (input.parentCode === null || input.parentCode === "") {
+          data.parentAccountId = null;
+        } else {
+          const parent = await tx.account.findFirst({
+            where: {
+              tenantId: tenant.id,
+              code: input.parentCode,
+              OR: [{ entityId: null }, { entityId: target.entityId ?? undefined }],
+            },
+            select: { id: true },
+          });
+          if (!parent) return { kind: "unknownParent" };
+          if (parent.id === target.id) return { kind: "selfParent" };
+          // Cycle prevention: walk up parent.parentAccountId chain. If we
+          // hit `target.id`, the proposed parent has target as an ancestor —
+          // setting target.parent = parent would create a cycle.
+          const cycleHit = await wouldCreateCycle(tx, target.id, parent.id);
+          if (cycleHit) return { kind: "cycle" };
+          data.parentAccountId = parent.id;
+        }
+      }
+
+      if (Object.keys(data).length === 0) return { kind: "noChanges" };
+
+      await tx.account.update({
+        where: { id: target.id },
+        data,
+      });
+      return { kind: "ok", code: target.code };
+    });
+
+    if (outcome.kind === "notFound") {
+      return { ok: false, message: "Account not found in this tenant." };
+    }
+    if (outcome.kind === "unknownParent") {
+      return {
+        ok: false,
+        message: `Parent account "${input.parentCode}" not found in this scope.`,
+      };
+    }
+    if (outcome.kind === "selfParent") {
+      return { ok: false, message: "An account cannot be its own parent." };
+    }
+    if (outcome.kind === "cycle") {
+      return {
+        ok: false,
+        message: "Cannot set parent: this would create a cycle in the account hierarchy.",
+      };
+    }
+    if (outcome.kind === "noChanges") {
       return { ok: true, message: "No changes." };
     }
-
-    await prisma.account.update({
-      where: { id: target.id },
-      data,
-    });
+    const target = { id: input.id, code: outcome.code };
 
     await auditPrivilegedAction({
       actor: admin,
@@ -349,13 +391,14 @@ export async function deactivateAccountAction(
  * (real charts are 4–5 levels max).
  */
 async function wouldCreateCycle(
+  db: Db,
   targetId: string,
   candidateParentId: string
 ): Promise<boolean> {
   let cursor: string | null = candidateParentId;
   for (let i = 0; i < 50 && cursor; i++) {
     if (cursor === targetId) return true;
-    const nextRow: { parentAccountId: string | null } | null = await prisma.account.findUnique({
+    const nextRow: { parentAccountId: string | null } | null = await db.account.findUnique({
       where: { id: cursor },
       select: { parentAccountId: true },
     });
@@ -376,12 +419,8 @@ function handleAuthError(
     });
     return { ok: false, message: "You must be signed in." };
   }
-  if (e instanceof NotAuthorizedError) {
-    void auditAccessDenied({
-      attemptedAction,
-      reason: "Not admin",
-      resource: "Account",
-    });
+  if (e instanceof PermissionDeniedError) {
+    // requirePermitted already wrote the ACCESS_DENIED audit row.
     return { ok: false, message: "Managing accounts requires admin permission." };
   }
   return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };

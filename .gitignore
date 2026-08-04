@@ -11,3 +11,6 @@ coverage
 *.tsbuildinfo
 .prisma/
 prisma/generated/
+
+# SOC 2 vendor receipts: PDFs gitignored ("do not distribute" clauses)
+docs/policies/vendor-receipts/**/*.pdf

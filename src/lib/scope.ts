@@ -5,13 +5,15 @@
 // via the setScope Server Action in src/app/actions/set-scope.ts.
 //
 // SECURITY: getScope() returns the RAW cookie value — it does NOT
-// verify that the entityCode belongs to the current tenant. Tenant-
-// scoped reads MUST use `getCurrentScope()` (defined below), which
-// resolves the cookie against the tenant's entities and falls back to
-// the tenant's first entity when the cookie names an entity outside
-// the tenant. Without that verification, a signed-in user can hand-
-// edit the lc-scope cookie to any entity code and have report pages
-// render that entity's data — a cross-tenant read leak.
+// verify that the entityCode belongs to the current tenant. It is now
+// MODULE-PRIVATE (not exported) so no application page can read it
+// directly: pages MUST use `getCurrentScope()` / `resolveCurrentScope()`
+// below, which resolve the cookie against the tenant's entities (and
+// fall back to the tenant's first entity when the cookie names one
+// outside the tenant). Without that verification, a signed-in user
+// could hand-edit the lc-scope cookie to any entity code and have a
+// page render that entity's data — a cross-tenant read leak. Keeping
+// this reader un-exported makes that class of bug unrepresentable.
 
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
@@ -29,7 +31,7 @@ export const DEFAULT_SCOPE: LedgerScope = {
 
 const COOKIE_NAME = "lc-scope";
 
-export function getScope(): LedgerScope {
+function getScope(): LedgerScope {
   const raw = cookies().get(COOKIE_NAME)?.value;
   if (!raw) return DEFAULT_SCOPE;
   try {
@@ -78,12 +80,30 @@ export const SCOPE_COOKIE_NAME = COOKIE_NAME;
  * platform-level (US_GAAP, IFRS, etc.) so it doesn't need verification,
  * but entityCode is tenant-scoped after Phase 4b and MUST be checked.
  */
-export interface CurrentScope {
+/**
+ * A tenant-VERIFIED scope. `tenantId` and `entityId` have been resolved and
+ * confirmed to belong to the current session's tenant (via getCurrentScope
+ * / resolveCurrentScope); `entityCode`/`bookCode` are presentation
+ * attributes, NOT authorization keys.
+ *
+ * This is the type tenant-facing data services should require in their
+ * signature: accepting an `AuthorizedLedgerScope` is the type-level proof
+ * that the caller resolved the scope through the verified path rather than
+ * reading a raw cookie. It makes "queried with an unverified scope" an
+ * unrepresentable state at the service boundary.
+ */
+export interface AuthorizedLedgerScope {
   tenantId: string;
   entityId: string;
   entityCode: string;
   bookCode: string;
 }
+
+/**
+ * @deprecated Prefer `AuthorizedLedgerScope` — same shape, clearer intent.
+ * Retained as an alias so existing imports keep compiling.
+ */
+export type CurrentScope = AuthorizedLedgerScope;
 
 /**
  * Resolve the request's scope against the current tenant's entities.

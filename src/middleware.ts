@@ -1,5 +1,6 @@
 // Next.js middleware — wires Clerk auth at the edge when CLERK_SECRET_KEY
-// is set; otherwise a no-op pass-through.
+// is set, sets the Content-Security-Policy with per-request nonce, and
+// otherwise passes through.
 //
 // Clerk's middleware intercepts every request to attach session info
 // before route handlers + server components run. Without it, currentUser()
@@ -23,6 +24,17 @@
 // any user (intentional in dev for the UserSwitcher dropdown). Without
 // the prod fail-closed gate, an unset CLERK_SECRET_KEY in prod would
 // leave that impersonation surface exposed.
+//
+// CSP (SOC 2 CC6.6 — was deferred in next.config.js):
+//   Every response gets a Content-Security-Policy header with a
+//   per-request nonce. `strict-dynamic` means once a nonce'd script
+//   loads, the scripts IT loads inherit trust — so we don't have to
+//   enumerate every Clerk / Sentry runtime domain. Inline scripts
+//   without the nonce are blocked.
+//
+//   Server components read the nonce from `headers().get('x-nonce')`
+//   and pass it to <Script nonce={nonce}>. Next.js's own runtime
+//   scripts (chunk loader, etc.) inherit via strict-dynamic.
 
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -42,6 +54,12 @@ const isProd = () => process.env.NODE_ENV === "production";
 const PUBLIC_PATH_PATTERNS: RegExp[] = [
   /^\/sign-in(\/.*)?$/,
   /^\/sign-up(\/.*)?$/,
+  // Product-tour gallery: the one page a prospect sees BEFORE having an
+  // account, so it must survive the fail-closed 503 that guards
+  // everything else when Clerk is on. Read-only screenshots of seeded
+  // demo data; the tour assets themselves (/tours/*, /vendor/*) contain
+  // dots and never reach middleware (see config.matcher).
+  /^\/how-it-works$/,
   /^\/api\/internal\//,
   /^\/api\/health$/,
   /^\/_next\//,
@@ -52,7 +70,80 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PATH_PATTERNS.some((re) => re.test(pathname));
 }
 
+// ─── CSP nonce + header ───────────────────────────────────────────────────
+//
+// Generate a 128-bit random nonce per request. base64url so it's
+// header-safe. The crypto.getRandomValues call runs on Edge runtime
+// (Web Crypto API), so no Node.js dep — works in middleware.
+
+function generateNonce(): string {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  // Base64 → base64url (URL/header safe). 16 bytes → 22 chars.
+  return Buffer.from(arr).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+function buildCspHeader(nonce: string): string {
+  // strict-dynamic delegates trust: a script loaded via the nonce
+  // can load more scripts without listing every domain. Clerk + Sentry
+  // + Stripe.js runtimes work via this delegation.
+  //
+  // For non-script directives, enumerate the domains we actually use.
+  // `style-src 'unsafe-inline'` is required for Tailwind's runtime
+  // styles; the per-style nonce alternative would need plumbing into
+  // every styled component — too invasive for now.
+  const policy = [
+    `default-src 'self'`,
+    // Dev needs 'unsafe-eval' in script-src (NOT script-src-elem — eval()
+    // is governed by script-src): Next dev serves eval-wrapped modules, so
+    // without it every page loads but never hydrates. Prod stays strict.
+    process.env.NODE_ENV === "production"
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`,
+    process.env.NODE_ENV === "production"
+      ? null
+      : `script-src-elem 'self' 'nonce-${nonce}' 'unsafe-inline' 'unsafe-eval'`,
+    `style-src 'self' 'unsafe-inline'`,
+    `img-src 'self' data: https:`,
+    `font-src 'self' data:`,
+    // connect-src: Clerk APIs, Sentry ingest, Stripe API, Vercel
+    // analytics. Use wildcard subdomains rather than enumerate every
+    // region/shard.
+    `connect-src 'self' https://*.clerk.com https://*.clerk.accounts.dev https://*.sentry.io https://api.stripe.com https://*.vercel-insights.com`,
+    // frame-src: Clerk's sign-in widget + Stripe payment elements
+    // mount in iframes.
+    `frame-src https://*.clerk.com https://*.clerk.accounts.dev https://js.stripe.com https://hooks.stripe.com`,
+    `frame-ancestors 'none'`, // we already block via X-Frame-Options DENY too
+    `base-uri 'self'`,
+    `form-action 'self'`,
+    `object-src 'none'`,
+    `upgrade-insecure-requests`,
+  ].filter(Boolean).join("; ");
+  return policy;
+}
+
+/**
+ * Attach the per-request nonce to the request headers (so server
+ * components can read it via `headers().get('x-nonce')`) and the CSP
+ * to the response headers.
+ */
+function applyCsp(req: NextRequest, response: NextResponse, nonce: string): NextResponse {
+  response.headers.set("Content-Security-Policy", buildCspHeader(nonce));
+  return response;
+}
+
 export default async function middleware(req: NextRequest) {
+  const nonce = generateNonce();
+  // Pass the nonce to downstream Server Components by setting it on
+  // the request headers. They read it via `headers().get('x-nonce')`
+  // and pass to <Script nonce={...}> for any inline-injected JS.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-nonce", nonce);
+  // Same mechanism for the pathname: the root layout reads it to skip
+  // the authenticated app shell (sidebar/header) on the public
+  // /how-it-works gallery. Overwrites any client-supplied value — this
+  // header is trustworthy only because middleware always stamps it.
+  requestHeaders.set("x-pathname", req.nextUrl.pathname);
   if (!isClerkEnabled()) {
     // Fail closed in production. Dev / CI without Clerk passes through
     // so local work doesn't require Clerk credentials, but the moment
@@ -60,7 +151,7 @@ export default async function middleware(req: NextRequest) {
     // returns 503 — closing the dev-impersonation cookie path that
     // would otherwise be reachable.
     if (isProd() && !isPublic(req.nextUrl.pathname)) {
-      return NextResponse.json(
+      const r = NextResponse.json(
         {
           ok: false,
           error:
@@ -68,28 +159,43 @@ export default async function middleware(req: NextRequest) {
         },
         { status: 503 }
       );
+      return applyCsp(req, r, nonce);
     }
-    return NextResponse.next();
+    const r = NextResponse.next({ request: { headers: requestHeaders } });
+    return applyCsp(req, r, nonce);
   }
 
   // Lazy-import Clerk so we don't pay for it when stub path is active.
   const { clerkMiddleware, createRouteMatcher } = await import(
     "@clerk/nextjs/server"
   );
+  // Keep in lockstep with PUBLIC_PATH_PATTERNS above — this is the
+  // Clerk-mode twin of the same allowlist.
   const isPublicRoute = createRouteMatcher([
     "/sign-in(.*)",
     "/sign-up(.*)",
+    "/how-it-works",
     "/api/internal/(.*)",
     "/api/health",
   ]);
 
   // Wrap the Clerk handler so we can run additional logic (like the
   // public-route bypass) without dropping Clerk's session attachment.
-  return clerkMiddleware(async (auth, request) => {
+  const clerkResponse = await clerkMiddleware(async (auth, request) => {
     if (isPublicRoute(request)) return;
     // Protect everything else. Unsigned-in users are redirected to /sign-in.
     await auth.protect();
   })(req, { waitUntil: () => {} } as never);
+
+  // Clerk's middleware returns a NextResponse-shaped object. Attach
+  // the CSP header to it. The nonce-on-request-headers path Clerk
+  // already forwards via its own request rewriting, so the
+  // downstream `headers().get('x-nonce')` works without us re-injecting.
+  if (clerkResponse instanceof NextResponse) {
+    return applyCsp(req, clerkResponse, nonce);
+  }
+  const r = NextResponse.next({ request: { headers: requestHeaders } });
+  return applyCsp(req, r, nonce);
 }
 
 export const config = {
@@ -97,6 +203,11 @@ export const config = {
   matcher: ["/((?!_next|.*\\..*).*)", "/(api|trpc)(.*)"],
 };
 
-// Re-export the public-path check so unit tests can verify the list
-// without instantiating Clerk.
-export const _internal = { isPublic, PUBLIC_PATH_PATTERNS };
+// Re-export the public-path check + CSP helpers so unit tests can
+// verify the list and the policy shape without instantiating Clerk.
+export const _internal = {
+  isPublic,
+  PUBLIC_PATH_PATTERNS,
+  generateNonce,
+  buildCspHeader,
+};

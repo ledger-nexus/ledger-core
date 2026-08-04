@@ -25,8 +25,6 @@
 // entries is never the right answer.
 
 import { revalidatePath } from "next/cache";
-import { Decimal } from "decimal.js";
-import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import {
   requireCurrentUser,
@@ -37,6 +35,8 @@ import {
   auditPrivilegedAction,
   auditAccessDenied,
 } from "@/lib/audit/log";
+import { prisma } from "@/lib/db";
+import { withTenantContext } from "@/lib/tenant-context";
 
 export interface ReverseJournalEntryInput {
   /** Source JE id. The reversal targets THIS entry. */
@@ -82,42 +82,6 @@ export async function reverseJournalEntryAction(
     return { ok: false, message: "No active tenant." };
   }
 
-  // Tenant-scoped lookup. A forged id from another tenant returns
-  // "not found" — no cross-tenant leak (same pattern as the CSV route).
-  const source = await prisma.journalEntry.findFirst({
-    where: { id: input.id, tenantId: tenant.id },
-    include: {
-      entity: { select: { code: true } },
-      book: { select: { code: true } },
-      currency: { select: { code: true } },
-      lines: {
-        include: {
-          account: { select: { code: true } },
-          party: { select: { code: true } },
-          item: { select: { code: true } },
-        },
-        orderBy: { lineNo: "asc" },
-      },
-    },
-  });
-  if (!source) {
-    return { ok: false, message: "Journal entry not found in this tenant." };
-  }
-
-  // Status discipline.
-  if (source.status === "REVERSED") {
-    return {
-      ok: false,
-      message: `${source.entryNumber} is already reversed. Reverse only happens once per entry.`,
-    };
-  }
-  if (source.status !== "POSTED") {
-    return {
-      ok: false,
-      message: `Only POSTED entries can be reversed (this one is ${source.status}).`,
-    };
-  }
-
   const reversalDate = input.reversalDate
     ? new Date(input.reversalDate)
     : new Date();
@@ -125,24 +89,69 @@ export async function reverseJournalEntryAction(
     return { ok: false, message: "reversalDate must be a valid date (YYYY-MM-DD)." };
   }
 
-  // Sign-flip every line. We swap debit ↔ credit. partyCode and itemCode
-  // come along verbatim — a reversal preserves the dimensional context
-  // of the original entry.
-  const flippedLines = source.lines.map((l) => ({
-    accountCode: l.account.code,
-    debit: l.credit.toString(),
-    credit: l.debit.toString(),
-    description: l.description ?? undefined,
-    partyCode: l.party?.code,
-    itemCode: l.item?.code,
-  }));
+  // RLS Phase 2b: wrap the full action — source lookup + reversal post +
+  // status flip + reversalOfId link — in withTenantContext. The SET LOCAL
+  // app.current_tenant_id GUC is scoped to the wrapping $transaction, so
+  // every read/write here will reach RLS policies once Phase 3 flips FORCE
+  // on. Read-then-write atomicity also tightens: the source's status is
+  // re-read inside the same tx as the writes, so the
+  // POSTED-→-REVERSED-→-POSTED race is impossible.
+  //
+  // Tenant-scoped lookup retained as defense in depth.
+  type ReverseOutcome =
+    | { kind: "notFound" }
+    | { kind: "alreadyReversed"; entryNumber: string }
+    | { kind: "wrongStatus"; entryNumber: string; status: string }
+    | { kind: "ok"; reversalId: string; reversalEntryNumber: string; sourceEntryNumber: string; lineCount: number };
 
-  // Atomic: post the reversal + flip source status in one transaction.
-  // If postJournalEntry rejects (closed period, bad account, etc.) the
-  // status flip is rolled back so the source stays in its original state.
+  let outcome: ReverseOutcome;
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      const reversal = await postJournalEntry(tx as typeof prisma, {
+    outcome = await withTenantContext(prisma, tenant.id, async (tx) => {
+      const source = await tx.journalEntry.findFirst({
+        where: { id: input.id, tenantId: tenant.id },
+        include: {
+          entity: { select: { code: true } },
+          book: { select: { code: true } },
+          currency: { select: { code: true } },
+          lines: {
+            include: {
+              account: { select: { code: true } },
+              party: { select: { code: true } },
+              item: { select: { code: true } },
+            },
+            orderBy: { lineNo: "asc" },
+          },
+        },
+      });
+      if (!source) {
+        return { kind: "notFound" as const };
+      }
+
+      // Status discipline — inside the tx so the read is consistent with the writes.
+      if (source.status === "REVERSED") {
+        return { kind: "alreadyReversed" as const, entryNumber: source.entryNumber };
+      }
+      if (source.status !== "POSTED") {
+        return {
+          kind: "wrongStatus" as const,
+          entryNumber: source.entryNumber,
+          status: source.status,
+        };
+      }
+
+      // Sign-flip every line. We swap debit ↔ credit. partyCode and itemCode
+      // come along verbatim — a reversal preserves the dimensional context
+      // of the original entry.
+      const flippedLines = source.lines.map((l) => ({
+        accountCode: l.account.code,
+        debit: l.credit.toString(),
+        credit: l.debit.toString(),
+        description: l.description ?? undefined,
+        partyCode: l.party?.code,
+        itemCode: l.item?.code,
+      }));
+
+      const reversal = await postJournalEntry(tx, {
         tenantId: tenant.id,
         entityCode: source.entity.code,
         bookCode: source.book.code,
@@ -175,32 +184,14 @@ export async function reverseJournalEntryAction(
         data: { reversalOfId: source.id },
       });
 
-      return reversal;
-    });
-
-    await auditPrivilegedAction({
-      actor: user,
-      action: "reverse-journal-entry",
-      resource: "JournalEntry",
-      resourceId: source.id,
-      tenantId: tenant.id,
-      metadata: {
+      return {
+        kind: "ok" as const,
+        reversalId: reversal.id,
+        reversalEntryNumber: reversal.entryNumber,
         sourceEntryNumber: source.entryNumber,
-        reversalEntryNumber: result.entryNumber,
-        reversalDate: reversalDate.toISOString().slice(0, 10),
         lineCount: source.lines.length,
-      },
+      };
     });
-
-    revalidatePath("/journal-entries");
-    revalidatePath(`/journal-entries/${source.id}`);
-    revalidatePath(`/journal-entries/${result.id}`);
-    return {
-      ok: true,
-      reversalId: result.id,
-      reversalEntryNumber: result.entryNumber,
-      message: `Reversed ${source.entryNumber} → ${result.entryNumber} on ${reversalDate.toISOString().slice(0, 10)}.`,
-    };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
       return { ok: false, message: "You must be signed in." };
@@ -210,4 +201,44 @@ export async function reverseJournalEntryAction(
       message: e instanceof Error ? e.message : "Unknown error during reversal.",
     };
   }
+
+  if (outcome.kind === "notFound") {
+    return { ok: false, message: "Journal entry not found in this tenant." };
+  }
+  if (outcome.kind === "alreadyReversed") {
+    return {
+      ok: false,
+      message: `${outcome.entryNumber} is already reversed. Reverse only happens once per entry.`,
+    };
+  }
+  if (outcome.kind === "wrongStatus") {
+    return {
+      ok: false,
+      message: `Only POSTED entries can be reversed (this one is ${outcome.status}).`,
+    };
+  }
+
+  await auditPrivilegedAction({
+    actor: user,
+    action: "reverse-journal-entry",
+    resource: "JournalEntry",
+    resourceId: input.id,
+    tenantId: tenant.id,
+    metadata: {
+      sourceEntryNumber: outcome.sourceEntryNumber,
+      reversalEntryNumber: outcome.reversalEntryNumber,
+      reversalDate: reversalDate.toISOString().slice(0, 10),
+      lineCount: outcome.lineCount,
+    },
+  });
+
+  revalidatePath("/journal-entries");
+  revalidatePath(`/journal-entries/${input.id}`);
+  revalidatePath(`/journal-entries/${outcome.reversalId}`);
+  return {
+    ok: true,
+    reversalId: outcome.reversalId,
+    reversalEntryNumber: outcome.reversalEntryNumber,
+    message: `Reversed ${outcome.sourceEntryNumber} → ${outcome.reversalEntryNumber} on ${reversalDate.toISOString().slice(0, 10)}.`,
+  };
 }

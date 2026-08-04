@@ -13,7 +13,16 @@ export default defineConfig({
     // per query; 20s is too tight when a clearLedger() alone runs 7
     // scoped deleteMany calls.
     testTimeout: 60_000,
+    // 30s — afterAll cleanups walk 10+ scoped deleteMany calls to
+    // prevent shared-DB cruft accumulation; the default 10s budgets
+    // for fast in-process hooks, not Neon-latency cleanup chains.
+    hookTimeout: 30_000,
   },
+  // tsconfig.json sets jsx: "preserve" for Next's compiler, which leaves
+  // esbuild nothing to do with a .tsx test file. Component tests opt into the
+  // automatic runtime here (react/jsx-runtime); the app build is unaffected —
+  // Next never reads this config.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

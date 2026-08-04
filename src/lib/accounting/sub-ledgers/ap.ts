@@ -8,19 +8,15 @@
 // Invariant: sum of currentBalance for status IN (OPEN, PARTIAL, REOPENED)
 // per (entity, book) === AP control account balance (Cr).
 
+import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
+import { CrossBookApplicationError } from "../types";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
+import { toDecimal } from "../../utils/decimal";
+import { isUuid } from "../../utils/uuid";
 
-function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
-  if (v === undefined || v === null) return new Decimal(0);
-  if (v instanceof Decimal) return v;
-  return new Decimal(v);
-}
 
-function isUuid(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-}
 
 export interface OpenApItemInput {
   entityCode: string;
@@ -145,17 +141,42 @@ export interface ApplyApPaymentInput {
   appliedDate: Date;
 }
 
-export async function applyApPayment(
-  prisma: PrismaClient,
+// Class T (RLS Phase 2b): transactional body exported separately so
+// Server Actions can run it inside withTenantContext's transaction.
+export async function applyApPaymentInTx(
+  tx: Prisma.TransactionClient,
   input: ApplyApPaymentInput
 ): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
-  return await prisma.$transaction(async (tx) => {
+  {
     const item = await tx.apOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
-      select: { currentBalance: true, status: true, tenantId: true },
+      // bookId pulled for the Phase 3.5.D cross-book guard below.
+      select: {
+        currentBalance: true,
+        status: true,
+        tenantId: true,
+        bookId: true,
+        book: { select: { code: true } },
+      },
     });
     if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
       throw new Error(`Cannot apply payment to AP item in ${item.status} state`);
+    }
+
+    // v0.9 NS Books Phase 3.5.D — cross-book application guard (mirror
+    // of applyArPayment). The payment JE must be on the same book as
+    // the OpenItem; cross-book apply leaves the per-book TB imbalanced.
+    const appliedByEntry = await tx.journalEntry.findUniqueOrThrow({
+      where: { id: input.appliedByEntryId },
+      select: { bookId: true, book: { select: { code: true } } },
+    });
+    if (appliedByEntry.bookId !== item.bookId) {
+      throw new CrossBookApplicationError(
+        input.openItemId,
+        item.book.code,
+        input.appliedByEntryId,
+        appliedByEntry.book.code
+      );
     }
 
     const applied = toDecimal(input.appliedAmount);
@@ -199,16 +220,28 @@ export async function applyApPayment(
     }
 
     return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
-  });
+  }
+}
+
+export async function applyApPayment(
+  prisma: PrismaClient,
+  input: ApplyApPaymentInput
+): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
+  return prisma.$transaction((tx) => applyApPaymentInTx(tx, input));
 }
 
 export async function openApBalance(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  // Tenant pin — entity codes are only unique per tenant; UI/API callers
+  // MUST pass this (deficiency #16 pattern, closed for reports, was still
+  // open here). Optional for legacy substrate scripts.
+  tenantId?: string
 ): Promise<Decimal> {
   const rows = await prisma.apOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
@@ -229,10 +262,13 @@ export async function apAging(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,
-  asOf: Date
+  asOf: Date,
+  // Tenant pin — see openApBalance. Same cross-tenant same-code hole.
+  tenantId?: string
 ): Promise<ApAgingBucket[]> {
   const items = await prisma.apOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },

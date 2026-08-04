@@ -38,6 +38,14 @@ export interface FixedAssetBookSpec {
 }
 
 export interface CreateFixedAssetInput {
+  /**
+   * Authoritative tenant scope. The entity lookup is scoped by this
+   * tenantId so cross-tenant code collisions return "entity not found"
+   * instead of mutating the wrong tenant's data. Added 2026-06-05 to
+   * close deficiency log #28 (surfaced by 15th adversarial pass as a
+   * historical finding). Required.
+   */
+  tenantId: string;
   entityCode: string;
   code: string;
   description: string;
@@ -58,9 +66,10 @@ export async function createFixedAsset(
   prisma: PrismaClient,
   input: CreateFixedAssetInput
 ): Promise<{ id: string }> {
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  // Phase 4b: entity code unique per [tenantId, code]. Scope by
+  // input.tenantId — see deficiency log #28 for context.
   const entity = await prisma.legalEntity.findFirstOrThrow({
-    where: { code: input.entityCode },
+    where: { code: input.entityCode, tenantId: input.tenantId },
     select: { id: true, tenantId: true },
   });
   const vendor = input.vendorPartyCode
@@ -477,10 +486,15 @@ export async function disposeFixedAsset(
 export async function netBookValue(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  // Tenant pin — entity codes are unique only per tenant, so a UI/API
+  // caller MUST pass this or a colliding entity code in another tenant
+  // could sum that tenant's assets. Optional for substrate scripts.
+  tenantId?: string
 ): Promise<{ totalGross: Decimal; totalAccumDep: Decimal; nbv: Decimal }> {
   const assets = await prisma.fixedAsset.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       status: { in: ["IN_SERVICE", "IDLE"] },
     },

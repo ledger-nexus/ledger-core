@@ -1,11 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
-import { applyApPayment } from "@/lib/accounting/sub-ledgers/ap";
+import { applyApPaymentInTx } from "@/lib/accounting/sub-ledgers/ap";
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { requireCurrentTenant, NoTenantSelectedError } from "@/lib/auth/tenant";
+import { prisma } from "@/lib/db";
+import { withTenantContext } from "@/lib/tenant-context";
 
 export type ApplyApPaymentState =
   | { ok?: undefined; error?: undefined }
@@ -20,6 +21,15 @@ export type ApplyApPaymentState =
 // — could pay tenant B's AP item by submitting that item's id. Now:
 // requires a signed-in user + active tenant, scopes the lookup by
 // tenantId, stamps the actor on the JE.
+//
+// RLS Phase 2b (Class T migration reference): the entire transaction —
+// the AP open-item read, postJournalEntry, applyApPaymentInTx — runs
+// inside withTenantContext. The SET LOCAL app.current_tenant_id GUC is
+// scoped to the wrapping $transaction, so every read/write here will
+// reach RLS policies once Phase 3 flips FORCE on. We call the INNER
+// helper applyApPaymentInTx (not the outer applyApPayment) so the
+// GUC propagates instead of being lost across a nested $transaction.
+// See docs/architecture/rls-phase-2b-migration-guide.md → Class T.
 export async function applyApPaymentAction(
   _prev: ApplyApPaymentState,
   formData: FormData
@@ -40,56 +50,69 @@ export async function applyApPaymentAction(
       return { ok: false, error: "Amount must be positive" };
     }
 
-    // Tenant-scoped lookup — a forged id from another tenant returns null
-    // → "not found" (no cross-tenant write).
-    const item = await prisma.apOpenItem.findFirst({
-      where: { id: openItemId, tenantId: tenant.id },
-      include: {
-        entity: { select: { code: true } },
-        book: { select: { code: true } },
-        party: { select: { code: true } },
-      },
+    const result = await withTenantContext(prisma, tenant.id, async (tx) => {
+      // Tenant-scoped lookup — a forged id from another tenant returns null
+      // → "not found" (no cross-tenant write). Belt + suspenders: this
+      // explicit tenantId predicate keeps working even before RLS FORCE
+      // lands in Phase 3.
+      const item = await tx.apOpenItem.findFirst({
+        where: { id: openItemId, tenantId: tenant.id },
+        include: {
+          entity: { select: { code: true } },
+          book: { select: { code: true } },
+          party: { select: { code: true } },
+        },
+      });
+      if (!item) {
+        return { kind: "notFound" as const };
+      }
+
+      const entry = await postJournalEntry(tx, {
+        tenantId: tenant.id,
+        entityCode: item.entity.code,
+        bookCode: item.book.code,
+        currencyCode: item.currencyId,
+        documentDate: paymentDate,
+        memo: `Payment to ${item.party.code}${item.referenceNumber ? ` (${item.referenceNumber})` : ""}`,
+        source: "MANUAL",
+        sourceRecordType: "VendorPayment",
+        sourceRecordId: `MANUAL-VPMT-${item.id.slice(0, 8)}`,
+        createdBy: user.email,
+        ownerUserId: user.id,
+        lines: [
+          {
+            accountCode: item.controlAccountCode,
+            debit: amount,
+            partyCode: item.party.code,
+            description: `Pay bill — ${item.referenceNumber ?? item.id}`,
+          },
+          { accountCode: cashAccountCode, credit: amount, description: "Cash payment" },
+        ],
+      });
+
+      await applyApPaymentInTx(tx, {
+        openItemId,
+        appliedByEntryId: entry.id,
+        appliedAmount: amount,
+        appliedDate: paymentDate,
+      });
+
+      return { kind: "ok" as const, entryNumber: entry.entryNumber };
     });
-    if (!item) {
+
+    if (result.kind === "notFound") {
       return { ok: false, error: "AP open item not found in this tenant." };
     }
 
-    const entry = await postJournalEntry(prisma, {
-      tenantId: tenant.id,
-      entityCode: item.entity.code,
-      bookCode: item.book.code,
-      currencyCode: item.currencyId,
-      documentDate: paymentDate,
-      memo: `Payment to ${item.party.code}${item.referenceNumber ? ` (${item.referenceNumber})` : ""}`,
-      source: "MANUAL",
-      sourceRecordType: "VendorPayment",
-      sourceRecordId: `MANUAL-VPMT-${item.id.slice(0, 8)}`,
-      createdBy: user.email,
-      ownerUserId: user.id,
-      lines: [
-        {
-          accountCode: item.controlAccountCode,
-          debit: amount,
-          partyCode: item.party.code,
-          description: `Pay bill — ${item.referenceNumber ?? item.id}`,
-        },
-        { accountCode: cashAccountCode, credit: amount, description: "Cash payment" },
-      ],
-    });
-
-    await applyApPayment(prisma, {
-      openItemId,
-      appliedByEntryId: entry.id,
-      appliedAmount: amount,
-      appliedDate: paymentDate,
-    });
-
     revalidatePath("/ap");
     revalidatePath("/", "layout");
-    return { ok: true, entryNumber: entry.entryNumber };
+    return { ok: true, entryNumber: result.entryNumber };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
       return { ok: false, error: "You must be signed in to apply a vendor payment." };
+    }
+    if (e instanceof NoTenantSelectedError) {
+      return { ok: false, error: e.message };
     }
     return {
       ok: false,

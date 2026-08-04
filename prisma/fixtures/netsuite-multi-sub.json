@@ -1,0 +1,403 @@
+{
+ "_meta": {
+  "sourceSystem": "NETSUITE",
+  "companyName": "Vandelay Industries (NS demo)",
+  "exportedAt": "2026-04-30T00:00:00Z",
+  "comment": "Hand-rolled fixture modeled on a NetSuite SuiteAnalytics export. Field naming follows NS conventions (internalid, externalid, tranid, custbody_, custcol_, classification, department, location, customForm) so the mapper exercises real-world structure. The dimension assignments on transaction lines are the headline of this fixture \u2014 Layer 3 of the universal schema gets its first real workout here.",
+  "books": [
+   "PRIMARY"
+  ],
+  "functionalCurrency": "USD",
+  "fiscalYearStart": "2026-01-01"
+ },
+ "Subsidiary": [
+  {
+   "internalid": "1",
+   "name": "Vandelay Industries",
+   "iselimination": false,
+   "currency": "USD",
+   "country": "US"
+  },
+  {
+   "internalid": "2",
+   "name": "Vandelay USA",
+   "iselimination": false,
+   "currency": "USD",
+   "country": "US",
+   "parent": {
+    "internalid": "1",
+    "name": "Vandelay Industries"
+   }
+  },
+  {
+   "internalid": "3",
+   "name": "Vandelay UK",
+   "iselimination": false,
+   "currency": "GBP",
+   "country": "GB",
+   "parent": {
+    "internalid": "1",
+    "name": "Vandelay Industries"
+   }
+  }
+ ],
+ "Class": [
+  {
+   "internalid": "10",
+   "name": "Software",
+   "isinactive": false
+  },
+  {
+   "internalid": "11",
+   "name": "Services",
+   "isinactive": false
+  }
+ ],
+ "Department": [
+  {
+   "internalid": "20",
+   "name": "Engineering",
+   "isinactive": false
+  },
+  {
+   "internalid": "21",
+   "name": "Sales",
+   "isinactive": false
+  },
+  {
+   "internalid": "22",
+   "name": "G&A",
+   "isinactive": false
+  }
+ ],
+ "Location": [
+  {
+   "internalid": "30",
+   "name": "HQ \u2014 New York",
+   "isinactive": false
+  },
+  {
+   "internalid": "31",
+   "name": "Remote \u2014 Distributed",
+   "isinactive": false
+  }
+ ],
+ "CustomSegment": [
+  {
+   "internalid": "custcol_region",
+   "name": "Region",
+   "description": "Sales/operations region (custom segment).",
+   "values": [
+    {
+     "internalid": "100",
+     "name": "NORAM"
+    },
+    {
+     "internalid": "101",
+     "name": "EMEA"
+    }
+   ]
+  }
+ ],
+ "Account": [
+  {
+   "internalid": "1000",
+   "acctnumber": "1000",
+   "acctname": "Cash \u2014 Operating",
+   "accttype": "Bank",
+   "issummary": false,
+   "isinactive": false
+  },
+  {
+   "internalid": "1200",
+   "acctnumber": "1200",
+   "acctname": "Accounts Receivable",
+   "accttype": "AcctRec",
+   "issummary": false,
+   "isinactive": false
+  },
+  {
+   "internalid": "2000",
+   "acctnumber": "2000",
+   "acctname": "Accounts Payable",
+   "accttype": "AcctPay",
+   "issummary": false,
+   "isinactive": false
+  },
+  {
+   "internalid": "3100",
+   "acctnumber": "3100",
+   "acctname": "Paid-in Capital",
+   "accttype": "Equity",
+   "issummary": false,
+   "isinactive": false
+  },
+  {
+   "internalid": "4000",
+   "acctnumber": "4000",
+   "acctname": "Subscription Revenue",
+   "accttype": "Income",
+   "issummary": false,
+   "isinactive": false
+  },
+  {
+   "internalid": "5000",
+   "acctnumber": "5000",
+   "acctname": "Consulting Income",
+   "accttype": "Income",
+   "issummary": false,
+   "isinactive": false
+  },
+  {
+   "internalid": "6000",
+   "acctnumber": "6000",
+   "acctname": "Salaries & Wages",
+   "accttype": "Expense",
+   "issummary": false,
+   "isinactive": false
+  },
+  {
+   "internalid": "7200",
+   "acctnumber": "7200",
+   "acctname": "Professional Fees",
+   "accttype": "Expense",
+   "issummary": false,
+   "isinactive": false
+  }
+ ],
+ "Customer": [
+  {
+   "internalid": "5000",
+   "entityid": "C-ACME",
+   "companyname": "Acme Corp",
+   "isinactive": false,
+   "subsidiary": "1",
+   "custentity_industry": "Manufacturing"
+  },
+  {
+   "internalid": "5001",
+   "entityid": "C-GLOBEX",
+   "companyname": "Globex Corporation",
+   "isinactive": false,
+   "subsidiary": "1",
+   "custentity_industry": "Technology"
+  }
+ ],
+ "Vendor": [
+  {
+   "internalid": "6000",
+   "entityid": "V-SMITH",
+   "companyname": "Smith & Co Legal LLP",
+   "isinactive": false,
+   "subsidiary": "1"
+  }
+ ],
+ "Item": [
+  {
+   "internalid": "7000",
+   "itemid": "SUB-MONTHLY",
+   "displayname": "Monthly SaaS subscription",
+   "itemtype": "Service",
+   "isinactive": false,
+   "incomeaccount": "4000"
+  }
+ ],
+ "Invoice": [
+  {
+   "internalid": "10001",
+   "tranid": "INV-NS-2026-001",
+   "trandate": "2026-03-15",
+   "duedate": "2026-04-14",
+   "subsidiary": "2",
+   "entity": "5000",
+   "total": 12500.0,
+   "amountremaining": 12500.0,
+   "currency": "USD",
+   "custbody_priority": "HIGH",
+   "lines": [
+    {
+     "linesequencenumber": 1,
+     "item": "7000",
+     "account": "4000",
+     "amount": 7500.0,
+     "memo": "Acme \u2014 Engineering subscription",
+     "class": "10",
+     "department": "20",
+     "location": "30",
+     "custcol_region": "100"
+    },
+    {
+     "linesequencenumber": 2,
+     "item": "7000",
+     "account": "4000",
+     "amount": 5000.0,
+     "memo": "Acme \u2014 Services tier add-on",
+     "class": "11",
+     "department": "21",
+     "location": "30",
+     "custcol_region": "100"
+    }
+   ]
+  },
+  {
+   "internalid": "10002",
+   "tranid": "INV-NS-2026-002",
+   "trandate": "2026-04-10",
+   "duedate": "2026-05-10",
+   "subsidiary": "2",
+   "entity": "5001",
+   "total": 8000.0,
+   "amountremaining": 0.0,
+   "currency": "USD",
+   "custbody_priority": "STANDARD",
+   "lines": [
+    {
+     "linesequencenumber": 1,
+     "item": "7000",
+     "account": "4000",
+     "amount": 8000.0,
+     "memo": "Globex \u2014 EMEA expansion",
+     "class": "10",
+     "department": "21",
+     "location": "31",
+     "custcol_region": "101"
+    }
+   ]
+  },
+  {
+   "internalid": "10003",
+   "tranid": "INV-UK-001",
+   "subsidiary": "3",
+   "entity": "5000",
+   "trandate": "2026-04-15",
+   "duedate": "2026-05-15",
+   "total": 1000.0,
+   "amountremaining": 1000.0,
+   "currency": "GBP",
+   "memo": "UK consulting services",
+   "custbody_priority": "STANDARD",
+   "lines": [
+    {
+     "linesequencenumber": 1,
+     "item": "7000",
+     "account": "4000",
+     "amount": 1000.0,
+     "memo": "Vandelay UK \u2014 consulting services",
+     "class": "10",
+     "department": "20",
+     "location": "30",
+     "custcol_region": "101"
+    }
+   ]
+  }
+ ],
+ "VendorBill": [
+  {
+   "internalid": "20001",
+   "tranid": "BILL-NS-001",
+   "trandate": "2026-04-10",
+   "duedate": "2026-05-10",
+   "subsidiary": "2",
+   "entity": "6000",
+   "total": 9500.0,
+   "amountremaining": 0.0,
+   "currency": "USD",
+   "lines": [
+    {
+     "linesequencenumber": 1,
+     "account": "7200",
+     "amount": 9500.0,
+     "memo": "Smith & Co \u2014 Q1 legal retainer",
+     "class": "10",
+     "department": "22",
+     "location": "30",
+     "custcol_region": "100"
+    }
+   ]
+  }
+ ],
+ "CustomerPayment": [
+  {
+   "internalid": "30001",
+   "trandate": "2026-05-15",
+   "subsidiary": "2",
+   "entity": "5001",
+   "total": 8000.0,
+   "currency": "USD",
+   "depositaccount": "1000",
+   "apply": [
+    {
+     "doc": "10002",
+     "amount": 8000.0
+    }
+   ]
+  }
+ ],
+ "VendorPayment": [
+  {
+   "internalid": "40001",
+   "trandate": "2026-05-12",
+   "subsidiary": "2",
+   "entity": "6000",
+   "total": 9500.0,
+   "currency": "USD",
+   "account": "1000",
+   "apply": [
+    {
+     "doc": "20001",
+     "amount": 9500.0
+    }
+   ]
+  }
+ ],
+ "JournalEntry": [
+  {
+   "internalid": "50001",
+   "tranid": "JE-NS-OBE",
+   "trandate": "2026-01-02",
+   "subsidiary": "2",
+   "memo": "Founding capitalization",
+   "lines": [
+    {
+     "linesequencenumber": 1,
+     "account": "1000",
+     "debit": 250000.0,
+     "credit": 0,
+     "memo": "Opening cash",
+     "class": null,
+     "department": "22",
+     "location": "30"
+    },
+    {
+     "linesequencenumber": 2,
+     "account": "3100",
+     "debit": 0,
+     "credit": 250000.0,
+     "memo": "Founders' equity",
+     "class": null,
+     "department": "22",
+     "location": "30"
+    }
+   ]
+  }
+ ],
+ "CustomFieldDefinition": [
+  {
+   "internalid": "custbody_priority",
+   "label": "Priority",
+   "fieldtype": "ENUM",
+   "appliesto": "transaction",
+   "options": [
+    "HIGH",
+    "STANDARD",
+    "LOW"
+   ]
+  },
+  {
+   "internalid": "custentity_industry",
+   "label": "Industry",
+   "fieldtype": "STRING",
+   "appliesto": "customer"
+  }
+ ]
+}

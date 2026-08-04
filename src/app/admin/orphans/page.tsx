@@ -21,10 +21,10 @@ import { prisma } from "@/lib/db";
 import { findOrphans } from "@/lib/ownership/orphan-detection";
 import {
   getCurrentUser,
-  isAdmin,
   NotAuthenticatedError,
-  NotAuthorizedError,
 } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canViewAdminPages } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -56,8 +56,8 @@ export default async function OrphansPage() {
   if (!currentUser) {
     return <PermissionDenied reason={new NotAuthenticatedError().message} />;
   }
-  if (!isAdmin(currentUser)) {
-    return <PermissionDenied reason={new NotAuthorizedError().message} />;
+  if (!canViewAdminPages(await getViewerRole())) {
+    return <PermissionDenied reason="This page requires admin access" />;
   }
 
   const [orphans, users, queues] = await Promise.all([
@@ -95,7 +95,7 @@ export default async function OrphansPage() {
   return (
     <div className="flex flex-col gap-6">
       <header>
-        <h1 className="text-xl font-semibold text-ink-900">Orphaned records</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Orphaned records</h1>
         <p className="text-sm text-ink-500">
           Records whose owner is no longer valid — typically because the user was
           deactivated or the queue was deleted. The reassignment-rules engine

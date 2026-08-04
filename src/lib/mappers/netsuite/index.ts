@@ -18,6 +18,16 @@ export {
   getOrCreateDimensionSet,
   dimensionSetHash,
 } from "./dimensions";
+export {
+  mapSubsidiary,
+  setupSubsidiaries,
+  resolveEntityCode,
+  resolveEntityResolution,
+  type EntityResolution,
+  type MappedSubsidiary,
+  type SetupSubsidiariesInput,
+  type SetupSubsidiariesResult,
+} from "./subsidiaries";
 export type {
   NsExport,
   NsAccount,
@@ -37,3 +47,16 @@ export type {
   NsJournalEntry,
   NsTransactionLine,
 } from "./types";
+
+// AccountingPeriod bootstrap (extracted from the chain's PR #43; the
+// Subsidiary/Book bootstrap halves were superseded by setupSubsidiaries
+// + setupBooks).
+export {
+  mapNsAccountingPeriod,
+  importAccountingPeriods,
+  nsCalendarCode,
+  nsPeriodCode,
+  type NsAccountingPeriodBootstrap,
+  type MappedPeriod,
+  type ImportAccountingPeriodsResult,
+} from "./periods";

@@ -113,24 +113,44 @@ export async function getM3Detail(
     toBookCode: string;
     periodStart: Date;
     periodEnd: Date;
+    /**
+     * Tenant the entity must belong to. UI/API callers MUST pass this
+     * (from getCurrentScope) — entity codes are only unique per tenant.
+     * Omitting it falls back to the legacy global entity lookup
+     * (substrate seeds + single-tenant scripts).
+     */
     tenantId?: string;
   }
 ): Promise<M3DetailReport> {
   const btd = await getBookTaxDifference(prisma, input);
 
+  // Resolve the entity so the subtype lookup pins to its tenant —
+  // mirrors getBookTaxDifference's resolution (same optional-tenantId
+  // fallback), so both lookups land on the same entity.
+  const entity = await prisma.legalEntity.findFirst({
+    where: input.tenantId
+      ? { tenantId: input.tenantId, code: input.entityCode }
+      : { code: input.entityCode },
+    select: { id: true, tenantId: true },
+  });
+  if (!entity) throw new Error(`Unknown entity: ${input.entityCode}`);
+
   // Pull subtypes for each account in the diff.
-  // SECURITY (SOC 2 CC6.1): tenant-scope the Account lookup. Without
-  // it, accounts in OTHER tenants with the same code surface and
-  // their `subtype` drives M-3 classification incorrectly. PR 7
-  // closure of the gap PR 5 documented.
   const allCodes = new Set<string>([
     ...btd.pnlRows.map((r) => r.accountCode),
     ...btd.balanceSheetRows.map((r) => r.accountCode),
   ]);
+
+  // tenantId pin: account codes are only unique per tenant, and subtype
+  // drives the M-3 line bucketing — a same-code account in another
+  // tenant could re-bucket a real difference (e.g. depreciation showing
+  // under "Meals and entertainment"). Same shape as the consolidation
+  // metadata fix (deficiency #15).
   const accounts = await prisma.account.findMany({
     where: {
+      tenantId: entity.tenantId,
       code: { in: Array.from(allCodes) },
-      ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+      OR: [{ entityId: null }, { entityId: entity.id }],
     },
     select: { code: true, subtype: true },
   });
@@ -183,7 +203,8 @@ export async function getM3Detail(
   }
 
   // Display order: largest absolute delta first so material items lead.
-  groups.sort((a, b) => Math.abs(b.totalDelta.toNumber()) - Math.abs(a.totalDelta.toNumber()));
+  // Decimal-native compare — toNumber() would lose precision past 2^53.
+  groups.sort((a, b) => b.totalDelta.abs().comparedTo(a.totalDelta.abs()));
 
   return {
     entityCode: input.entityCode,

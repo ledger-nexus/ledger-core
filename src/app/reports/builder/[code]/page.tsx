@@ -22,6 +22,8 @@ import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canManageReportTemplates } from "@/lib/auth/policy";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -106,7 +108,7 @@ export default async function ReportBuilderPage({ params, searchParams }: PagePr
           >
             Download PDF
           </Link>
-          {!template.isSystem && (
+          {!template.isSystem && canManageReportTemplates(await getViewerRole()) && (
             <Link
               href={`/reports/builder/${template.code}/edit`}
               className="rounded border border-ink-300 bg-white px-3 py-1.5 text-sm font-medium text-ink-700 hover:bg-ink-50"

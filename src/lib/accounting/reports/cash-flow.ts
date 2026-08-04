@@ -176,11 +176,32 @@ function cashImpactDirection(
 
 export async function getCashFlowStatement(
   prisma: PrismaClient,
-  scope: { entityCode: string; bookCode?: string; tenantId?: string },
+  scope: {
+    entityCode: string;
+    bookCode?: string;
+    /**
+     * Tenant the entity must belong to. UI/API callers MUST pass this
+     * (from getCurrentScope) — entity codes are only unique per tenant.
+     * Omitting it falls back to the legacy global entity lookup
+     * (substrate seeds + single-tenant scripts).
+     */
+    tenantId?: string;
+  },
   periodStart: Date,
   periodEnd: Date
 ): Promise<CashFlowStatement> {
   const bookCode = scope.bookCode ?? "US_GAAP";
+
+  // Resolve the entity FIRST so the metadata scan below can pin to its
+  // tenant — classification (subtype/isBank/isContra) must come from
+  // this tenant's chart only.
+  const entity = await prisma.legalEntity.findFirst({
+    where: scope.tenantId
+      ? { tenantId: scope.tenantId, code: scope.entityCode }
+      : { code: scope.entityCode },
+    select: { id: true, tenantId: true },
+  });
+  if (!entity) throw new Error(`Unknown entity: ${scope.entityCode}`);
 
   // BS at period start (instant before) and at period end.
   const dayBeforeStart = new Date(periodStart);
@@ -193,14 +214,15 @@ export async function getCashFlowStatement(
   ]);
 
   // Pull account metadata so we can classify each BS row.
-  // SECURITY (SOC 2 CC6.1): tenant-scope the Account lookup. Without
-  // this, accounts in OTHER tenants with the same code surface, and
-  // their `name` / `subtype` / `isBank` bleed into our cash-flow
-  // classification. PR 7 closure of the gap PR 5 documented.
+  //
+  // tenantId pin: shared accounts (entityId=null) exist PER TENANT, and
+  // the by-code map below is last-write-wins — a same-code account in
+  // another tenant could reclassify this tenant's row (e.g. flag it
+  // isBank and silently drop it from the working-capital walk).
   const accounts = await prisma.account.findMany({
     where: {
-      ...(scope.tenantId ? { tenantId: scope.tenantId } : {}),
-      OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
+      tenantId: entity.tenantId,
+      OR: [{ entityId: null }, { entityId: entity.id }],
     },
     select: { code: true, name: true, type: true, subtype: true, isBank: true, isContra: true },
   });

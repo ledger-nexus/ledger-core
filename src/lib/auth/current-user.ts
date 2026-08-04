@@ -128,37 +128,17 @@ export async function requireCurrentUser(): Promise<CurrentUser> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Admin authorization (stub)
+// Admin authorization moved to per-tenant RBAC.
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Until the full role/permission catalog from docs/ownership-and-rules.md
-// lands, admin-only pages gate on an email allowlist. Replace this with a
-// proper `can_access:admin.<feature>` permission check when the catalog is
-// built. The exports stay the same; only the implementation changes.
-
-const ADMIN_EMAIL_ALLOWLIST = new Set<string>([
-  "controller@northwind.test",
-  // Add more emails here as the test cohort grows. In production this list
-  // becomes irrelevant — real role grants take over.
-]);
-
-export class NotAuthorizedError extends Error {
-  constructor(message = "This page requires admin access") {
-    super(message);
-    this.name = "NotAuthorizedError";
-  }
-}
-
-export function isAdmin(user: CurrentUser | null): boolean {
-  if (!user) return false;
-  return ADMIN_EMAIL_ALLOWLIST.has(user.email);
-}
-
-export async function requireAdmin(): Promise<CurrentUser> {
-  const u = await requireCurrentUser();
-  if (!isAdmin(u)) throw new NotAuthorizedError();
-  return u;
-}
+// The email-allowlist isAdmin()/requireAdmin() that used to live here is
+// retired. Admin is a fact about your TenantMembership.role in the current
+// tenant, not about your email:
+//
+//   - Server Actions / routes: `requirePermitted(permission, canX)` from
+//     ./authorize.ts — resolves session + tenant, audits denials, throws.
+//   - Server Components: `getViewerRole()` from ./authorize.ts, fed to the
+//     named `can*` helpers in ./policy.ts.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers shared with the set-user Server Action.

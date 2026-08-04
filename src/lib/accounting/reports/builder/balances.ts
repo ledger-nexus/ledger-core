@@ -22,6 +22,7 @@
 import { Decimal } from "decimal.js";
 import type { PrismaClient, Prisma, AccountType } from "@prisma/client";
 
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import type { AccountFilter } from "./types";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -127,7 +128,15 @@ export async function getAccountBalances(
     include: {
       lines: {
         where: {
-          entry: { entityId: entity.id, bookId: book.id, documentDate: entryDateFilter },
+          entry: {
+            entityId: entity.id,
+            bookId: book.id,
+            documentDate: entryDateFilter,
+            // Maker-checker: only ledger-effective entries reach a report.
+            // A DRAFT or PENDING_APPROVAL entry is not yet part of the
+            // ledger; VOID never is. Same filter as reports.ts.
+            status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
+          },
         },
         select: { debit: true, credit: true },
       },

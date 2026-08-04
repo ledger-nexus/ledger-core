@@ -10,7 +10,8 @@ import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getConsolidatedTrialBalance } from "../src/lib/accounting/reports/consolidation";
-import { CHART_OF_ACCOUNTS } from "../src/lib/db/chart-of-accounts";
+import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../src/lib/db/chart-of-accounts";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const PARENT = "CONS_TEST_PARENT";
@@ -91,7 +92,14 @@ async function seedHierarchy() {
         isContra: a.isContra ?? false,
         isControlAccount: a.isControlAccount ?? false,
         isBank: a.isBank ?? false,
+        isMonetary: a.isMonetary ?? false,
         subtype: a.subtype,
+        // v0.8 FX Phase 4a — populate so the migration-backfill
+        // invariant (every account has a category) holds even when
+        // tests create accounts directly outside the seedNorthwind path.
+        translationCategory:
+          a.translationCategory ??
+          defaultTranslationCategory({ type: a.type, subtype: a.subtype }),
       },
     });
   }
@@ -312,5 +320,195 @@ describe("Consolidation: intercompany elimination", () => {
     const ar = report.rows.find((r) => r.accountCode === "1200");
     expect(ar?.isEliminated).toBe(false);
     expect(ar?.consolidatedDebit.toNumber()).toBe(800);
+  });
+});
+
+// =========================================================================
+// Tenant isolation: account metadata (subtype / isContra)
+// =========================================================================
+
+describe("Consolidation: account metadata is tenant-scoped", () => {
+  // Regression: the classification lookup (subtype + isContra) used to
+  // query accounts by code alone. Account codes are only unique per
+  // tenant (Phase 4b composite uniques), so a same-code account in
+  // ANOTHER tenant carrying an IC subtype could poison the map and
+  // eliminate a real balance from this tenant's consolidation.
+  //
+  // Both same-code rows are minted here (unique per-run code) rather
+  // than reusing the shared chart's "1000" — the test DB is persistent
+  // and pre-existing rows don't reliably carry the chart's subtype.
+  const SUFFIX = "consmeta" + Date.now().toString(36) + Math.floor(Math.random() * 9999);
+  const POISON_CODE = `1000-${SUFFIX}`;
+  let otherTenantId: string;
+  let otherOwnerUserId: string;
+
+  beforeAll(async () => {
+    // The default tenant's (root's) own row for the code: plain cash.
+    const defaultTenant = await prisma.tenant.findUniqueOrThrow({
+      where: { slug: "default" },
+      select: { id: true },
+    });
+    await prisma.account.create({
+      data: {
+        tenantId: defaultTenant.id,
+        code: POISON_CODE,
+        name: "Cash (metadata-scope regression)",
+        type: "ASSET",
+        normalBalance: "DEBIT",
+        subtype: "CASH",
+        translationCategory: defaultTranslationCategory({ type: "ASSET", subtype: "CASH" }),
+      },
+    });
+
+    const owner = await prisma.user.create({
+      data: {
+        email: `consmeta-owner-${SUFFIX}@example.test`,
+        displayName: "Consolidation metadata-poison owner",
+        isActive: true,
+      },
+    });
+    otherOwnerUserId = owner.id;
+    const tenant = await prisma.tenant.create({
+      data: {
+        slug: `consmeta-${SUFFIX}`,
+        name: "Metadata poison tenant",
+        ownerUserId: owner.id,
+      },
+    });
+    otherTenantId = tenant.id;
+    // Same code in the OTHER tenant, tagged with an IC subtype +
+    // isContra. If the metadata lookup ever loses its tenant filter,
+    // this row can win the by-code map and flip the default tenant's
+    // cash to "eliminated".
+    await prisma.account.create({
+      data: {
+        tenantId: tenant.id,
+        code: POISON_CODE,
+        name: "Poisoned IC account",
+        type: "ASSET",
+        normalBalance: "DEBIT",
+        subtype: "DUE_FROM_AFFILIATE",
+        isContra: true,
+        translationCategory: defaultTranslationCategory({
+          type: "ASSET",
+          subtype: "DUE_FROM_AFFILIATE",
+        }),
+      },
+    });
+  });
+
+  afterAll(async () => {
+    // JE lines reference the minted account; clear entries first (lines
+    // cascade), mirroring the file-level beforeEach.
+    await prisma.journalEntry.deleteMany({
+      where: { entity: { code: { in: [PARENT, SUB_A, SUB_B] } } },
+    });
+    await prisma.account.deleteMany({ where: { code: POISON_CODE } });
+    await prisma.tenant.delete({ where: { id: otherTenantId } });
+    // app_user hard-deletes trip the audit_log append-only RULE's
+    // referential-integrity check — needs the mutable window.
+    await withAuditLogMutableTransaction(prisma, async (tx) => {
+      await tx.user.delete({ where: { id: otherOwnerUserId } });
+    });
+  });
+
+  it("a same-code IC-subtype account in another tenant does not eliminate this tenant's balance", async () => {
+    await postJournalEntry(prisma, {
+      entityCode: SUB_A,
+      bookCode: BOOK,
+      documentDate: new Date("2026-03-15"),
+      memo: "Cash sale (must survive consolidation)",
+      source: "SEED",
+      lines: [
+        { accountCode: POISON_CODE, debit: 1_000 },
+        { accountCode: "4000", credit: 1_000 },
+      ],
+    });
+
+    const report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: PARENT,
+      bookCode: BOOK,
+      asOf: new Date("2026-12-31"),
+    });
+
+    const cash = report.rows.find((r) => r.accountCode === POISON_CODE);
+    expect(cash).toBeDefined();
+    // Metadata must come from the root's tenant: Cash, not the other
+    // tenant's DUE_FROM_AFFILIATE.
+    expect(cash!.subtype).toBe("CASH");
+    expect(cash!.isEliminated).toBe(false);
+    expect(cash!.consolidatedDebit.toNumber()).toBe(1_000);
+    // isContra from the poisoned row would flip the sign: normal-side
+    // balance for non-contra Cash is Dr 1,000, not Cr -1,000.
+    expect(cash!.consolidatedBalance.toNumber()).toBe(1_000);
+    expect(report.eliminationSummary.map((e) => e.accountCode)).not.toContain(POISON_CODE);
+  });
+});
+
+describe("Consolidation: multi-currency disclosure", () => {
+  // When the included entities all share the same functional currency,
+  // hasMultiCurrency must be false — no banner shown, no false alarm.
+  // When at least one sub uses a different currency, the report flags
+  // it so the page can surface the limitation.
+
+  beforeAll(async () => {
+    await clearAll();
+    await seedHierarchy(); // PARENT/SUB_A/SUB_B all USD
+  });
+
+  afterAll(async () => {
+    await clearAll();
+    await prisma.$disconnect();
+  });
+
+  it("hasMultiCurrency is false when every entity uses the same functional currency", async () => {
+    const report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: PARENT,
+      bookCode: BOOK,
+      asOf: new Date("2026-12-31"),
+    });
+    expect(report.hasMultiCurrency).toBe(false);
+    expect(report.distinctCurrencies).toEqual(["USD"]);
+    expect(
+      report.entitiesIncluded.every((e) => e.functionalCurrencyId === "USD")
+    ).toBe(true);
+  });
+
+  it("hasMultiCurrency is true when a sub uses a different currency", async () => {
+    // Add GBP currency + flip SUB_B to GBP. We don't post any GBP
+    // transactions — the disclosure logic is structural, based on
+    // entity functional currency only.
+    await prisma.currency.upsert({
+      where: { code: "GBP" },
+      create: { code: "GBP", name: "Pound Sterling", decimals: 2, symbol: "£" },
+      update: {},
+    });
+    const subB = await prisma.legalEntity.findFirstOrThrow({
+      where: { code: SUB_B },
+      select: { id: true },
+    });
+    await prisma.legalEntity.update({
+      where: { id: subB.id },
+      data: { functionalCurrencyId: "GBP" },
+    });
+
+    const report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: PARENT,
+      bookCode: BOOK,
+      asOf: new Date("2026-12-31"),
+    });
+    expect(report.hasMultiCurrency).toBe(true);
+    expect(report.distinctCurrencies.sort()).toEqual(["GBP", "USD"]);
+
+    // The entitiesIncluded field surfaces each entity's currency so
+    // the page can show "SUB_A (USD), SUB_B (GBP)" in the banner.
+    const subBEntity = report.entitiesIncluded.find((e) => e.code === SUB_B);
+    expect(subBEntity?.functionalCurrencyId).toBe("GBP");
+
+    // Critical invariant: the disclosure flag does NOT alter the
+    // numeric totals — they're still the naïve sum we always computed.
+    // The banner just tells the operator that those numbers mix
+    // currencies. Once FX translation lands, this assertion changes.
+    expect(report.balances).toBe(true);
   });
 });

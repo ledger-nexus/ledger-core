@@ -22,15 +22,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!scope) {
     return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
   }
+  // Resolve the tenant BEFORE running the report: ?root= is
+  // client-controlled, and the report's root lookup must be pinned to
+  // the session tenant or a caller could name another tenant's entity
+  // code and download that tenant's consolidated books.
+  const tenant = await getCurrentTenant();
+  if (!tenant) {
+    return new NextResponse("No tenant available — sign in and select a tenant", { status: 403 });
+  }
   const report = await getConsolidatedTrialBalance(prisma, {
     rootEntityCode: root,
     bookCode: scope.bookCode,
     asOf: new Date(asOf),
+    tenantId: tenant.id,
   });
 
   const subCodes = report.entitiesIncluded.filter((e) => !e.isRoot).map((e) => e.code);
 
-  const tenant = await getCurrentTenant();
   const currentUser = await getCurrentUser();
   await auditDataExport({
     actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
@@ -38,7 +46,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     resource: "Consolidation",
     resourceId: root,
     rowCount: report.rows.length,
-    tenantId: tenant?.id ?? null,
+    tenantId: tenant.id,
     requestHeaders: {
       ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
       userAgent: req.headers.get("user-agent"),

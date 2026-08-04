@@ -8,7 +8,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentTenant } from "@/lib/auth/tenant";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canManageRecurringEntries } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -21,8 +22,7 @@ import RunAllButton from "./run-all-button";
 
 export default async function RecurringEntriesPage() {
   const tenant = await getCurrentTenant();
-  const user = await getCurrentUser();
-  const admin = isAdmin(user);
+  const admin = canManageRecurringEntries(await getViewerRole());
 
   if (!tenant) {
     return (
@@ -76,7 +76,7 @@ export default async function RecurringEntriesPage() {
     <div className="flex flex-col gap-4">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-ink-900">Recurring entries</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">Recurring entries</h1>
           <p className="text-sm text-ink-500 mt-1 max-w-prose">
             Templates that fire on a schedule. Every cadence step posts a fresh
             journal entry via the substrate — same posting boundary, same audit

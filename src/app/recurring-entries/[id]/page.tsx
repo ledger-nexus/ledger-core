@@ -7,7 +7,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getCurrentTenant } from "@/lib/auth/tenant";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canManageRecurringEntries } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +23,7 @@ export default async function RecurringDetail({
 }) {
   const tenant = await getCurrentTenant();
   if (!tenant) return notFound();
-  const user = await getCurrentUser();
-  const admin = isAdmin(user);
+  const admin = canManageRecurringEntries(await getViewerRole());
 
   const t = await prisma.recurringEntry.findFirst({
     where: { id: params.id, tenantId: tenant.id },

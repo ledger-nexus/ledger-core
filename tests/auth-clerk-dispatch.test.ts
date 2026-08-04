@@ -128,6 +128,14 @@ describe("middleware: public-path detection", () => {
     expect(_internal.isPublic("/sign-up/verify-email-address")).toBe(true);
   });
 
+  it("treats /how-it-works as public — exactly that path, not children", async () => {
+    const { _internal } = await import("@/middleware");
+    expect(_internal.isPublic("/how-it-works")).toBe(true);
+    // The pattern is anchored: a hypothetical nested admin page must not
+    // inherit publicness from the prefix.
+    expect(_internal.isPublic("/how-it-works/edit")).toBe(false);
+  });
+
   it("treats /api/internal/* as public (gated by token, not session)", async () => {
     const { _internal } = await import("@/middleware");
     expect(_internal.isPublic("/api/internal/journal-entries")).toBe(true);

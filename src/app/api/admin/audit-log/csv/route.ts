@@ -14,11 +14,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import {
-  getCurrentUser,
-  isAdmin,
-} from "@/lib/auth/current-user";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { canViewAuditLog } from "@/lib/auth/policy";
 import { auditDataExport } from "@/lib/audit/log";
 import { toCsv, csvFilename } from "@/lib/utils/csv";
 import type { AuditEventType, AuditOutcome, Prisma } from "@prisma/client";
@@ -38,10 +36,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!currentUser) {
     return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
   }
-  if (!isAdmin(currentUser)) {
+  const tenant = await getCurrentTenant();
+  if (!canViewAuditLog(tenant?.role)) {
     return NextResponse.json({ ok: false, error: "Admin only" }, { status: 403 });
   }
-  const tenant = await getCurrentTenant();
 
   // ─── Parse + validate filter params ───────────────────────────────────
   const url = new URL(req.url);

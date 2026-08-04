@@ -11,9 +11,12 @@ export function Table({ className, ...props }: TableHTMLAttributes<HTMLTableElem
 
 export function THead({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
   return (
+    // No background band — the border + letterform treatment carries the
+    // header. 11px/medium/0.1em-tracked uppercase is the same micro-label
+    // voice as CardTitle, so tables and cards read as one system.
     <thead
       className={cn(
-        "border-b border-ink-200 bg-ink-50 text-xs uppercase tracking-wide text-ink-500",
+        "border-b border-ink-200 text-[11px] font-medium uppercase tracking-[0.1em] text-ink-500",
         className
       )}
       {...props}
@@ -32,12 +35,12 @@ export function TR({ className, ...props }: HTMLAttributes<HTMLTableRowElement>)
 export function TH({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
-      className={cn("px-3 py-2 text-left font-medium", className)}
+      className={cn("px-3 py-2.5 text-left font-medium", className)}
       {...props}
     />
   );
 }
 
 export function TD({ className, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("px-3 py-2 align-top", className)} {...props} />;
+  return <td className={cn("px-3 py-2.5 align-top", className)} {...props} />;
 }

@@ -20,6 +20,7 @@ import {
   getBalanceSheet,
 } from "@/lib/accounting/reports";
 import { MonthEndDocument } from "@/lib/reports/month-end-pdf";
+import { getReconciliationRollup } from "@/lib/recon/rollup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,9 +35,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return new NextResponse("No scope available — sign in and select a tenant", { status: 403 });
   }
 
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  // Resolve by the already-verified entityId from the session scope — never
+  // by code alone (a colliding code in another tenant would render their
+  // entity identity + period metadata).
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: scope.entityCode },
+    where: { id: scope.entityId, tenantId: scope.tenantId },
     select: { id: true, code: true, name: true },
   });
   const book = await prisma.book.findUnique({
@@ -51,7 +54,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const allPeriods = await prisma.period.findMany({
-    where: { calendar: { entityId: entity.id } },
+    where: { tenantId: scope.tenantId, calendar: { entityId: entity.id } },
     orderBy: { startsOn: "desc" },
     select: { id: true, code: true, startsOn: true, endsOn: true },
   });
@@ -90,16 +93,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     select: { closedAt: true, closedBy: true },
   });
 
-  const [tb, is, bs] = await Promise.all([
+  const tenant = await getCurrentTenant();
+
+  const [tb, is, bs, reconRollup] = await Promise.all([
     getTrialBalance(prisma, scope, selected.endsOn),
     getIncomeStatement(prisma, scope, selected.startsOn, selected.endsOn),
     getBalanceSheet(prisma, scope, selected.endsOn),
+    tenant
+      ? getReconciliationRollup(prisma, {
+          tenantId: tenant.id,
+          entityId: entity.id,
+          bookId: book.id,
+          periodId: selected.id,
+        })
+      : Promise.resolve(null),
   ]);
 
   const tbTies = tb.totalDebit.equals(tb.totalCredit);
   const bsTies = bs.totalAssets.equals(bs.totalLiabilities.plus(bs.totalEquity));
-
-  const tenant = await getCurrentTenant();
+  const reconsAllDone =
+    reconRollup !== null &&
+    reconRollup.total > 0 &&
+    reconRollup.done === reconRollup.total;
   const currentUser = await getCurrentUser();
   await auditDataExport({
     actor: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
@@ -130,7 +145,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           closedBy: close.closedBy,
         }
       : null,
-    tieOuts: { tbTies, bsTies },
+    tieOuts: {
+      tbTies,
+      bsTies,
+      // Recons signed off — added in BlackLine arc Phase 1 PR 8. null
+      // when no recons opened (renders as "n/a" in the PDF).
+      reconsAllDone: reconRollup && reconRollup.total > 0 ? reconsAllDone : null,
+      reconsDone: reconRollup ? reconRollup.done : 0,
+      reconsTotal: reconRollup ? reconRollup.total : 0,
+    },
+    reconRollup: reconRollup && reconRollup.total > 0 ? reconRollup : null,
     incomeStatement: {
       revenue: is.revenue.map((r) => ({
         code: r.code,

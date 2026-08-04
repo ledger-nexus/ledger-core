@@ -42,10 +42,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { Decimal } from "decimal.js";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { auditTokenUse } from "@/lib/audit/log";
 import { resolveBearerToken } from "@/lib/auth/token";
+import { withTenantContext } from "@/lib/tenant-context";
+
+// RLS Phase 2b widening: findByLineage runs inside withTenantContext on
+// the main path (taking tx), AND from outside on the race-loss recovery
+// path (taking raw prisma after the inner tx rolled back).
+type Db = PrismaClient | Prisma.TransactionClient;
 import {
   UnbalancedEntryError,
   InvalidLineError,
@@ -210,11 +217,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const hasFullLineage =
     !!body.sourceSystem && !!body.sourceRecordType && !!body.sourceRecordId;
   if (hasFullLineage) {
-    const existing = await findByLineage(
-      identity.tenantId,
-      body.sourceSystem!,
-      body.sourceRecordType!,
-      body.sourceRecordId!
+    // RLS Phase 2b: the idempotency lookup runs in its own
+    // withTenantContext tx. Tenant-scoped findByLineage + GUC are
+    // belt-and-suspenders for Phase 3 FORCE.
+    const existing = await withTenantContext(prisma, identity.tenantId, async (tx) =>
+      findByLineage(
+        tx,
+        identity.tenantId,
+        body.sourceSystem!,
+        body.sourceRecordType!,
+        body.sourceRecordId!
+      )
     );
     if (existing) {
       return NextResponse.json({
@@ -228,7 +241,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const result = await postJournalEntry(prisma, input);
+    // RLS Phase 2b: postJournalEntry runs inside withTenantContext. It
+    // already accepts both PrismaClient and TransactionClient per the
+    // v1.11 contract — no helper widening required.
+    const result = await withTenantContext(prisma, identity.tenantId, async (tx) =>
+      postJournalEntry(tx, input)
+    );
     // SOC 2 CC6: log the successful token use + resulting JE.
     // sourceSystem identifies which sibling repo posted this; tenantLabel
     // identifies which token authorized it (audit reviews use this to
@@ -263,7 +281,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // and return as duplicate. Only relevant when the partial unique
     // index exists; harmless otherwise.
     if (hasFullLineage && isUniqueViolation(e)) {
+      // Race-loss recovery: the inner tx rolled back; query on raw
+      // prisma since we're outside the withTenantContext now. tenantId
+      // predicate alone is sufficient for the read (pre-Phase-3) and
+      // becomes a secondary defense once FORCE lands.
       const existing = await findByLineage(
+        prisma,
         identity.tenantId,
         body.sourceSystem!,
         body.sourceRecordType!,
@@ -356,12 +379,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 // same lineage triple (e.g. identical Plaid transaction ids) would
 // dedup against each other and cross-tenant-leak the resulting id.
 async function findByLineage(
+  db: Db,
   tenantId: string,
   sourceSystem: string,
   sourceRecordType: string,
   sourceRecordId: string
 ): Promise<{ id: string; entryNumber: string; bookCode: string } | null> {
-  const found = await prisma.journalEntry.findFirst({
+  const found = await db.journalEntry.findFirst({
     where: { tenantId, sourceSystem, sourceRecordType, sourceRecordId },
     select: { id: true, entryNumber: true, book: { select: { code: true } } },
   });

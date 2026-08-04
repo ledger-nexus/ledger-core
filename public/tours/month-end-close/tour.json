@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "id": "month-end-close",
+  "title": "Run the month-end close",
+  "frame": {
+    "w": 2880,
+    "h": 1800
+  },
+  "theme": {
+    "accent": "#0891b2"
+  },
+  "steps": [
+    {
+      "img": "steps/01.webp",
+      "hotspot": {
+        "x": 0.0139,
+        "y": 0.4844,
+        "w": 0.1521,
+        "h": 0.0311
+      },
+      "tooltip": {
+        "text": "The dashboard is the day-to-day view — balances, cash, what needs attention. The close has its own home. Open the **Close dashboard**."
+      },
+      "zoom": 1.25
+    },
+    {
+      "img": "steps/02.webp",
+      "hotspot": {
+        "x": 0.0139,
+        "y": 0.5167,
+        "w": 0.1521,
+        "h": 0.0311
+      },
+      "tooltip": {
+        "text": "Every pillar of this month's close on one screen — tasks, reconciliations, alerts — with the stragglers surfaced. Start where a close starts: **Close tasks**."
+      }
+    },
+    {
+      "img": "steps/03.webp",
+      "hotspot": {
+        "x": 0.0139,
+        "y": 0.5489,
+        "w": 0.1521,
+        "h": 0.0311
+      },
+      "tooltip": {
+        "text": "A dependency-ordered checklist, not a spreadsheet: each task knows what it blocks, and state changes are append-only history. Next, tie the balances out — **Reconciliations**."
+      }
+    },
+    {
+      "img": "steps/04.webp",
+      "hotspot": {
+        "x": 0.0139,
+        "y": 0.71,
+        "w": 0.1521,
+        "h": 0.0311
+      },
+      "tooltip": {
+        "text": "Every account ties to something outside the ledger — sub-ledger pulls, sign-offs, attachments, a state machine to signed-off. When the pillars are green, assemble the packet: **Month-end review**."
+      }
+    },
+    {
+      "img": "steps/05.webp",
+      "hotspot": {
+        "x": 0.8854,
+        "y": 0.4533,
+        "w": 0.075,
+        "h": 0.0311
+      },
+      "tooltip": {
+        "text": "The whole month in one packet — statements, comparisons, the trail your reviewer actually reads. **One click, out the door.**"
+      },
+      "zoom": 1.25
+    }
+  ],
+  "cta": {
+    "label": "Explore the code",
+    "href": "https://github.com/ledger-nexus/ledger-core"
+  }
+}

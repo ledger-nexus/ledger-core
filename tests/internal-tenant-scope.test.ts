@@ -24,6 +24,7 @@ import {
   revokeTenantApiToken,
 } from "@/lib/auth/token";
 import { POST } from "../src/app/api/internal/journal-entries/route";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -133,7 +134,9 @@ afterAll(async () => {
   await prisma.journalEntry.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.account.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: { in: tenantIds } } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  });
   await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
   await prisma.user.deleteMany({ where: { id: ownerUser.id } }).catch(() => {});
   await prisma.$disconnect();

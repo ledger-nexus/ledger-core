@@ -272,9 +272,60 @@ describe("Report Builder — end-to-end operator journey", () => {
   });
 
   // ──────────────────────────────────────────────────────────────────
-  // Step 6: Delete the clone — mirrors PR 9's deleteReportTemplate.
+  // Step 6 (post-#315 regression): a PENDING_APPROVAL entry must never
+  // reach builder balances. The builder's math primitive predates
+  // maker-checker, so this pins the LEDGER_EFFECTIVE_STATUSES filter
+  // added on merge. The entry is flipped to POSTED at the end to prove
+  // the exclusion came from the status filter, not a broken fixture.
+  it("step 6 — pending-approval entry is excluded from builder balances until posted", async () => {
+    const { id: entryId } = await postJournalEntry(prisma, {
+      entityCode: ENT_CODE,
+      bookCode: BOOK_CODE,
+      currencyCode: "USD",
+      documentDate: new Date("2026-03-15"),
+      memo: "End-to-end fixture pending revenue",
+      source: "MANUAL",
+      lines: [
+        { accountCode: "1000", debit: 777, credit: 0 },
+        { accountCode: "4000", debit: 0, credit: 777 },
+      ],
+    });
+    // Simulate maker-checker holding the entry. How it entered PENDING
+    // doesn't matter to the invariant: non-effective statuses never
+    // aggregate, period.
+    await prisma.journalEntry.update({
+      where: { id: entryId },
+      data: { status: "PENDING_APPROVAL" },
+    });
+
+    const tpl = await loadTemplate(prisma, CLONE_CODE, tenantId);
+    const pendingMatrix = await renderTemplate(prisma, tpl!, {
+      asOfDate: new Date("2026-12-31"),
+      entityCode: ENT_CODE,
+      bookCode: BOOK_CODE,
+      tenantId,
+    });
+    const niPending = pendingMatrix.rows.find((r) => r.id === "ni");
+    expect(niPending!.cells[0].value).toBe("5000.00");
+
+    await prisma.journalEntry.update({
+      where: { id: entryId },
+      data: { status: "POSTED" },
+    });
+    const postedMatrix = await renderTemplate(prisma, tpl!, {
+      asOfDate: new Date("2026-12-31"),
+      entityCode: ENT_CODE,
+      bookCode: BOOK_CODE,
+      tenantId,
+    });
+    const niPosted = postedMatrix.rows.find((r) => r.id === "ni");
+    expect(niPosted!.cells[0].value).toBe("5777.00");
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 7: Delete the clone — mirrors PR 9's deleteReportTemplate.
   // Asserts the resolver no longer returns it.
-  it("step 6 — delete + resolver returns null", async () => {
+  it("step 7 — delete + resolver returns null", async () => {
     await prisma.reportTemplate.delete({ where: { id: cloneId } });
     cloneId = ""; // prevent cleanup double-delete
     const gone = await loadTemplate(prisma, CLONE_CODE, tenantId);

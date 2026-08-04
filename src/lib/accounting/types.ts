@@ -99,7 +99,29 @@ export interface JournalEntryInput {
   sourcePayload?: unknown;
   mappingVersion?: string;
   extensions?: Record<string, unknown>;
+
+  // Maker-checker: when "PENDING_APPROVAL", the entry is persisted with
+  // its lines (balance validated up front) but has NO ledger effect —
+  // every aggregation site filters to LEDGER_EFFECTIVE_STATUSES below.
+  // Defaults to "POSTED", the historical behavior. Period-close checks
+  // are SKIPPED on pending entries (re-run at approval time) so a
+  // submission doesn't fail just because the period closed between
+  // submit and approve.
+  initialStatus?: "POSTED" | "PENDING_APPROVAL";
+  // Required when initialStatus="PENDING_APPROVAL" — the maker's User
+  // UUID, used for the separation-of-duties check at approval.
+  submittedByUserId?: string;
 }
+
+/**
+ * The statuses with ledger effect. PENDING_APPROVAL entries (queued
+ * maker-checker submissions) and VOID entries (rejected/withdrawn
+ * submissions, plus any future lined voids) carry lines but must NOT
+ * count in any balance, report, revaluation, tie-out, or match.
+ * REVERSED originals stay in — they and their reversal entries net.
+ * Every aggregation over journal lines filters on this.
+ */
+export const LEDGER_EFFECTIVE_STATUSES = ["POSTED", "REVERSED"] as const;
 
 // Custom error types so the API layer can produce useful messages.
 export class UnbalancedEntryError extends Error {
@@ -153,6 +175,46 @@ export class AccountBookScopeError extends Error {
   }
 }
 
+// Raised when an account constrains the commodities it may hold and the
+// entry's currency isn't one of them — e.g. a EUR posting into a USD-only
+// cash account. Accounts with an empty allowedCurrencies are unconstrained.
+export class AccountCurrencyNotAllowedError extends Error {
+  constructor(
+    public accountCode: string,
+    public currencyCode: string,
+    public allowedCurrencies: string[]
+  ) {
+    super(
+      `Account ${accountCode} does not accept ${currencyCode} ` +
+        `(allowed: ${allowedCurrencies.join(", ")})`
+    );
+    this.name = "AccountCurrencyNotAllowedError";
+  }
+}
+
+// Raised when an entry is dated outside the account's open window. Boundaries
+// are INCLUSIVE — posting ON openedOn or ON closedOn is fine; the error means
+// the document date fell strictly before the account opened or strictly after
+// it closed. A null boundary is unbounded.
+export class AccountNotOpenError extends Error {
+  constructor(
+    public accountCode: string,
+    public documentDate: Date,
+    public openedOn: Date | null,
+    public closedOn: Date | null
+  ) {
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const reason =
+      openedOn && documentDate < openedOn
+        ? `it did not open until ${iso(openedOn)}`
+        : `it closed on ${iso(closedOn as Date)}`;
+    super(
+      `Account ${accountCode} was not open on ${iso(documentDate)} — ${reason}`
+    );
+    this.name = "AccountNotOpenError";
+  }
+}
+
 // Raised when input.tenantId is supplied but doesn't match the tenant
 // that owns the resolved LegalEntity. Indicates a cross-tenant attempt —
 // e.g. a Server Action running as tenant A trying to write to an entity
@@ -183,5 +245,33 @@ export class EntityMissingTenantError extends Error {
         `Every entity must belong to a tenant (Phase 1 migration).`
     );
     this.name = "EntityMissingTenantError";
+  }
+}
+
+// v0.9 NS Books Phase 3.5.D — raised when an AR/AP application attempts
+// to bind a payment-side JE on one book to an OpenItem on a different
+// book. In Pattern 2 multi-book ledger semantics, each book is its own
+// independent GL — an application must stay within a single book or the
+// per-book trial balance gets corrupted.
+//
+// Typical trigger: hand-built or AI-suggested apply that picked the
+// wrong OpenItem from a multi-book set. The NS importer's Phase 3.5.B
+// path matches book correctly via the per-book lookup map, but Server
+// Actions / API endpoints calling applyArPayment / applyApPayment
+// directly need this guard.
+export class CrossBookApplicationError extends Error {
+  constructor(
+    public openItemId: string,
+    public openItemBookCode: string,
+    public appliedByEntryId: string,
+    public appliedByEntryBookCode: string
+  ) {
+    super(
+      `Cross-book application refused: payment JE ${appliedByEntryId} ` +
+        `posted on book ${appliedByEntryBookCode} cannot apply to ` +
+        `open item ${openItemId} on book ${openItemBookCode}. ` +
+        `Apply on the matching-book payment JE instead.`
+    );
+    this.name = "CrossBookApplicationError";
   }
 }

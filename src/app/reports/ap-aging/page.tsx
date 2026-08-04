@@ -19,10 +19,41 @@ const BUCKET_LABEL: Record<string, string> = {
   OVER_90: "Over 90 days",
 };
 
+type SortField =
+  | "reference"
+  | "vendor"
+  | "opened"
+  | "due"
+  | "daysOverdue"
+  | "bucket"
+  | "status"
+  | "original"
+  | "balance";
+type SortDir = "asc" | "desc";
+
+const VALID_SORT_FIELDS: SortField[] = [
+  "reference",
+  "vendor",
+  "opened",
+  "due",
+  "daysOverdue",
+  "bucket",
+  "status",
+  "original",
+  "balance",
+];
+const BUCKET_RANK: Record<string, number> = {
+  CURRENT: 0,
+  "1_30": 1,
+  "31_60": 2,
+  "61_90": 3,
+  OVER_90: 4,
+};
+
 export default async function ApAgingPage({
   searchParams,
 }: {
-  searchParams: { asOf?: string };
+  searchParams: { asOf?: string; sort?: string; dir?: string };
 }) {
   // Tenant-verified scope (closes the cross-tenant read leak the raw
   // lc-scope cookie used to enable).
@@ -38,11 +69,18 @@ export default async function ApAgingPage({
   const asOf = searchParams.asOf ?? "2026-06-30";
   const asOfDate = new Date(asOf);
 
+  const sortField: SortField =
+    (VALID_SORT_FIELDS as readonly string[]).includes(searchParams.sort ?? "")
+      ? (searchParams.sort as SortField)
+      : "due";
+  const sortDir: SortDir = searchParams.dir === "desc" ? "desc" : "asc";
+
   const [buckets, total, items] = await Promise.all([
-    apAging(prisma, scope.entityCode, scope.bookCode, asOfDate),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
+    apAging(prisma, scope.entityCode, scope.bookCode, asOfDate, scope.tenantId),
+    openApBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.apOpenItem.findMany({
       where: {
+        tenantId: scope.tenantId,
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
@@ -73,6 +111,55 @@ export default async function ApAgingPage({
     if (d <= 60) return "31_60";
     if (d <= 90) return "61_90";
     return "OVER_90";
+  }
+
+  const sortedItems = [...items].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const cmp = (() => {
+      switch (sortField) {
+        case "reference":
+          return (a.referenceNumber ?? a.id).localeCompare(b.referenceNumber ?? b.id);
+        case "vendor":
+          return a.party.displayName.localeCompare(b.party.displayName);
+        case "opened":
+          return a.openedDate.getTime() - b.openedDate.getTime();
+        case "due": {
+          const ax = a.dueDate?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          const bx = b.dueDate?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          return ax - bx;
+        }
+        case "daysOverdue": {
+          const ax = daysOverdue(a) ?? -Infinity;
+          const bx = daysOverdue(b) ?? -Infinity;
+          return ax - bx;
+        }
+        case "bucket":
+          return (BUCKET_RANK[bucketFor(a)] ?? 0) - (BUCKET_RANK[bucketFor(b)] ?? 0);
+        case "status":
+          return a.status.localeCompare(b.status);
+        case "original":
+          return Number(a.originalAmount) - Number(b.originalAmount);
+        case "balance":
+          return Number(a.currentBalance) - Number(b.currentBalance);
+      }
+    })();
+    return cmp * dir;
+  });
+
+  function sortLink(field: SortField): string {
+    const next: SortDir =
+      field === sortField
+        ? sortDir === "asc"
+          ? "desc"
+          : "asc"
+        : field === "original" || field === "balance" || field === "daysOverdue"
+          ? "desc"
+          : "asc";
+    return `?asOf=${asOf}&sort=${field}&dir=${next}`;
+  }
+  function sortArrow(field: SortField): string {
+    if (field !== sortField) return " ↕";
+    return sortDir === "asc" ? " ↑" : " ↓";
   }
 
   return (
@@ -139,19 +226,19 @@ export default async function ApAgingPage({
             <Table>
               <THead>
                 <tr>
-                  <TH>Reference</TH>
-                  <TH>Vendor</TH>
-                  <TH>Opened</TH>
-                  <TH>Due</TH>
-                  <TH>Days overdue</TH>
-                  <TH>Bucket</TH>
-                  <TH>Status</TH>
-                  <TH className="text-right">Original</TH>
-                  <TH className="text-right">Balance</TH>
+                  <TH><Link href={sortLink("reference")} className="hover:underline">Reference{sortArrow("reference")}</Link></TH>
+                  <TH><Link href={sortLink("vendor")} className="hover:underline">Vendor{sortArrow("vendor")}</Link></TH>
+                  <TH><Link href={sortLink("opened")} className="hover:underline">Opened{sortArrow("opened")}</Link></TH>
+                  <TH><Link href={sortLink("due")} className="hover:underline">Due{sortArrow("due")}</Link></TH>
+                  <TH><Link href={sortLink("daysOverdue")} className="hover:underline">Days overdue{sortArrow("daysOverdue")}</Link></TH>
+                  <TH><Link href={sortLink("bucket")} className="hover:underline">Bucket{sortArrow("bucket")}</Link></TH>
+                  <TH><Link href={sortLink("status")} className="hover:underline">Status{sortArrow("status")}</Link></TH>
+                  <TH className="text-right"><Link href={sortLink("original")} className="hover:underline">Original{sortArrow("original")}</Link></TH>
+                  <TH className="text-right"><Link href={sortLink("balance")} className="hover:underline">Balance{sortArrow("balance")}</Link></TH>
                 </tr>
               </THead>
               <TBody>
-                {items.map((item) => {
+                {sortedItems.map((item) => {
                   const d = daysOverdue(item);
                   return (
                     <TR key={item.id}>

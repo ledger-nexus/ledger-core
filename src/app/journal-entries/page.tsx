@@ -11,12 +11,11 @@
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
-import { tenantScopeOrNone } from "@/lib/db-sentinels";
+import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate, formatMoney } from "@/lib/utils/format";
@@ -28,7 +27,15 @@ export default async function JournalEntriesPage({
 }: {
   searchParams: { from?: string; to?: string; q?: string; page?: string };
 }) {
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <EmptyState
+        title="No scope available"
+        description="Sign in and select a tenant with at least one entity to view journal entries."
+      />
+    );
+  }
   const from = searchParams.from ?? "2026-01-01";
   const to = searchParams.to ?? "2026-12-31";
   const q = (searchParams.q ?? "").trim();
@@ -39,12 +46,10 @@ export default async function JournalEntriesPage({
   const fromDate = new Date(from);
   const toDate = new Date(to);
 
-  // Tenant-scope (Phase 4c): defense-in-depth against cross-tenant reads.
-  // JournalEntry has a denormalized tenantId; filtering on it cuts the
-  // query plan AND closes the leak when Phase 4b makes entityCode no
-  // longer globally unique.
-  const tenant = await getCurrentTenant();
-  const tenantFilter = tenantScopeOrNone(tenant?.id);
+  // Tenant pin from the verified scope. JournalEntry has a denormalized
+  // tenantId; filtering on it cuts the query plan AND closes the leak
+  // now that Phase 4b makes entityCode no longer globally unique.
+  const tenantFilter = { tenantId: scope.tenantId };
 
   // Search predicate. Postgres' `mode: "insensitive"` does an ILIKE
   // under the hood; for v1 we accept the full-table scan (the date
@@ -221,7 +226,7 @@ export default async function JournalEntriesPage({
                         )}
                       </TD>
                       <TD>
-                        <Badge tone="neutral">{entry.source}</Badge>
+                        <SourceBadge source={entry.source} />
                       </TD>
                       <TD>
                         {entry.sourceSystem ? (

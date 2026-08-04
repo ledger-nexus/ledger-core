@@ -61,6 +61,57 @@ model Tenant {
   name        String
   ownerUserId String @db.Uuid
 
+  // ─── Maker-checker policy (PR #46 harvest ④) ───────────────────────
+  /// When true, non-approver journal entries land in the
+  /// PENDING_APPROVAL queue instead of posting directly. Default off —
+  /// solo books and small teams keep the historical behavior.
+  requireJeApproval Boolean @default(false)
+  /// Optional amount threshold. Null (or ≤ 0) with the flag on means
+  /// EVERY non-approver entry queues; when > 0, only entries whose
+  /// total ≥ this amount queue and smaller ones post directly. Units:
+  /// the entry's own currency total (one currency per entry).
+  jeApprovalMinAmount Decimal? @db.Decimal(18, 4)
+
+  // ─── Ownership transfer (PR #46 harvest ⑤) ─────────────────────────
+  /// Two-step OWNER hand-off: these columns record the target user +
+  /// when the offer was made. The target must accept (Server Action
+  /// gated on currentUser.id === pendingOwnerTransferToUserId) to swap;
+  /// either side can cancel before that. The atomic swap rotates
+  /// Tenant.ownerUserId + flips the OWNER/ADMIN roles on the two
+  /// memberships in one $transaction. Null on both = no transfer
+  /// pending. Initiator-only column kept thin — the initiator is always
+  /// the current OWNER, recoverable from ownerUserId while non-null.
+  pendingOwnerTransferToUserId    String?   @db.Uuid
+  pendingOwnerTransferInitiatedAt DateTime?
+
+  // ─── Stripe subscription state (PR #46 harvest ⑦) ──────────────────
+  //
+  // Written ONLY by /api/billing/webhook after signature verification —
+  // never by a Server Action, never from client input. Everything the
+  // app decides about entitlement reads these five columns; Stripe is
+  // the system of record and this is its local mirror.
+  //
+  // All nullable: a tenant with no subscription (the common case, and
+  // the only case until Stripe env vars are configured) has NULL in all
+  // five and resolves to FREE_TIER via getEffectivePlan().
+  /// Stripe Customer id (cus_...). Unique — one Stripe customer per
+  /// workspace, so a webhook can never fan out across tenants.
+  stripeCustomerId String? @unique
+  /// Stripe Subscription id (sub_...). Null when never subscribed or
+  /// after cancellation.
+  stripeSubscriptionId String?
+  /// Plan key from src/lib/billing/plans.ts ("starter" | "growth" |
+  /// "scale"). Null = free tier. A key not in the catalog (a retired
+  /// tier) also resolves to FREE_TIER rather than throwing.
+  billingPlan String?
+  /// Raw Stripe subscription status string ("active", "trialing",
+  /// "past_due", "canceled", …). Deliberately NOT an enum: Stripe adds
+  /// statuses, and a value we don't recognize must degrade to free
+  /// tier, not fail a migration.
+  subscriptionStatus String?
+  /// End of the current paid period — display only ("Renews 2026-09-01").
+  currentPeriodEnd DateTime?
+
   memberships TenantMembership[]
   apiTokens   TenantApiToken[]
 
@@ -68,40 +119,63 @@ model Tenant {
   // resolve the relations on the other side. Cascading delete is OFF by
   // default — soft delete is the intended path for tenant offboarding
   // (see docs/multi-tenancy.md "Open questions").
-  legalEntities          LegalEntity[]
-  fiscalCalendars        FiscalCalendar[]
-  periods                Period[]
-  periodCloses           PeriodClose[]
-  parties                Party[]
-  partyRoles             PartyRole[]
-  items                  Item[]
-  accounts               Account[]
-  journalEntries         JournalEntry[]
-  journalLines           JournalLine[]
-  dimensions             Dimension[]
-  dimensionValues        DimensionValue[]
-  dimensionSets          DimensionSet[]
-  postingRules           PostingRule[]
-  customFieldDefinitions CustomFieldDefinition[]
-  arOpenItems            ArOpenItem[]
-  arApplications         ArApplication[]
-  apOpenItems            ApOpenItem[]
-  apApplications         ApApplication[]
-  fixedAssets            FixedAsset[]
-  leases                 Lease[]
-  revenueContracts       RevenueContract[]
-  queues                 Queue[]
-  recordEvents           RecordEvent[]
-  auditLogs              AuditLog[]
-  reassignmentRules      ReassignmentRule[]
-  notifications          Notification[]
-  recurringEntries       RecurringEntry[]
-  journalEntryNotes      JournalEntryNote[]
-  reportTemplates        ReportTemplate[]
+  legalEntities             LegalEntity[]
+  fiscalCalendars           FiscalCalendar[]
+  periods                   Period[]
+  periodCloses              PeriodClose[]
+  balanceAssertions         BalanceAssertion[]
+  commodities               Commodity[]
+  commodityPrices           CommodityPrice[]
+  lots                      Lot[]
+  parties                   Party[]
+  partyRoles                PartyRole[]
+  items                     Item[]
+  accounts                  Account[]
+  journalEntries            JournalEntry[]
+  journalLines              JournalLine[]
+  dimensions                Dimension[]
+  dimensionValues           DimensionValue[]
+  dimensionSets             DimensionSet[]
+  postingRules              PostingRule[]
+  customFieldDefinitions    CustomFieldDefinition[]
+  arOpenItems               ArOpenItem[]
+  arApplications            ArApplication[]
+  apOpenItems               ApOpenItem[]
+  apApplications            ApApplication[]
+  fixedAssets               FixedAsset[]
+  leases                    Lease[]
+  revenueContracts          RevenueContract[]
+  queues                    Queue[]
+  recordEvents              RecordEvent[]
+  auditLogs                 AuditLog[]
+  reassignmentRules         ReassignmentRule[]
+  notifications             Notification[]
+  recurringEntries          RecurringEntry[]
+  journalEntryNotes         JournalEntryNote[]
+  // BlackLine arc Phase 1: account-reconciliation workflow.
+  reconciliations           Reconciliation[]
+  reconciliationAttachments ReconciliationAttachment[]
+  reconciliationConfig      ReconciliationConfig?
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks                CloseTask[]
+  closeTaskTemplates        CloseTaskTemplate[]
+  closeTaskComments         CloseTaskComment[]
+  closeTaskStateChanges     CloseTaskStateChange[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements            FluxStatement[]
+  fluxLines                 FluxLine[]
+  // Notifications arc: per-tenant Slack/etc channels for close alerts.
+  notificationChannels      NotificationChannel[]
+  notificationDispatches    NotificationDispatch[]
+  bankTransactions          BankTransaction[]
+  emailDeliveries           EmailDelivery[]
+  invites                   TenantInvite[]
+  reportTemplates           ReportTemplate[]
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   deletedAt DateTime? // soft delete
+  BankRule  BankRule[]
 
   @@index([ownerUserId])
   @@map("tenant")
@@ -127,6 +201,7 @@ enum TenantRole {
   OWNER // cannot be removed; can delete the tenant
   ADMIN // full read+write+admin (period close, user lifecycle)
   MEMBER // read+write, no admin actions
+  VIEWER // read-only — reports and pages, no mutations (auditors)
 }
 
 // Per-tenant API tokens for companion-repo authentication.
@@ -175,6 +250,16 @@ model LegalEntity {
   functionalCurrencyId String
   functionalCurrency   Currency @relation("EntityFunctionalCcy", fields: [functionalCurrencyId], references: [code])
 
+  // v0.9 NS Books — promoted from `extensions.nsIsElimination` JSON flag
+  // to a real column. NetSuite OneWorld designates one subsidiary per
+  // group as the "elimination subsidiary" — its only postings are the
+  // intercompany eliminations the consolidation engine generates. The
+  // existing IC-subtype elimination logic (DUE_FROM/DUE_TO/INTERCOMPANY_*)
+  // is account-driven and doesn't need this flag yet, but the column
+  // unblocks future entity-level elimination behavior (e.g. "post the
+  // CTA plug to the elimination sub instead of the parent").
+  isEliminationEntity Boolean @default(false)
+
   // Lineage — null for natively-created entities; populated on ERP import.
   sourceSystem     String?
   sourceRecordType String?
@@ -189,12 +274,20 @@ model LegalEntity {
   parties          Party[]
   items            Item[]
   periodCloses     PeriodClose[]
+  balanceAssertions BalanceAssertion[]
+  lots              Lot[]
   fixedAssets      FixedAsset[]
   leases           Lease[]
   revenueContracts RevenueContract[]
   arOpenItems      ArOpenItem[]
   apOpenItems      ApOpenItem[]
   recurringEntries RecurringEntry[]
+  reconciliations  Reconciliation[]
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks       CloseTask[]
+  bankTransactions BankTransaction[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements   FluxStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -220,6 +313,8 @@ model Book {
 
   journalEntries                JournalEntry[]
   periodCloses                  PeriodClose[]
+  balanceAssertions             BalanceAssertion[]
+  lots                          Lot[]
   postingRules                  PostingRule[]
   fixedAssetBookAttributes      FixedAssetBookAttributes[]
   leaseBookAttributes           LeaseBookAttributes[]
@@ -227,6 +322,12 @@ model Book {
   arOpenItems                   ArOpenItem[]
   apOpenItems                   ApOpenItem[]
   recurringEntries              RecurringEntry[]
+  reconciliations               Reconciliation[]
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks                    CloseTask[]
+  bankTransactions              BankTransaction[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatements                FluxStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -281,8 +382,14 @@ model Period {
   startsOn   DateTime       @db.Date
   endsOn     DateTime       @db.Date
 
-  journalEntries JournalEntry[]
-  closes         PeriodClose[]
+  journalEntries     JournalEntry[]
+  closes             PeriodClose[]
+  reconciliations    Reconciliation[]
+  // BlackLine arc Phase 2: close-task calendar.
+  closeTasks         CloseTask[]
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatementsFrom FluxStatement[]  @relation("FluxFromPeriod")
+  fluxStatementsTo   FluxStatement[]  @relation("FluxToPeriod")
 
   @@unique([calendarId, code])
   @@unique([calendarId, ordinal])
@@ -310,6 +417,96 @@ model PeriodClose {
   @@unique([entityId, bookId, periodId])
   @@index([tenantId])
   @@map("period_close")
+}
+
+// Append-only reopen history. PeriodClose is binary — a row exists (closed) or
+// it doesn't (open) — so deleting it on reopen erases the fact that a period was
+// ever reopened, and why. This log preserves each reopen as an immutable fact:
+// who, when, and the REQUIRED reason. Tamper-evident capture also lives in
+// audit_log (DB-RULE append-only); this table is the queryable domain
+// projection ("show every reopen of 2026-05 with reasons"). Columns are
+// denormalized (codes + reopenedBy email, no FK relations) so a row survives
+// deletion of its period/entity — the same survival rationale as
+// audit_log.actorEmail. Insert-only by application convention.
+model PeriodReopenLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @db.Uuid
+  entityId   String   @db.Uuid
+  bookId     String   @db.Uuid
+  entityCode String
+  bookCode   String
+  periodCode String
+  reason     String
+  reopenedBy String? // admin email; denormalized for trail survival
+  reopenedAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([entityId, bookId, periodCode])
+  @@map("period_reopen_log")
+}
+
+// Balance assertion — "this account held exactly this much on this date."
+//
+// postJournalEntry enforces correctness at the moment of WRITE (debits =
+// credits, account validity, period close). An assertion enforces correctness
+// ACROSS TIME: it catches silent drift — a double-posted import, a missed
+// reversal, a mapper regression — on the date it first appears, instead of at
+// period close. Cheap and machine-checked, so it can run continuously (e.g.
+// after every bank-feed import).
+//
+// This does NOT duplicate Reconciliation. Reconciliation is the periodic,
+// human, attested control (glBalance vs supportingBalance + sign-off); an
+// assertion is a continuous tripwire. They are complementary — keep both.
+//
+// asOf semantics: END of day — the observed balance includes every entry with
+// documentDate <= asOf, matching getTrialBalance. (Beancount, the source of
+// this idea, asserts at the START of the date. The divergence is deliberate;
+// mixing the two silently answers the wrong question.)
+//
+// expectedAmount is stated on the account's NORMAL side, matching
+// TrialBalanceRow.balance. tolerance null => derived from Currency.decimals
+// (one unit of the last decimal place: 0.01 USD, 1 JPY).
+model BalanceAssertion {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+  accountId String     @db.Uuid
+  account   Account    @relation(fields: [accountId], references: [id])
+
+  // v1 asserts in the book's reporting currency. Plain column (no relation),
+  // matching ar_open_item / ap_open_item. Carried explicitly so per-commodity
+  // assertions remain expressible once a commodity/price layer exists.
+  currencyId String
+
+  asOf           DateTime @db.Date
+  expectedAmount Decimal  @db.Decimal(20, 4)
+  tolerance      Decimal? @db.Decimal(20, 4)
+
+  // Result cache. The assertion itself is the durable fact; these are a
+  // recomputable snapshot of the last check so a UI can render without
+  // re-running the whole sweep.
+  lastCheckedAt      DateTime?
+  lastObservedAmount Decimal?        @db.Decimal(20, 4)
+  lastStatus         AssertionStatus @default(UNCHECKED)
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, bookId, accountId, currencyId, asOf])
+  @@index([tenantId])
+  @@index([entityId, bookId, asOf])
+  @@map("balance_assertion")
+}
+
+enum AssertionStatus {
+  UNCHECKED
+  PASS
+  FAIL
 }
 
 model Currency {
@@ -347,6 +544,135 @@ model FxRate {
   @@unique([fromCurrencyId, toCurrencyId, asOf, rateType])
   @@index([asOf])
   @@map("fx_rate")
+}
+
+// Commodity — a tradeable instrument that is NOT a currency: a stock, ETF,
+// fund, crypto asset, etc. Currency is ISO-4217-keyed and global ("these are
+// stable"); a commodity is tenant master data like Item / Party, so it carries
+// tenantId and is unique per (tenant, symbol). Keeping the two apart is
+// deliberate — a security price is unrepresentable in FxRate (which is
+// currency->currency), and pushing securities into Currency would pollute
+// Layer-2 master data. See docs/spec/beancount-adoption-study.md (item 3).
+//
+// This is an ADDITIVE Layer-2 extension: nothing here changes Currency, FxRate
+// or the posting path. It establishes the seam that mark-to-market / holdings
+// valuation and per-commodity balance assertions can build on later.
+model Commodity {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  // Beancount-style symbol: "AAPL", "BTC", "VTSAX". Not an ISO currency.
+  symbol     String
+  name       String
+  // Free-form for v1 ("EQUITY", "CRYPTO", "FUND", ...). A typed enum can come
+  // later once the set stabilises.
+  assetClass String?
+  active     Boolean  @default(true)
+
+  prices CommodityPrice[]
+  lots   Lot[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, symbol])
+  @@index([tenantId])
+  @@map("commodity")
+}
+
+// A price point: the value of ONE unit of a commodity, quoted in a currency,
+// on a date. Mirrors FxRate (the currency-pair price DB) but for commodities.
+// Resolution is on-or-before (see getCommodityPrice), the same convention as
+// resolveFxRate. Last write for a given (commodity, currency, date) wins —
+// matching Beancount's "the last price declaration on a day is retained".
+//
+// currencyId is a plain code column (no relation) to avoid a Currency backref,
+// matching ar_open_item.currencyId.
+model CommodityPrice {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  commodityId String    @db.Uuid
+  commodity   Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  currencyId  String
+  asOf        DateTime  @db.Date
+  price       Decimal   @db.Decimal(20, 10)
+  // Provenance: "MANUAL", "IMPORT:<system>", etc. Optional.
+  source      String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([commodityId, currencyId, asOf])
+  @@index([tenantId])
+  @@index([commodityId, currencyId, asOf])
+  @@map("commodity_price")
+}
+
+// Lot — a parcel of a commodity acquired at a specific per-unit cost on a
+// specific date, held in an account, per book. This is the persistence layer
+// under the pure inventory engine (src/lib/accounting/inventory.ts): a purchase
+// AUGMENTS (creates) a lot; a sale REDUCES lots, drawing `remainingUnits` down
+// by booking method until the parcel is exhausted (status → CLOSED). Cost basis
+// is preserved parcel by parcel, which is what makes per-lot capital gains
+// possible.
+//
+// Book-aware, following the canon's "inventory layers" master-data-extension
+// pattern (like fixed_asset_book_attributes): the same holding can carry a
+// different basis under US_GAAP vs US_TAX. Modeled on ArOpenItem — a per-(entity,
+// book) sub-ledger parcel opened by a JournalEntry. openedByEntryId is nullable
+// so a lot can be seeded / imported before its GL posting is wired (the posting
+// integration is a later part of the arc).
+model Lot {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+
+  // The account the commodity is held in (the investment / asset account).
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id])
+
+  commodityId String    @db.Uuid
+  commodity   Commodity @relation(fields: [commodityId], references: [id])
+
+  // The JournalEntry that opened this lot (the purchase). Nullable — a lot may
+  // be seeded / imported before its GL posting exists.
+  openedByEntryId String?       @db.Uuid
+  openedByEntry   JournalEntry? @relation(fields: [openedByEntryId], references: [id])
+
+  label           String?  // optional user label ("RSU tranche 3", broker lot id)
+  acquisitionDate DateTime @db.Date
+
+  // Units + per-unit cost. High precision for fractional shares / crypto.
+  // costCurrencyId is a plain code (no relation), matching ar_open_item.
+  originalUnits  Decimal @db.Decimal(28, 10)
+  remainingUnits Decimal @db.Decimal(28, 10)
+  unitCost       Decimal @db.Decimal(28, 10)
+  costCurrencyId String
+
+  status LotStatus @default(OPEN)
+
+  // Lineage — populated on import; also the natural idempotency key for the
+  // augment-on-purchase path once posting is wired.
+  sourceSystem     String?
+  sourceRecordType String?
+  sourceRecordId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([entityId, bookId, accountId, commodityId, status])
+  @@index([entityId, bookId, commodityId, status, acquisitionDate])
+  @@map("lot")
+}
+
+enum LotStatus {
+  OPEN
+  CLOSED
 }
 
 enum FxRateType {
@@ -490,6 +816,21 @@ model Account {
   isControlAccount Boolean       @default(false) // true for AR/AP control accounts
   isBank           Boolean       @default(false)
 
+  // ASC 830 / IAS 21: monetary accounts (cash, receivables, payables, debt)
+  // hold a fixed number of currency units, so a foreign-currency balance is
+  // re-measured to the functional currency at the period-end CLOSE rate and
+  // the delta hits FX gain/loss. Non-monetary accounts (inventory, fixed
+  // assets, prepaids, equity) stay at historical rate and are NOT revalued.
+  // The revaluation engine walks accounts where isMonetary = true.
+  isMonetary Boolean @default(false)
+
+  // FX Phase 4 — ASC 830 translation method for CONSOLIDATION (distinct
+  // from isMonetary, which drives period-end remeasurement). Nullable so
+  // existing single-currency installations don't need a backfill; the
+  // consolidation translator defaults to CURRENT_RATE when null. New
+  // chart-of-accounts rows + seed paths set this explicitly per category.
+  translationCategory TranslationCategory?
+
   parentAccountId String?   @db.Uuid
   parent          Account?  @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
   children        Account[] @relation("AccountHierarchy")
@@ -500,7 +841,43 @@ model Account {
 
   active Boolean @default(true)
 
-  lines JournalLine[]
+  // Commodities this account may hold. EMPTY = unconstrained (the default, so
+  // this is inert for every existing account). When set, postJournalEntry
+  // refuses an entry whose currency isn't listed — a USD-only cash account
+  // cannot silently accumulate EUR. Same "make invalid states unrepresentable"
+  // intent as the debit/credit CHECK constraints, one level up.
+  allowedCurrencies String[] @default([])
+
+  // Dated account lifecycle. `active` is a boolean and therefore cannot answer
+  // "was this account valid on the ENTRY's date" — which is the only question
+  // that matters for a backdated post. These can, and postJournalEntry checks
+  // them against documentDate.
+  //
+  // BOUNDARIES ARE INCLUSIVE: the account is postable on [openedOn, closedOn].
+  // A post ON the open date or ON the close date is allowed; before or after is
+  // refused. NULL on either side means unbounded, so both are inert by default.
+  openedOn DateTime? @db.Date
+  closedOn DateTime? @db.Date
+
+  // BlackLine arc Phase 1: per-account override of the tenant default.
+  // - requiresReconReview: null = inherit ReconciliationConfig.defaultRequiresReview.
+  //   true = always preparer→reviewer chain. false = single sign-off OK.
+  // - reconTolerance: null = inherit tenant default (typically 0 = must tie out
+  //   exactly). Non-null = $-amount diff allowed before marking EXCEPTION.
+  //   Used by cash accounts where rounding differences are common.
+  requiresReconReview Boolean?
+  reconTolerance      Decimal? @db.Decimal(20, 4)
+
+  lines                   JournalLine[]
+  reconciliations         Reconciliation[]
+  balanceAssertions       BalanceAssertion[]
+  lots                    Lot[]
+  bankFeedTransactions    BankTransaction[] @relation("BankTxnBankAccount")
+  categorizedTransactions BankTransaction[] @relation("BankTxnCategory")
+  bankRuleCategories      BankRule[]        @relation("BankRuleCategory")
+  bankRuleAccounts        BankRule[]        @relation("BankRuleBankAccount")
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxLines               FluxLine[]
 
   sourceSystem     String?
   sourceRecordType String?
@@ -529,6 +906,40 @@ enum AccountType {
 enum NormalBalance {
   DEBIT
   CREDIT
+}
+
+// v0.8 FX Phase 4 — ASC 830 period-end translation method per account.
+//
+// When consolidating a foreign-functional-currency subsidiary into a
+// parent's reporting currency, each account's balance is translated
+// at a rate chosen per its category:
+//
+//   CURRENT_RATE  — Balance Sheet items (assets, liabilities). The
+//                   period-end ("current") rate. Default for asset +
+//                   liability account types.
+//
+//   HISTORICAL    — Equity items, recorded at the rate when each
+//                   contribution / dividend was originally posted.
+//                   Default for equity account types. The translator
+//                   uses the original transaction-date rate.
+//
+//   WEIGHTED_AVG  — Income Statement items (revenue, expense). The
+//                   period-average rate. Default for revenue + expense
+//                   account types.
+//
+//   EXCLUDED      — Accounts that are themselves the translation
+//                   result and must NOT be re-translated (e.g. 8300
+//                   Realized FX Gain/Loss is already in reporting
+//                   currency at posting time). Treated as already-
+//                   translated, no rate applied.
+//
+// Phase 4a (this commit) only adds the column + defaults. Phase 4b
+// adds the translator. Phase 4c wires it into the consolidation report.
+enum TranslationCategory {
+  CURRENT_RATE
+  HISTORICAL
+  WEIGHTED_AVG
+  EXCLUDED
 }
 
 // One row per posted document. Posts to exactly ONE (entity, book).
@@ -574,9 +985,35 @@ model JournalEntry {
   source JournalSource @default(MANUAL)
   status EntryStatus   @default(POSTED)
 
+  // ─── Maker-checker approval columns (PR #46 harvest ④) ─────────────
+  // Populated only for entries that flow through the approval queue;
+  // direct ADMIN+ postings leave all of these null. submittedById is
+  // the maker; approved*/rejected* are set when an approver resolves
+  // it. rejectionReason is required when a pending entry flips to VOID
+  // (withdraw reuses the rejected* columns with a "Withdrawn:" prefix
+  // and rejectedById === submittedById as the marker). Bare UUIDs, not
+  // relations — same posture as ownerId's polymorphic discipline.
+  submittedById   String?   @db.Uuid
+  submittedAt     DateTime?
+  approvedById    String?   @db.Uuid
+  approvedAt      DateTime?
+  rejectedById    String?   @db.Uuid
+  rejectedAt      DateTime?
+  rejectionReason String?
+
   reversalOfId String?        @db.Uuid
   reversalOf   JournalEntry?  @relation("Reversal", fields: [reversalOfId], references: [id])
   reversedBy   JournalEntry[] @relation("Reversal")
+
+  // Correction lineage — a supplemental reclassification / correcting entry
+  // that fixes the classification of an earlier POSTED entry WITHOUT negating
+  // it. Unlike a reversal (which flips the source to REVERSED), the source of
+  // a correction stays POSTED: the correction is an additional adjusting entry,
+  // and this link records "this entry corrects that one" so the audit trail and
+  // the balance-change lineage view can follow it. Mirrors reversalOf.
+  correctionOfId String?        @db.Uuid
+  correctionOf   JournalEntry?  @relation("Correction", fields: [correctionOfId], references: [id])
+  corrections    JournalEntry[] @relation("Correction")
 
   // Lineage — non-negotiable per spec. Populated on every ERP import.
   sourceSystem     String? // "QBO", "NETSUITE", "INTACCT", ...
@@ -586,6 +1023,16 @@ model JournalEntry {
   mappingVersion   String?
   extensions       Json?
 
+  // Denormalized line sums. Per the invariant that debits == credits,
+  // these are equal on every well-formed entry (postJournalEntry
+  // enforces this). Stored to make amount-based filtering on the
+  // saved-search endpoint (NS SuiteAnalytics Phase 4 follow-up) and
+  // future reporting queries an O(1) index lookup instead of a JOIN
+  // + aggregate. Backfilled by migration 0012; populated on every
+  // new entry by postJournalEntry.
+  totalDebit  Decimal @default(0) @db.Decimal(18, 4)
+  totalCredit Decimal @default(0) @db.Decimal(18, 4)
+
   lines JournalLine[]
 
   // Sub-ledger backrefs — entries that opened or applied to sub-ledger items.
@@ -593,6 +1040,7 @@ model JournalEntry {
   apOpenItemsOpened ApOpenItem[]    @relation("ApOpenedBy")
   arApplications    ArApplication[] @relation("ArAppliedBy")
   apApplications    ApApplication[] @relation("ApAppliedBy")
+  openedLots        Lot[]
 
   // Ownership + audit. ownerId is the default-responsible-party; defaults to
   // createdBy at insert and only changes via explicit reassignment (manual or
@@ -614,7 +1062,11 @@ model JournalEntry {
   recordEvents RecordEvent[] @relation("JournalEntryEvents")
 
   // Backref to inline notes (review comments, follow-up flags).
-  notes JournalEntryNote[]
+  notes            JournalEntryNote[]
+  // 1:1 — a posted entry is claimed by at most one bank-feed line. The
+  // uniqueness is enforced on BankTransaction.postedEntryId so two feed
+  // lines can't match/categorize onto the same entry (TOCTOU guard).
+  bankTransaction  BankTransaction?
 
   @@unique([tenantId, entryNumber])
   @@index([ownerId])
@@ -622,6 +1074,8 @@ model JournalEntry {
   @@index([entityId, bookId, periodId])
   @@index([sourceSystem, sourceRecordType, sourceRecordId])
   @@index([tenantId, postingDate])
+  // Pending-approval queue: list PENDING_APPROVAL for a tenant, newest first.
+  @@index([tenantId, status, createdAt])
   @@map("gl_entry_header")
 }
 
@@ -635,8 +1089,9 @@ enum JournalSource {
 
 enum EntryStatus {
   DRAFT
+  PENDING_APPROVAL // maker-checker queue: lines exist + balance, NO ledger effect until approved
   POSTED
-  VOID
+  VOID // rejected/withdrawn pending entries land here too (rejectionReason set)
   REVERSED
 }
 
@@ -711,17 +1166,17 @@ model JournalLine {
 // renders de-emphasized. Deleting is admin-only.
 
 model JournalEntryNote {
-  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId     String       @db.Uuid
-  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  entryId      String       @db.Uuid
-  entry        JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  id       String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String       @db.Uuid
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entryId  String       @db.Uuid
+  entry    JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
 
   // Author: links to User but kept nullable for the case where a user
   // is later deactivated. authorEmail is snapshotted at write time so
   // the note's authorship survives even if the user row goes away.
-  authorUserId String?      @db.Uuid
-  author       User?        @relation(fields: [authorUserId], references: [id])
+  authorUserId String? @db.Uuid
+  author       User?   @relation(fields: [authorUserId], references: [id])
   authorEmail  String?
 
   // Plain-text body for v1. No markdown / no rich text — keeps the audit
@@ -730,8 +1185,8 @@ model JournalEntryNote {
 
   // Resolution: anyone in the tenant can resolve. The note stays in the
   // DB; the UI renders resolved notes muted.
-  resolvedAt    DateTime?
-  resolvedBy    String? // email snapshot (same rationale as authorEmail)
+  resolvedAt DateTime?
+  resolvedBy String? // email snapshot (same rationale as authorEmail)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -758,13 +1213,13 @@ model JournalEntryNote {
 // new entries.
 
 model RecurringEntry {
-  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId  String @db.Uuid
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  entityId  String @db.Uuid
-  entity    LegalEntity @relation(fields: [entityId], references: [id])
-  bookId    String @db.Uuid
-  book      Book   @relation(fields: [bookId], references: [id])
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String      @db.Uuid
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
 
   // Human-readable identifier per tenant. "MONTHLY_RENT", "QUARTERLY_AUDIT_ACCRUAL".
   code String
@@ -781,9 +1236,9 @@ model RecurringEntry {
   // For monthly cadence, subsequent JEs are at startDate + N months
   // (anchored to startDate's day-of-month; falls back to last day of
   // month if the target month is shorter).
-  startDate DateTime @db.Date
+  startDate      DateTime  @db.Date
   // Optional sunset: no posts after endDate (inclusive). Null = forever.
-  endDate   DateTime? @db.Date
+  endDate        DateTime? @db.Date
   // Bookmark: the most recent docDate this template successfully posted.
   // Drives "what's next" — next posting is the cadence step AFTER this.
   // Null = never posted; the first post will use startDate.
@@ -805,8 +1260,8 @@ model RecurringEntry {
 }
 
 model RecurringEntryLine {
-  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  templateId String @db.Uuid
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  templateId String         @db.Uuid
   template   RecurringEntry @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   // 1-indexed within the template.
@@ -816,8 +1271,8 @@ model RecurringEntryLine {
   accountCode String
 
   // Money. Mirrors the substrate convention (debit XOR credit > 0).
-  debit  Decimal @db.Decimal(18, 4) @default(0)
-  credit Decimal @db.Decimal(18, 4) @default(0)
+  debit  Decimal @default(0) @db.Decimal(18, 4)
+  credit Decimal @default(0) @db.Decimal(18, 4)
 
   description String?
   partyCode   String?
@@ -1184,6 +1639,14 @@ model FixedAsset {
 
   bookAttributes FixedAssetBookAttributes[]
 
+  // User attribution (DSR evidence). Set by the Server Action that creates
+  // the asset (manual UI flow) / flips it on disposal; NetSuite imports and
+  // pre-2026-06-05 rows leave them null — no human actor. Columns were
+  // applied to the shared DB by fa-amort's reviewed raw SQL
+  // (fa-amort prisma/sql/2026-06-05-attribution-schema.sql).
+  createdBy  String? @db.Uuid
+  disposedBy String? @db.Uuid
+
   sourceSystem     String?
   sourceRecordType String?
   sourceRecordId   String?
@@ -1197,6 +1660,10 @@ model FixedAsset {
   @@unique([entityId, code])
   @@index([entityId, status])
   @@index([tenantId])
+  // Physical index names are lowercase-folded — the 2026-06-05 raw SQL left
+  // them unquoted. The maps pin the actual names so migrate diff stays clean.
+  @@index([createdBy], map: "fixed_asset_createdby_idx")
+  @@index([disposedBy], map: "fixed_asset_disposedby_idx")
   @@map("fixed_asset")
 }
 
@@ -1227,8 +1694,18 @@ model FixedAssetBookAttributes {
   depreciationExpenseAccountCode String // e.g. "8000" Depreciation Expense
   accumDepreciationAccountCode   String // e.g. "1510" Accum Dep contra-asset
 
+  // User attribution (DSR evidence). Set by the Server Action that runs
+  // depreciation through a given date; NetSuite-imported rows leave both
+  // null. Applied to the shared DB by fa-amort's reviewed raw SQL
+  // (fa-amort prisma/sql/2026-06-05-attribution-schema.sql).
+  lastRunBy String?   @db.Uuid
+  lastRunAt DateTime?
+
   @@id([assetId, bookId])
   @@index([bookId, lastDepreciatedThrough])
+  // Lowercase physical name (unquoted in the 2026-06-05 raw SQL); the map
+  // pins it so migrate diff stays clean.
+  @@index([lastRunBy], map: "fab_lastrunby_idx")
   @@map("fixed_asset_book_attributes")
 }
 
@@ -1393,8 +1870,51 @@ model PerformanceObligation {
   revenueAccountCode  String // e.g. "4000"
   deferredAccountCode String // e.g. "2200"
 
+  // ASC 606 allocation columns, upstreamed from revenue-rec (its PR #17,
+  // applied to the shared DB 2026). revenue-rec's allocator/scheduler and
+  // NS mappers read + write these; ledger-core owns the definitions.
+
+  // Allocated transaction price for this PO. When null, revenue-rec's
+  // allocator falls back to SSP (proportional allocation default). When
+  // set, this is the authoritative amount the recognition engine schedules.
+  allocatedAmount Decimal? @db.Decimal(18, 4)
+
+  // How the transaction price got allocated to this PO (ASC 606 ¶78).
+  // Null = unspecified (pre-migration data + AI-extracted contracts that
+  // didn't surface the method).
+  allocationMethod AllocationMethod?
+
+  // Fair-value evidence type (ASC 606 ¶77, formerly ASC 605 VSOE
+  // hierarchy). Tracked for audit-trail purposes; does not affect
+  // recognition math. Null = unspecified.
+  fairValueMethod FairValueMethod?
+
+  // Item quantity. Defaults to 1 (the dominant case: SSP carries the
+  // per-line total, not per-unit).
+  quantity Decimal @default(1) @db.Decimal(18, 4)
+
   @@unique([contractId, sequenceNo])
   @@map("performance_obligation")
+}
+
+// ASC 606 ¶78 allocation methods. PROPORTIONAL is the default
+// (relative-SSP); RESIDUAL is permitted when SSP for one or more
+// POs is uncertain; MANUAL captures auditor-required overrides.
+enum AllocationMethod {
+  PROPORTIONAL
+  RESIDUAL
+  MANUAL
+}
+
+// ASC 606 ¶77 fair-value evidence hierarchy (carried over from
+// the ASC 605 VSOE/TPE/ESP framework for continuity in audit
+// trails). RESIDUAL means SSP was determined by the residual
+// approach (total minus observable SSPs of other POs).
+enum FairValueMethod {
+  ESP
+  VSOE
+  TPE
+  RESIDUAL
 }
 
 model RevenueContractBookAttributes {
@@ -1442,6 +1962,17 @@ enum OwnerType {
 model User {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email         String    @unique
+  // SOC 2 CC6 — Confidentiality TSC. HMAC-SHA256 search-hash for
+  // the encrypted `email` column. Populated by the encrypted-fields
+  // Prisma extension on write; queried by `emailLookupKeyForUser`
+  // (see src/lib/soc2/index.ts) on every login + admin email
+  // lookup. See docs/design/deterministic-encryption.md.
+  //
+  // Nullable during the Phase 2 rollout window so existing pre-
+  // rollout rows (with NULL hash) don't block writes. Backfill via
+  // scripts/encrypt-user-emails.ts. Tightened to NOT NULL in the
+  // Phase 3 cleanup PR once every row has a hash.
+  emailHash     Bytes?    @unique
   displayName   String
   isActive      Boolean   @default(true)
   deactivatedAt DateTime?
@@ -1450,12 +1981,32 @@ model User {
   // User itself is global (no tenantId) — login lookup is global by email.
   tenantMemberships TenantMembership[]
 
-  queueMemberships   QueueMember[]
-  recordEvents       RecordEvent[]
-  notifications      Notification[] @relation("NotificationRecipient")
-  notificationsActed Notification[] @relation("NotificationActor")
-  auditEvents        AuditLog[]     @relation("AuditLogActor")
-  journalEntryNotes  JournalEntryNote[]
+  queueMemberships            QueueMember[]
+  recordEvents                RecordEvent[]
+  notifications               Notification[]             @relation("NotificationRecipient")
+  notificationsActed          Notification[]             @relation("NotificationActor")
+  auditEvents                 AuditLog[]                 @relation("AuditLogActor")
+  journalEntryNotes           JournalEntryNote[]
+  // BlackLine arc Phase 1: a user can be the preparer on N recons, the
+  // reviewer on N recons, and the uploader of N attachments. CPA
+  // segregation of duties means preparer != reviewer on the same recon
+  // (enforced at the Server Action layer, not the schema).
+  reconciliationsPrepared     Reconciliation[]           @relation("ReconPreparer")
+  reconciliationsReviewed     Reconciliation[]           @relation("ReconReviewer")
+  reconciliationAttachments   ReconciliationAttachment[]
+  // BlackLine arc Phase 2: close-task calendar. A user can own N close
+  // tasks (assigned executor), complete N, and author N comments.
+  closeTasksOwned             CloseTask[]                @relation("CloseTaskOwner")
+  closeTasksCompleted         CloseTask[]                @relation("CloseTaskCompleter")
+  closeTaskComments           CloseTaskComment[]
+  closeTaskStateChangesMade   CloseTaskStateChange[]
+  // Notifications arc: which channels did this user create.
+  notificationChannelsCreated NotificationChannel[]
+  // Team management: invites this user originated (audit trail).
+  invitesSent                 TenantInvite[]             @relation("InvitedBy")
+  // BlackLine arc Phase 3: flux / variance analysis.
+  fluxStatementsFinalized     FluxStatement[]            @relation("FluxFinalizer")
+  fluxLineComments            FluxLine[]                 @relation("FluxLineCommenter")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1628,6 +2179,7 @@ enum AuditEventType {
   ACCESS_DENIED // requireAdmin failed; non-admin tried admin action
   PRIVILEGED_ACTION // period close, user lifecycle, admin reset, etc.
   DATA_EXPORT // CSV/PDF download, bulk read
+  DATA_ERASURE // GDPR Art. 17 PII redaction — regulator-queryable proof the request was honored
   TOKEN_USED // /api/internal/* request authenticated via INTERNAL_API_TOKEN
   TOKEN_REJECTED // /api/internal/* request failed Bearer-token check
   CONFIG_CHANGE // env-var change, schema migration applied
@@ -1788,6 +2340,299 @@ model ReportTemplate {
 }
 
 // =========================================================================
+// BlackLine arc — Phase 2: Close Task Calendar
+// =========================================================================
+//
+// Models the controller's monthly close checklist as data instead of an
+// outside spreadsheet. Each (entity, book, period) gets N CloseTask rows
+// instantiated from CloseTaskTemplate at period-open time. Task status
+// flows: NOT_STARTED → IN_PROGRESS → DONE (or → BLOCKED, or → WAIVED).
+//
+// Dependencies are encoded as a self-FK array (dependsOnIds: UUID[]).
+// Cycle prevention happens at write-time in the Server Action — the
+// schema can't enforce a DAG via Prisma. Closing a period requires all
+// `requiredForClose=true` tasks to be terminal (DONE/WAIVED).
+//
+// Design doc: docs/blackline-arc-design.md → Phase 2.
+
+enum CloseTaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  WAIVED
+}
+
+enum CloseTaskCategory {
+  ACCRUAL
+  RECON
+  DEPRECIATION
+  FX
+  REVENUE
+  INVENTORY
+  TAX
+  REPORTING
+  ADMIN
+}
+
+model CloseTask {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // entityId/bookId nullable so a tenant-wide admin task ("send close-
+  // complete notification") can apply across all (entity, book) tuples
+  // for the period without N duplicate rows. The instantiator decides
+  // the fan-out shape: BS-tied tasks (recon AR) are per-(entity, book);
+  // org-wide tasks (post-mortem) are null/null.
+  entityId String?      @db.Uuid
+  entity   LegalEntity? @relation(fields: [entityId], references: [id])
+  bookId   String?      @db.Uuid
+  book     Book?        @relation(fields: [bookId], references: [id])
+  periodId String       @db.Uuid
+  period   Period       @relation(fields: [periodId], references: [id])
+
+  // Links back to the template this row was instantiated from. Null when
+  // the task was created ad-hoc (a controller adds a one-off "investigate
+  // unusual JE in Misc Income"). NOT a FK because deleting a template
+  // shouldn't cascade-wipe historical task records — the audit trail.
+  templateKey String?
+  name        String
+  description String?
+  category    CloseTaskCategory
+
+  status           CloseTaskStatus @default(NOT_STARTED)
+  // When true, the period-close gate refuses if this task isn't terminal.
+  requiredForClose Boolean         @default(true)
+
+  // Polymorphic owner — User or Queue, discriminated by ownerType.
+  // ownerId is application-enforced, not FK'd, mirroring the same
+  // pattern on JournalEntry / ArOpenItem (see docs/ownership-and-rules.md).
+  ownerId   String?    @db.Uuid
+  ownerType OwnerType?
+
+  // Due date computed at instantiation from
+  // (period.endsOn + dueOffsetDays). Negative = before period end.
+  // Stored as DateTime so a task in a week-of-month calendar still
+  // gets a meaningful due moment.
+  dueOffsetDays Int?
+  dueAt         DateTime?
+
+  // Self-reference dependency list. Cycle prevention is enforced in
+  // the Server Action (Prisma can't validate a DAG at the schema level).
+  // Empty array = no predecessors.
+  dependsOnIds String[] @db.Uuid
+
+  blockedReason String?
+  completedById String?   @db.Uuid
+  completer     User?     @relation("CloseTaskCompleter", fields: [completedById], references: [id])
+  completedAt   DateTime?
+  // Free-text evidence link the user pastes when marking DONE — URL to a
+  // workpaper, bank statement screenshot, etc. Not a typed Attachment
+  // (those live on Reconciliation per Phase 1); free-form is enough at
+  // the task tier and keeps the UI simple.
+  evidenceUrl   String?
+  evidenceNote  String?
+
+  owner        User?                  @relation("CloseTaskOwner", fields: [ownerId], references: [id])
+  comments     CloseTaskComment[]
+  // Append-only state-change log (migration 0011). One row per status
+  // transition + one row at instantiation (fromStatus=null).
+  stateChanges CloseTaskStateChange[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, periodId, status])
+  @@index([ownerId])
+  @@index([dueAt])
+  @@map("close_task")
+}
+
+// Per-tenant catalog of recurring tasks. seedCloseTaskTemplates ships
+// the ~50 BlackLine-standard rows; controllers can disable or add
+// custom templates per tenant.
+model CloseTaskTemplate {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Stable identifier — "ACCRUE_PAYROLL", "RUN_DEPRECIATION".
+  // Templates instantiate by key, not id, so a re-seed against a fresh
+  // tenant gives matching dependsOnKeys without UUID juggling.
+  key         String
+  name        String
+  description String?
+  category    CloseTaskCategory
+
+  defaultOwnerId       String?    @db.Uuid
+  defaultOwnerType     OwnerType?
+  defaultDueOffsetDays Int? // relative to period.endsOn
+  requiredForClose     Boolean    @default(true)
+
+  // Dependency list by KEY (not ID) — resolved to ids at instantiation
+  // time. This makes the seed file portable: a fresh tenant gets the
+  // same predecessor wiring without needing to know the new UUIDs.
+  defaultDependsOnKeys String[]
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, key])
+  @@index([tenantId, active])
+  @@map("close_task_template")
+}
+
+// Comment thread on a close task. Body encrypted via the PrismaExtension
+// confidential-column path when wired in (see docs/blackline-arc-design.md
+// → "Confidentiality wire-up"). Stored as plain Text in v1.
+model CloseTaskComment {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  closeTaskId String    @db.Uuid
+  closeTask   CloseTask @relation(fields: [closeTaskId], references: [id], onDelete: Cascade)
+
+  body     String
+  authorId String @db.Uuid
+  author   User   @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([closeTaskId])
+  @@index([tenantId])
+  @@map("close_task_comment")
+}
+
+// Append-only state transition log for CloseTask. Migration 0011.
+// Closes a documented v1.18 limitation: the recurring-blockers helper
+// in src/lib/close/retrospective.ts was current-snapshot only, so a
+// template that hit BLOCKED four periods ago and was since unblocked
+// would not appear. With this table, the replay walker counts
+// EVER-blocked, not currently-blocked.
+//
+// Write protocol: every status-mutating Server Action wraps the
+// `closeTask.update` + state-change insert in one $transaction. The
+// `changedById` field is REQUIRED for live transitions; nullable only
+// to permit the backfill migration to land an initial row for every
+// pre-existing task without inventing a fake actor.
+model CloseTaskStateChange {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  closeTaskId String    @db.Uuid
+  closeTask   CloseTask @relation(fields: [closeTaskId], references: [id], onDelete: Cascade)
+
+  // fromStatus is null for the initial INSTANTIATE row only.
+  fromStatus CloseTaskStatus?
+  toStatus   CloseTaskStatus
+  // Optional context. Populated for BLOCKED (the blockedReason value)
+  // and WAIVED (the waive reason). Always null for start/complete/
+  // unblock to avoid noise.
+  reason     String?
+
+  // Nullable to support the migration backfill — rows minted for pre-
+  // existing tasks have no real actor. All NEW writes through the
+  // recordStateChange helper require a non-null value (enforced in
+  // the helper, not the schema, so backfill stays clean).
+  changedById String?  @db.Uuid
+  changedBy   User?    @relation(fields: [changedById], references: [id])
+  changedAt   DateTime @default(now())
+
+  @@index([closeTaskId, changedAt])
+  @@index([tenantId, changedAt])
+  @@index([tenantId, toStatus])
+  @@map("close_task_state_change")
+}
+
+// =========================================================================
+// BlackLine arc — Phase 3: Flux / Variance Analysis
+// =========================================================================
+
+enum FluxStatementStatus {
+  DRAFT
+  FINALIZED
+}
+
+enum FluxLineStatus {
+  IMMATERIAL
+  NEEDS_COMMENT
+  EXPLAINED
+  WAIVED
+}
+
+model FluxStatement {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+
+  fromPeriodId String @db.Uuid
+  fromPeriod   Period @relation("FluxFromPeriod", fields: [fromPeriodId], references: [id])
+  toPeriodId   String @db.Uuid
+  toPeriod     Period @relation("FluxToPeriod", fields: [toPeriodId], references: [id])
+
+  absoluteThreshold Decimal @default(0) @db.Decimal(20, 4)
+  percentThreshold  Decimal @default(0) @db.Decimal(8, 4)
+
+  status FluxStatementStatus @default(DRAFT)
+
+  finalizedBy String?   @db.Uuid
+  finalizer   User?     @relation("FluxFinalizer", fields: [finalizedBy], references: [id])
+  finalizedAt DateTime?
+
+  lines FluxLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityId, bookId, fromPeriodId, toPeriodId])
+  @@index([tenantId, toPeriodId, status])
+  @@map("flux_statement")
+}
+
+model FluxLine {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  statementId String        @db.Uuid
+  statement   FluxStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id])
+
+  priorAmount   Decimal  @db.Decimal(20, 4)
+  currentAmount Decimal  @db.Decimal(20, 4)
+  deltaAmount   Decimal  @db.Decimal(20, 4)
+  deltaPercent  Decimal? @db.Decimal(12, 4)
+
+  status FluxLineStatus @default(IMMATERIAL)
+
+  commentary   String?
+  commentaryBy String?   @db.Uuid
+  commenter    User?     @relation("FluxLineCommenter", fields: [commentaryBy], references: [id])
+  commentaryAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([statementId, accountId])
+  @@index([statementId, status])
+  @@index([tenantId])
+  @@map("flux_line")
+}
+
+// =========================================================================
 // DB-level invariants live in prisma/migrations/0001_constraints/migration.sql
 // =========================================================================
 //
@@ -1799,3 +2644,470 @@ model ReportTemplate {
 //
 // See docs/universal-schema.md for the architectural rationale and the
 // remaining layers' build plan.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BlackLine arc — Phase 1: Account Reconciliations
+//
+// The workflow shell BlackLine's whole product is built around. One
+// Reconciliation row per (entity, book, period, account). Preparer ties out
+// GL balance to supporting documentation, signs, hands off to reviewer.
+// Reviewer signs OR sends back. Period close refuses to advance until every
+// active BS account in the tenant is RECONCILED (or WAIVED by admin).
+//
+// Design doc: docs/blackline-arc-design.md
+// Sign-off shape (single vs preparer→reviewer) is per-recon, default from
+// ReconciliationConfig.defaultRequiresReview, overridable per Account.
+// Period-close gate composition with Phases 2 + 3 documented in design doc.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ReconStatus {
+  OPEN // auto-created, not yet started
+  IN_PROGRESS // preparer is working
+  PREPARED // preparer signed; ready for reviewer (only when requiresReview)
+  RECONCILED // signed off (terminal — closes the period-close gate)
+  EXCEPTION // diff > tolerance; disposition required
+  WAIVED // admin marked not-applicable for this period
+}
+
+model Reconciliation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // The scope tuple. Composite-unique so re-running the auto-instantiator
+  // (Phase 1 PR 6) is idempotent.
+  entityId  String      @db.Uuid
+  entity    LegalEntity @relation(fields: [entityId], references: [id])
+  bookId    String      @db.Uuid
+  book      Book        @relation(fields: [bookId], references: [id])
+  periodId  String      @db.Uuid
+  period    Period      @relation(fields: [periodId], references: [id])
+  accountId String      @db.Uuid
+  account   Account     @relation(fields: [accountId], references: [id])
+
+  // Frozen at sign-off so the reviewer sees the same numbers the preparer
+  // signed against — even if a JE backs into the period afterward.
+  // `glBalance` is the trial-balance number; `supportingBalance` is what
+  // the operator typed in (Phase 1) or what the sub-ledger says (Phase 1
+  // PR 7 auto-pull). `reconciledDiff` is computed = gl − supporting and
+  // stored so a SQL sort by "biggest disagreement" stays cheap.
+  glBalance         Decimal  @db.Decimal(20, 4)
+  supportingBalance Decimal?
+  reconciledDiff    Decimal?
+  // Per-recon tolerance. Inherited from Account.reconTolerance (which
+  // inherits from ReconciliationConfig.defaultTolerance). Stored on the
+  // row so changing the tenant default later doesn't retroactively flip
+  // signed-off recons in or out of EXCEPTION.
+  tolerance         Decimal  @default(0) @db.Decimal(20, 4)
+
+  status         ReconStatus @default(OPEN)
+  // Decision #2 wiring: false = single sign-off (preparer's mark =
+  // RECONCILED); true = preparer→reviewer chain (PREPARED waits for
+  // reviewer). Frozen at recon-open time. Default value supplied by the
+  // create-action from Account.requiresReconReview → ReconciliationConfig
+  // → true (BlackLine standard).
+  requiresReview Boolean     @default(true)
+
+  preparedBy String?   @db.Uuid
+  preparer   User?     @relation("ReconPreparer", fields: [preparedBy], references: [id])
+  preparedAt DateTime?
+  reviewedBy String?   @db.Uuid
+  reviewer   User?     @relation("ReconReviewer", fields: [reviewedBy], references: [id])
+  reviewedAt DateTime?
+
+  // Encrypted via the existing PrismaExtension confidential-column path
+  // (wired in PR 4 when notes get a real UI). Stays plain Text in schema.
+  notes String?
+
+  // Soft reference: RecordEvent.recordType = "Reconciliation",
+  // .recordId = this id. No Prisma relation — RecordEvent is the
+  // tenant-wide event journal used by ownership, JE notes, etc.
+  attachments ReconciliationAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Idempotent auto-instantiation on first visit to /close/reconciliations.
+  @@unique([entityId, bookId, periodId, accountId])
+  @@index([tenantId, periodId, status])
+  @@index([periodId, status])
+  @@map("reconciliation")
+}
+
+model ReconciliationAttachment {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  reconciliationId String         @db.Uuid
+  reconciliation   Reconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  filename    String
+  contentType String
+  // Encrypted bytes via PrismaExtension (wired in PR 4). Self-contained
+  // storage — no S3 vendor dependency. Worst case: 5 MB CSV × 100
+  // accounts × 12 months = 6 GB tenant-wide. Acceptable at portfolio
+  // scale; revisit if customer onboards with 500+ accounts.
+  payload     Bytes
+  sizeBytes   Int
+
+  uploadedById String   @db.Uuid
+  uploader     User     @relation(fields: [uploadedById], references: [id])
+  uploadedAt   DateTime @default(now())
+
+  @@index([reconciliationId])
+  @@index([tenantId])
+  @@map("reconciliation_attachment")
+}
+
+// Per-tenant default sign-off shape + default tolerance. Per-account
+// override stored on Account.requiresReconReview + Account.reconTolerance.
+// Resolution order documented in docs/blackline-arc-design.md.
+model ReconciliationConfig {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @unique @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  defaultRequiresReview Boolean @default(true)
+  defaultTolerance      Decimal @default(0) @db.Decimal(20, 4)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("reconciliation_config")
+}
+
+// =========================================================================
+// Notifications arc — Slack/etc outbound delivery
+// =========================================================================
+
+enum NotificationChannelType {
+  SLACK
+  // Future: EMAIL, MICROSOFT_TEAMS, WEBHOOK_GENERIC. The schema is
+  // typed so multiple per tenant can fan out the same alert.
+}
+
+// Dispatch cadence. The IMMEDIATE cron (every 15m business hours) and
+// the DIGEST_DAILY cron (once daily 09:00 UTC) read disjoint slices of
+// this enum, so a channel belongs to exactly one cadence at a time —
+// flip the mode on the channel to move it between them.
+enum NotificationChannelMode {
+  IMMEDIATE
+  DIGEST_DAILY
+}
+
+// A configured outbound delivery target (Slack webhook). The
+// `webhookUrl` column stores the application-layer AES-256-GCM
+// ciphertext from src/lib/notifications/crypto.ts — never plaintext.
+// Operators see the masked URL (maskWebhookUrl) in the admin UI.
+model NotificationChannel {
+  id       String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String                  @db.Uuid
+  tenant   Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  type     NotificationChannelType
+  name     String
+
+  // Encrypted via src/lib/notifications/crypto.ts (AES-256-GCM, IV +
+  // tag + ciphertext packed into one base64 string). Never decrypted
+  // on the read path — only the cron dispatcher decrypts at send time.
+  webhookUrl String
+
+  // Which severities push to this channel. JSON array of values from
+  // `AlertSeverity` (high / medium / low). Empty → all severities.
+  severityFilter String[]
+
+  // IMMEDIATE = the per-alert dispatcher fires every 15m and pings on
+  // every NEW alert. DIGEST_DAILY = the digest dispatcher fires once
+  // daily and batches all NEW alerts since the last successful digest
+  // into ONE Slack message. Existing channels default to IMMEDIATE so
+  // current behavior is preserved post-migration.
+  mode NotificationChannelMode @default(IMMEDIATE)
+
+  enabled Boolean @default(true)
+
+  // Audit ownership: who set this up. Used in the admin UI's
+  // "created by" column. Audit-trail correlation goes through
+  // the audit_log row written on createChannel.
+  createdById String? @db.Uuid
+  createdBy   User?   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dispatches NotificationDispatch[]
+
+  @@index([tenantId, enabled])
+  @@index([mode, enabled])
+  @@map("notification_channel")
+}
+
+// Per-(channel, alert) idempotency record. The cron dispatcher
+// upserts one row when an alert is sent; if a row already exists,
+// the alert is skipped (already pinged for this period). Operators
+// re-trigger by deleting the matching dispatch row, OR by changing
+// the alert's source data so it gets a new id.
+model NotificationDispatch {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  channelId String              @db.Uuid
+  channel   NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  // The alert.id from getCloseAlerts (e.g. "recon:<uuid>",
+  // "task:<uuid>", "flux:<uuid>"). Plain text — the underlying record
+  // ids are surrogate UUIDs, not PII.
+  alertFingerprint String
+
+  // Pillar + severity captured at send time. Useful for audit replay
+  // ("which severities have we pinged this month") without rejoining
+  // the source data.
+  pillar   String
+  severity String
+
+  // HTTP status from Slack — 200 on success, anything else on the
+  // failure leg of SlackSendResult. Kept for forensic queries.
+  sendStatus Int?
+  sendError  String?
+
+  sentAt DateTime @default(now())
+
+  // Dedupe: a given (channel, alert) tuple sends at most once.
+  @@unique([channelId, alertFingerprint])
+  @@index([tenantId, sentAt])
+  @@map("notification_dispatch")
+}
+
+/// Transactional email log — one row per attempted send, whatever the
+/// outcome. This is the operator's answer to "did this customer actually
+/// get their invite?" without grepping provider dashboards. Harvested
+/// from PR #46 (slice ② of the mega-branch harvest); templates and
+/// senders arrive with their consuming slices (team-invites, approvals,
+/// owner-transfer).
+model EmailDelivery {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Tenant the email is on behalf of. Null for platform-level emails
+  /// (no tenant context). SetNull on tenant delete — the delivery record
+  /// outlives the tenant, same rationale as audit_log's denormalization.
+  tenantId String? @db.Uuid
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  /// Recipient address. Encrypted at rest (random-IV AES-GCM) via the
+  /// encrypted-fields extension; equality lookups go through toEmailHash,
+  /// the same pattern as app_user.email/emailHash.
+  toEmail     String
+  /// HMAC-SHA256 search hash of the normalized recipient. Nullable (null
+  /// until the deterministic key is configured), NOT unique — many
+  /// deliveries per recipient is the normal case.
+  toEmailHash Bytes?
+
+  /// Stable template identifier — "tenant_invite", "je_approved",
+  /// "owner_transfer_offered", etc. Lets us answer "how many invites
+  /// went out this week?" without parsing subjects.
+  template String
+  /// Subject + bodies are literal email content (invite tokens, JE
+  /// context, people's names) — encrypted at rest via the extension.
+  subject  String
+  bodyText String?
+  bodyHtml String?
+
+  status       EmailDeliveryStatus
+  /// Provider message id (Resend's response.id when DELIVERED).
+  providerId   String?
+  /// Provider error detail on FAILED. Stored for diagnosis, never logged.
+  errorMessage String?
+  /// Template-specific payload (inviteId, entryId, …) for audit + replay.
+  metadata     Json?
+  sentAt       DateTime            @default(now())
+
+  @@index([tenantId, sentAt])
+  @@index([toEmailHash, sentAt])
+  @@map("email_delivery")
+}
+
+enum EmailDeliveryStatus {
+  DELIVERED // Provider accepted the message
+  LOGGED_ONLY // No RESEND_API_KEY set; row persisted for visibility
+  FAILED // Provider rejected (rate limit, bad recipient, etc.) or unreachable
+}
+
+/// Invite-by-email into a tenant. Flow: an ADMIN+ invites an address;
+/// the invite holds a random single-use token; the accept URL
+/// (/invites/accept?token=...) verifies the signed-in user's email
+/// matches the invite's (case-insensitively — no hijacking), creates
+/// the TenantMembership at the stored role, and flips the invite to
+/// ACCEPTED. Invites lazy-expire after expiresAt (default 14 days).
+/// Harvested from PR #46 (slice ③).
+model TenantInvite {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Email the invite was sent to. Lowercased on insert; encrypted at
+  /// rest (random-IV AES-GCM) via the encrypted-fields extension.
+  email     String
+  /// HMAC-SHA256 search hash of the normalized email — the
+  /// duplicate-invite refusal filters on this (via the extension's
+  /// where-rewrite; call sites write plain `where: { email }`).
+  /// Registered from day one, so no rollout window and no backfill.
+  emailHash Bytes?
+
+  /// Role granted on acceptance. OWNER is intentionally not invitable —
+  /// there is one OWNER per tenant, set at tenant creation.
+  role TenantRole
+
+  /// Random URL-safe token (32 bytes hex). Stored as-is (not hashed):
+  /// acceptance is single-use and the token only lets the holder JOIN
+  /// the tenant at the stored role, not impersonate an existing member.
+  /// If invites ever grant broader scope, switch to hashed-at-rest.
+  token String @unique
+
+  status      InviteStatus @default(PENDING)
+  /// Who created the invite — the audit trail's originator.
+  invitedById String       @db.Uuid
+  invitedBy   User         @relation("InvitedBy", fields: [invitedById], references: [id])
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+
+  @@index([tenantId, status])
+  @@index([tenantId, emailHash])
+  @@map("tenant_invite")
+}
+
+enum InviteStatus {
+  PENDING // outstanding — the accept link works
+  ACCEPTED // membership created; link is spent
+  REVOKED // admin cancelled before acceptance
+  EXPIRED // lazy-flipped when an expired link is followed
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Bank feed (QBO-style "For Review" inbox).
+//
+// A BankTransaction is a line imported from a bank/card — via CSV today,
+// via Plaid later — that has NOT yet hit the ledger. It's a staging record,
+// not a posting: the user reviews it, picks a category, and only then does a
+// balanced JournalEntry post through postJournalEntry. Excluded lines never
+// post. This mirrors the bank-feed mental model every QuickBooks user has
+// (For Review → Add/Exclude → count to zero), and keeps the import path
+// strictly separate from the ledger so a bad feed can't dirty the books.
+// ─────────────────────────────────────────────────────────────────────────
+model BankTransaction {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // Scope. A feed belongs to one (entity, book) just like everything else.
+  entityId String      @db.Uuid
+  entity   LegalEntity @relation(fields: [entityId], references: [id])
+  bookId   String      @db.Uuid
+  book     Book        @relation(fields: [bookId], references: [id])
+
+  // The bank/card GL account this line came from — the fixed side of the
+  // eventual JE. Must be a real account (isBank is the usual case).
+  bankAccountId String  @db.Uuid
+  bankAccount   Account @relation("BankTxnBankAccount", fields: [bankAccountId], references: [id])
+
+  postedDate  DateTime @db.Date
+  // Merchant / memo as the bank sent it. Encrypted at rest (Confidentiality
+  // TSC) — bank descriptions are as sensitive as anything in the ledger.
+  description String
+  // Signed in the ACCOUNT HOLDER's frame: positive = money into the account
+  // (a deposit / refund), negative = money out (a payment / charge). This is
+  // the sign convention nearly every bank CSV uses, so it needs no flip on
+  // import; the JE posting derives debit/credit from it per the account's
+  // normal side.
+  amount      Decimal  @db.Decimal(18, 4)
+  externalRef String? // bank's own transaction id, when the export carries one
+
+  // Idempotency. A content hash of (bankAccountId, postedDate, amount,
+  // normalized description, externalRef), computed on PLAINTEXT before the
+  // description is encrypted, so re-importing the same CSV is a no-op rather
+  // than a duplicate — exactly how QBO refuses to double-import a feed.
+  dedupeHash String
+
+  status BankTxnStatus @default(FOR_REVIEW)
+
+  // Set when the line is categorized: the category account chosen and the
+  // JournalEntry that posted. Null while FOR_REVIEW or EXCLUDED.
+  categoryAccountId String?       @db.Uuid
+  categoryAccount   Account?      @relation("BankTxnCategory", fields: [categoryAccountId], references: [id])
+  // Unique (nullable → Postgres allows many NULLs, so unclaimed lines are
+  // unconstrained): at most one bank line may point at a given posted
+  // entry. This is the DB-level backstop for the match/categorize race —
+  // a second concurrent claim on the same entry fails with P2002 instead
+  // of silently double-linking.
+  postedEntryId     String?       @unique @db.Uuid
+  postedEntry       JournalEntry? @relation(fields: [postedEntryId], references: [id])
+
+  // EXCLUDE audit — who dismissed it and why (a personal charge on a
+  // business card, a duplicate the bank re-sent, etc.).
+  excludedBy    String?
+  excludeReason String?
+
+  importedAt DateTime @default(now())
+  createdBy  String?
+
+  // One row per real bank line, per tenant. Full unique (not partial) so
+  // `prisma db push` creates it without a migration-mirror entry.
+  @@unique([tenantId, dedupeHash])
+  @@index([tenantId, entityId, bookId, bankAccountId, status])
+  @@map("bank_transaction")
+}
+
+enum BankTxnStatus {
+  FOR_REVIEW
+  CATEGORIZED
+  // Linked to an EXISTING journal entry instead of posting a new one —
+  // the books already recorded this money (a manual JE, a recurring
+  // posting), so the feed line just claims it. No entry is created.
+  MATCHED
+  EXCLUDED
+}
+
+// A learned categorization rule for the bank feed. Created automatically
+// each time a line is categorized: next time a line's normalized merchant
+// text contains this rule's matchText, the inbox pre-selects the category
+// (suggestion only — nothing posts without the user's Add). This is QBO's
+// learning matcher, minus auto-add, which stays a later, opt-in step.
+model BankRule {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // Normalized merchant text (lowercased, digit-runs stripped — see
+  // normalizeMerchant). Encrypted at rest like the descriptions it derives
+  // from; matching happens in application code over the tenant's decrypted
+  // rules, never in SQL.
+  matchText String
+  // Plain SHA-256 of the normalized matchText, for the uniqueness the
+  // encrypted column can't provide (random IV → different ciphertext per
+  // write). Same tradeoff as BankTransaction.dedupeHash and accepted for
+  // the same reason: uniqueness needs determinism.
+  matchHash String
+
+  // Optional: restrict the rule to lines from one bank account (a payee
+  // that should be Groceries from the card but Reimbursable from Checking).
+  bankAccountId String?  @db.Uuid
+  bankAccount   Account? @relation("BankRuleBankAccount", fields: [bankAccountId], references: [id])
+
+  categoryAccountId String  @db.Uuid
+  categoryAccount   Account @relation("BankRuleCategory", fields: [categoryAccountId], references: [id])
+
+  // Learning weight: bumped every time a categorize confirms this rule's
+  // merchant→category pairing. When two rules both match, higher wins.
+  timesUsed  Int      @default(1)
+  lastUsedAt DateTime @default(now())
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  @@unique([tenantId, matchHash])
+  @@index([tenantId])
+  @@map("bank_rule")
+}

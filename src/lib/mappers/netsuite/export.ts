@@ -23,11 +23,49 @@ import type {
   NsCustomSegment,
   NsCustomFieldDefinition,
   NsExport,
+  NsAccountingBook,
+  NsSubsidiary,
+  NsOpenItemState,
+  NsOpenItemStatus,
 } from "./types";
 
 export interface ExportToNsInput {
-  entityCode: string;
+  /**
+   * Single-sub backward compat. Reconstructs the NS export from a single
+   * ledger-core entity. Equivalent to `entityResolution: { mode: "single",
+   * entityCode }`.
+   */
+  entityCode?: string;
+  /**
+   * Multi-sub mode: discovers every LegalEntity with NS lineage
+   * (`extensions.nsIsImported === true`) whose code matches the
+   * resolution prefix, and reconstructs the Subsidiary array + routes
+   * each transaction back to its origin subsidiary.
+   */
+  entityResolution?:
+    | { mode: "single"; entityCode: string }
+    | { mode: "multi"; entityCodePrefix: string };
   bookCode?: string;
+  /**
+   * v0.9 NS Accounting Books Phase 4 — multi-book reverse export.
+   *
+   * Single mode (default, backward compat with v0.6 + Phase 3 single):
+   * exports JEs from ONE ledger-core book. Equivalent to `bookCode`.
+   *
+   * Multi mode: discovers JEs across EVERY mapped ledger-core book,
+   * groups them by source record id, reconstructs the AccountingBook
+   * array from the book mapping, and merges per-book JEs back into
+   * the source NS transaction. The frozen `sourcePayload` is identical
+   * across all per-book JE rows (it's the original NS transaction);
+   * the reverse exporter reads it from any one of them.
+   *
+   * `bookResolution` takes precedence over `bookCode` when both are set.
+   */
+  bookResolution?:
+    | { mode: "single"; bookCode: string }
+    | { mode: "multi"; bookMapping: Record<string, string> };
+  //                              ^ NS internalid → ledger-core book code
+  //                                (same shape as the importer's input)
   exportedAt?: Date;
 }
 
@@ -37,11 +75,133 @@ export async function exportToNs(
 ): Promise<NsExport> {
   const bookCode = input.bookCode ?? "US_GAAP";
 
+  // v0.9 NS Books Phase 4 — resolve book strategy. Single mode (default,
+  // backward compat) queries JEs from ONE book. Multi mode queries
+  // across all mapped books and reconstructs the AccountingBook array.
+  const bookResolution =
+    input.bookResolution ??
+    ({ mode: "single", bookCode } as const);
+  // The list of ledger-core book codes the JE query covers.
+  const bookCodesToQuery: string[] =
+    bookResolution.mode === "single"
+      ? [bookResolution.bookCode]
+      : Array.from(new Set(Object.values(bookResolution.bookMapping)));
+  // For Subsidiary-style "where do AccountingBook entries come from"
+  // reconstruction. In multi mode read each Book row's stashed NS
+  // sourcePayload (Phase 4.5 — written by setupBooks on the way in)
+  // and emit byref. Falls back to synthesis from the bookMapping for
+  // any internalid that has no stash (e.g. native-seeded books, or
+  // books imported before Phase 4.5 landed).
+  let accountingBooksReconstructed: NsAccountingBook[] = [];
+  if (bookResolution.mode === "multi") {
+    const booksWithExtensions = await prisma.book.findMany({
+      where: { code: { in: bookCodesToQuery } },
+      select: { code: true, extensions: true },
+    });
+    // Flatten every Book's stash dictionary into a single map. The
+    // many-to-one fold case (multiple NS books → one ledger-core book)
+    // is preserved: a Book's stash can hold N entries, all emitted.
+    const stashByInternalid = new Map<string, NsAccountingBook>();
+    for (const b of booksWithExtensions) {
+      const ext = (b.extensions ?? {}) as Record<string, unknown>;
+      const stash =
+        (ext.nsAccountingBookSourcePayloads as
+          | Record<string, NsAccountingBook>
+          | undefined) ?? {};
+      for (const [id, payload] of Object.entries(stash)) {
+        if (!stashByInternalid.has(id)) {
+          stashByInternalid.set(id, payload);
+        }
+      }
+    }
+    // Walk the operator's full bookMapping (which is the
+    // declared-on-the-way-in NS-book→ledger-book pairing). Prefer the
+    // stash; synthesize { internalid, name } for any internalid
+    // missing a stash entry.
+    for (const [nsId, ledgerCode] of Object.entries(
+      bookResolution.bookMapping
+    )) {
+      const stashed = stashByInternalid.get(nsId);
+      if (stashed) {
+        accountingBooksReconstructed.push(stashed);
+      } else {
+        accountingBooksReconstructed.push({
+          internalid: nsId,
+          name: ledgerCode.replace(/_/g, " "),
+        });
+      }
+    }
+    // NS conventionally orders AccountingBook by internalid ascending.
+    accountingBooksReconstructed.sort(
+      (a, b) => Number(a.internalid) - Number(b.internalid)
+    );
+  }
+
+  // Resolve the entity exporter strategy. Single mode keeps the v0.6
+  // behavior; multi mode discovers every NS-imported entity matching
+  // the prefix.
+  const resolution =
+    input.entityResolution ??
+    (input.entityCode
+      ? ({ mode: "single", entityCode: input.entityCode } as const)
+      : (() => {
+          throw new Error(
+            "exportToNs requires either `entityCode` (single mode) or " +
+              "`entityResolution` (single or multi mode)."
+          );
+        })());
+
+  // Discover the entity codes to query against.
+  //   - single: just the named entity (v0.6 path)
+  //   - multi: every LegalEntity with extensions.nsIsImported === true
+  //            AND code starts with the prefix (so we don't drag in
+  //            another tenant's NS-imported entities)
+  let entityCodes: string[];
+  let subsidiariesReconstructed: NsSubsidiary[] = [];
+  if (resolution.mode === "single") {
+    entityCodes = [resolution.entityCode];
+  } else {
+    const prefix = resolution.entityCodePrefix + "_NS";
+    // path() helps the Postgres planner use the GIN index on extensions.
+    const candidates = await prisma.legalEntity.findMany({
+      where: {
+        code: { startsWith: prefix },
+        extensions: { path: ["nsIsImported"], equals: true },
+      },
+      select: {
+        code: true,
+        extensions: true,
+      },
+      orderBy: { code: "asc" },
+    });
+    entityCodes = candidates.map((e) => e.code);
+    // Reconstruct Subsidiary array from frozen sourcePayload in
+    // extensions. Matches the lineage-replay pattern used by every
+    // other entity below — frozen original wins, never re-derive.
+    subsidiariesReconstructed = candidates
+      .map((e) => {
+        const ext = (e.extensions ?? {}) as Record<string, unknown>;
+        return (ext.nsSourcePayload as NsSubsidiary | undefined) ?? null;
+      })
+      .filter((s): s is NsSubsidiary => s !== null)
+      // NS conventionally orders Subsidiary by internalid ascending —
+      // the natural order of "parent created before child" in OneWorld.
+      .sort((a, b) => Number(a.internalid) - Number(b.internalid));
+  }
+
+  // Accounts/Parties/Items: in multi mode they're on the global chart
+  // (entityId: null per Phase 3 chart-of-accounts decision). In single
+  // mode they're scoped to the entity. Build the right `where` for each.
+  const masterRowEntityFilter =
+    resolution.mode === "single"
+      ? ({ entity: { code: resolution.entityCode } } as const)
+      : ({ entityId: null } as const);
+
   const accounts = await prisma.account.findMany({
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Account",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -50,7 +210,7 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Customer",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -59,7 +219,7 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Vendor",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
@@ -68,21 +228,42 @@ export async function exportToNs(
     where: {
       sourceSystem: "NETSUITE",
       sourceRecordType: "Item",
-      entity: { code: input.entityCode },
+      ...masterRowEntityFilter,
     },
     select: { sourcePayload: true },
     orderBy: { sourceRecordId: "asc" },
   });
 
-  const entries = await prisma.journalEntry.findMany({
+  // JEs are entity- AND book-scoped. In multi-sub mode we walk every
+  // discovered entity; in multi-book mode (v0.9) we walk every mapped
+  // ledger-core book and DEDUPE by sourceRecordId (per-book JEs share
+  // the same frozen NS sourcePayload — reading one is the same as
+  // reading any).
+  const rawEntries = await prisma.journalEntry.findMany({
     where: {
       sourceSystem: "NETSUITE",
-      entity: { code: input.entityCode },
-      book: { code: bookCode },
+      entity: { code: { in: entityCodes } },
+      book: { code: { in: bookCodesToQuery } },
     },
-    select: { sourceRecordType: true, sourcePayload: true },
+    select: {
+      sourceRecordType: true,
+      sourceRecordId: true,
+      sourcePayload: true,
+    },
     orderBy: [{ sourceRecordType: "asc" }, { sourceRecordId: "asc" }],
   });
+  // Dedupe by (sourceRecordType, sourceRecordId). Multiple per-book
+  // rows are intentional in v0.9 but the NS export side reconstructs
+  // ONE record per source — the per-book divergence is preserved in
+  // the AccountingBook array + (Phase 4.5) bookspecific[].
+  const seen = new Set<string>();
+  const entries: typeof rawEntries = [];
+  for (const e of rawEntries) {
+    const key = `${e.sourceRecordType}|${e.sourceRecordId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push(e);
+  }
 
   const invoices: NsInvoice[] = [];
   const bills: NsVendorBill[] = [];
@@ -156,6 +337,91 @@ export async function exportToNs(
     return seg;
   });
 
+  // v0.9 NS Books Phase 3.5 — sub-ledger multi-book reverse export.
+  //
+  // For multi-book mode ONLY, emit a per-book snapshot of every AR/AP
+  // OpenItem that lineage-links to an NS Invoice / VendorBill in
+  // scope. Single-book mode keeps the v0.6 export shape (no
+  // OpenItemState key) — the per-book divergence doesn't exist
+  // there, so emitting an empty array would be lossless noise.
+  //
+  // The query is scoped by `(entity in entityCodes) AND (book in
+  // bookCodesToQuery) AND sourceSystem='NETSUITE'`. Native (non-NS)
+  // open items are filtered out by the sourceSystem clause.
+  //
+  // Status values map straight through — the schema enum already
+  // matches the NS-side intent (OPEN/PARTIAL/APPLIED/etc.). Decimal
+  // columns are stringified to preserve precision across the wire.
+  let openItemStateRows: NsOpenItemState[] = [];
+  if (bookResolution.mode === "multi") {
+    const arRows = await prisma.arOpenItem.findMany({
+      where: {
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "Invoice",
+        entity: { code: { in: entityCodes } },
+        book: { code: { in: bookCodesToQuery } },
+      },
+      select: {
+        sourceRecordId: true,
+        originalAmount: true,
+        currentBalance: true,
+        status: true,
+        entity: { select: { code: true } },
+        book: { select: { code: true } },
+      },
+      orderBy: [{ sourceRecordId: "asc" }],
+    });
+    const apRows = await prisma.apOpenItem.findMany({
+      where: {
+        sourceSystem: "NETSUITE",
+        sourceRecordType: "VendorBill",
+        entity: { code: { in: entityCodes } },
+        book: { code: { in: bookCodesToQuery } },
+      },
+      select: {
+        sourceRecordId: true,
+        originalAmount: true,
+        currentBalance: true,
+        status: true,
+        entity: { select: { code: true } },
+        book: { select: { code: true } },
+      },
+      orderBy: [{ sourceRecordId: "asc" }],
+    });
+    const toState = (
+      r: typeof arRows[number] | typeof apRows[number],
+      side: "Invoice" | "VendorBill"
+    ): NsOpenItemState | null => {
+      if (!r.sourceRecordId) return null;
+      return {
+        sourceRecordType: side,
+        sourceRecordId: r.sourceRecordId,
+        bookCode: r.book.code,
+        entityCode: r.entity.code,
+        originalAmount: r.originalAmount.toString(),
+        currentBalance: r.currentBalance.toString(),
+        status: r.status as NsOpenItemStatus,
+      };
+    };
+    openItemStateRows = [
+      ...arRows.map((r) => toState(r, "Invoice")),
+      ...apRows.map((r) => toState(r, "VendorBill")),
+    ]
+      .filter((s): s is NsOpenItemState => s !== null)
+      // Deterministic ordering: AR before AP (sourceRecordType asc),
+      // then sourceRecordId asc, then bookCode asc. This is what the
+      // canonical-compare relies on for byte-stable diffs across runs.
+      .sort((a, b) => {
+        if (a.sourceRecordType !== b.sourceRecordType) {
+          return a.sourceRecordType.localeCompare(b.sourceRecordType);
+        }
+        if (a.sourceRecordId !== b.sourceRecordId) {
+          return a.sourceRecordId.localeCompare(b.sourceRecordId);
+        }
+        return a.bookCode.localeCompare(b.bookCode);
+      });
+  }
+
   const customFieldDefs = await prisma.customFieldDefinition.findMany({
     where: { sourceErpField: { startsWith: "cust" } },
     orderBy: { fieldKey: "asc" },
@@ -184,6 +450,16 @@ export async function exportToNs(
       exportedAt: (input.exportedAt ?? new Date()).toISOString(),
       comment: "Roundtrip export from ledger-core. Reconstructed from sourcePayload lineage.",
     },
+    // Subsidiary array: only emitted in multi mode (reconstructed from
+    // LegalEntity.extensions.nsSourcePayload). Single mode keeps the v0.6
+    // exporter shape — no Subsidiary key, matching the v0.6 fixture.
+    Subsidiary: subsidiariesReconstructed.length ? subsidiariesReconstructed : undefined,
+    // v0.9 NS Books Phase 4 — emit AccountingBook array only in multi
+    // mode. Single mode keeps the v0.6 export shape (no AccountingBook
+    // key), matching the v0.6 fixture.
+    AccountingBook: accountingBooksReconstructed.length
+      ? accountingBooksReconstructed
+      : undefined,
     Account: accounts.filter((a) => a.sourcePayload).map((a) => a.sourcePayload as unknown as NsAccount),
     Class: classes,
     Department: departments,
@@ -198,6 +474,9 @@ export async function exportToNs(
     CustomerPayment: customerPayments.length ? customerPayments : undefined,
     VendorPayment: vendorPayments.length ? vendorPayments : undefined,
     JournalEntry: journalEntries.length ? journalEntries : undefined,
+    // v0.9 NS Books Phase 3.5 — per-book sub-ledger snapshot. Only
+    // populated in multi mode (see the openItemStateRows guard above).
+    OpenItemState: openItemStateRows.length ? openItemStateRows : undefined,
   };
 }
 
@@ -235,6 +514,7 @@ export function diffNsExports(a: NsExport, b: NsExport): string | null {
 
   const keys = [
     "Subsidiary",
+    "AccountingBook",
     "Account",
     "Class",
     "Department",
@@ -263,6 +543,28 @@ export function diffNsExports(a: NsExport, b: NsExport): string | null {
       if (aStr !== bStr) {
         return `${key}[${aArr[i].internalid}]: payload differs\n  a=${aStr}\n  b=${bStr}`;
       }
+    }
+  }
+
+  // v0.9 NS Books Phase 3.5 — OpenItemState uses a composite key
+  // (sourceRecordType + sourceRecordId + bookCode) instead of
+  // internalid, so it gets its own canonical-compare branch.
+  const stateKey = (s: { sourceRecordType: string; sourceRecordId: string; bookCode: string }) =>
+    `${s.sourceRecordType}|${s.sourceRecordId}|${s.bookCode}`;
+  const aStateArr = [...(a.OpenItemState ?? [])].sort((x, y) =>
+    stateKey(x).localeCompare(stateKey(y))
+  );
+  const bStateArr = [...(b.OpenItemState ?? [])].sort((x, y) =>
+    stateKey(x).localeCompare(stateKey(y))
+  );
+  if (aStateArr.length !== bStateArr.length) {
+    return `OpenItemState: count differs (a=${aStateArr.length}, b=${bStateArr.length})`;
+  }
+  for (let i = 0; i < aStateArr.length; i++) {
+    const aStr = canonical(aStateArr[i]);
+    const bStr = canonical(bStateArr[i]);
+    if (aStr !== bStr) {
+      return `OpenItemState[${stateKey(aStateArr[i])}]: payload differs\n  a=${aStr}\n  b=${bStr}`;
     }
   }
   return null;

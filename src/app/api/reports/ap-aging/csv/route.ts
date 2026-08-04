@@ -19,10 +19,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const [buckets, total, items] = await Promise.all([
-    apAging(prisma, scope.entityCode, scope.bookCode, new Date(asOf)),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
+    apAging(prisma, scope.entityCode, scope.bookCode, new Date(asOf), scope.tenantId),
+    openApBalance(prisma, scope.entityCode, scope.bookCode, scope.tenantId),
     prisma.apOpenItem.findMany({
       where: {
+        tenantId: scope.tenantId,
         entity: { code: scope.entityCode },
         book: { code: scope.bookCode },
         status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
@@ -78,7 +79,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return new NextResponse(toCsv(rows), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${csvFilename("ap-aging", asOf)}"`,
+      // v0.9 NS Books Phase 3.5.C — book code in filename to prevent
+      // collision across per-book downloads. Mirror of the AR route.
+      "Content-Disposition": `attachment; filename="${csvFilename("ap-aging", `${scope.bookCode}-${asOf}`)}"`,
     },
   });
 }

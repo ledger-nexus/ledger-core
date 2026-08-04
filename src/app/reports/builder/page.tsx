@@ -16,6 +16,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canManageReportTemplates } from "@/lib/auth/policy";
 
 import { SYSTEM_TEMPLATES } from "@/lib/accounting/reports/builder/templates";
 import { listTemplates } from "@/lib/accounting/reports/builder/repository";
@@ -37,6 +39,8 @@ interface RowVM {
 
 export default async function ReportBuilderIndex() {
   const tenant = await getCurrentTenant();
+  // Affordance gate only — the Server Actions re-check and audit.
+  const canManage = canManageReportTemplates(await getViewerRole());
 
   // Build the unified template list:
   //   - DB rows for this tenant (system + user)
@@ -117,7 +121,7 @@ export default async function ReportBuilderIndex() {
                     >
                       Open →
                     </Link>
-                    {t.isSystem && (
+                    {t.isSystem && canManage && (
                       <form
                         action={async () => {
                           "use server";
@@ -136,7 +140,7 @@ export default async function ReportBuilderIndex() {
                         </button>
                       </form>
                     )}
-                    {!t.isSystem && t.id && (
+                    {!t.isSystem && t.id && canManage && (
                       <form
                         action={async () => {
                           "use server";

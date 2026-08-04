@@ -1,0 +1,5 @@
+# Append-only changelog / coordination docs: union-merge so parallel
+# branches that each prepend an entry combine cleanly instead of
+# conflicting. Order isn't load-bearing in these files.
+STATUS.md        merge=union
+PROJECT_STATUS.md merge=union

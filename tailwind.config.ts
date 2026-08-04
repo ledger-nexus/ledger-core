@@ -5,18 +5,21 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Slate-leaning neutral palette — accountants like restraint.
+        // Warm neutral palette (stone-leaning). Same semantic names as the
+        // old slate scale so no className changes anywhere — the whole app
+        // warms up in one token swap. Pure #000-on-#fff is deliberately
+        // unreachable: 50 is warm off-white, 900 is warm near-black.
         ink: {
-          50: "#f8fafc",
-          100: "#f1f5f9",
-          200: "#e2e8f0",
-          300: "#cbd5e1",
-          400: "#94a3b8",
-          500: "#64748b",
-          600: "#475569",
-          700: "#334155",
-          800: "#1e293b",
-          900: "#0f172a",
+          50: "#fafaf9",
+          100: "#f5f5f4",
+          200: "#e7e5e4",
+          300: "#d6d3d1",
+          400: "#a8a29e",
+          500: "#78716c",
+          600: "#57534e",
+          700: "#44403c",
+          800: "#292524",
+          900: "#1c1917",
         },
         accent: {
           500: "#0891b2",  // cyan-600 — used sparingly for actions
@@ -27,7 +30,16 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Helvetica", "Arial"],
+        // Display face for headings only — body stays system for speed and
+        // data density. The variable is set by next/font in layout.tsx.
+        display: ["var(--font-display)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
+      },
+      // Named easing curves — no CSS keyword easings on interactive
+      // elements. "snap" for hover/press, "out" for enter/exit.
+      transitionTimingFunction: {
+        snap: "cubic-bezier(0.22, 1, 0.36, 1)",
+        out: "cubic-bezier(0.16, 1, 0.3, 1)",
       },
     },
   },

@@ -12,11 +12,15 @@
 // becomes the only sensible default for legacy code paths still being
 // migrated.
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+
+// Widened DB client type — accepts both PrismaClient and TransactionClient.
+// RLS Phase 2b pattern; see docs/architecture/rls-phase-2b-migration-guide.md.
+type Db = PrismaClient | Prisma.TransactionClient;
 
 const DEFAULT_TENANT_SLUG = "default";
 
-export async function getDefaultTenantId(prisma: PrismaClient): Promise<string> {
+export async function getDefaultTenantId(prisma: Db): Promise<string> {
   const t = await prisma.tenant.findUnique({
     where: { slug: DEFAULT_TENANT_SLUG },
     select: { id: true },
@@ -29,4 +33,57 @@ export async function getDefaultTenantId(prisma: PrismaClient): Promise<string> 
     );
   }
   return t.id;
+}
+
+// Same bootstrap identity CI uses, so a locally-reset database and the CI
+// database agree on who owns the default tenant.
+const BOOTSTRAP_USER_EMAIL = "ci-bootstrap@northwind.test";
+
+// SEED/CLI USE ONLY. Creates the default tenant (and its owner user) when
+// missing. In a migrate-deploy world this is migration 0002_multi_tenancy's
+// DO block — but the schema is `db push`-managed (no baseline migration), so
+// a fresh or force-reset database has no tenant row at all and the Northwind
+// seed would throw in getDefaultTenantId.
+//
+// Runtime code must never call this: tenants are provisioned through
+// sign-up, and a runtime path that silently mints a tenant would bypass it.
+// getDefaultTenantId stays strict (throws) for exactly that reason.
+export async function ensureDefaultTenant(prisma: PrismaClient): Promise<string> {
+  // CC6 — `email` is encrypted at rest with a random IV, so the same
+  // plaintext yields different ciphertext on every write. That makes the
+  // column's @unique unenforceable AND would make this upsert never match
+  // an existing row, silently minting a second bootstrap owner on every
+  // call with no constraint violation to catch it.
+  //
+  // The filter below stays in plaintext ON PURPOSE: the encrypted-fields
+  // extension rewrites it onto the deterministic `emailHash` when a
+  // deterministic key is configured, and leaves it alone when there isn't
+  // one (in which case writes weren't hashed either, so plaintext is the
+  // correct match). Calling the hash helper here directly would THROW in
+  // any environment without FIELD_DETERMINISTIC_KEY — which includes CI.
+  const owner = await prisma.user.upsert({
+    where: { email: BOOTSTRAP_USER_EMAIL },
+    update: {},
+    create: { email: BOOTSTRAP_USER_EMAIL, displayName: "CI Bootstrap" },
+    select: { id: true },
+  });
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: DEFAULT_TENANT_SLUG },
+    update: {},
+    create: {
+      slug: DEFAULT_TENANT_SLUG,
+      name: "Default Tenant",
+      ownerUserId: owner.id,
+    },
+    select: { id: true },
+  });
+  // Tenant.ownerUserId records ownership, but role resolution reads
+  // TenantMembership.role (see src/lib/auth/policy.ts) — without this
+  // row the bootstrap owner would have a tenant and no role in it.
+  await prisma.tenantMembership.upsert({
+    where: { tenantId_userId: { tenantId: tenant.id, userId: owner.id } },
+    create: { tenantId: tenant.id, userId: owner.id, role: "OWNER" },
+    update: { role: "OWNER" },
+  });
+  return tenant.id;
 }

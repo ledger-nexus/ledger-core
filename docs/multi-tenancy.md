@@ -204,7 +204,13 @@ Postgres RLS is **not in v1 of multi-tenancy**. Application-level scoping is the
 
 Why deferred: RLS requires every Prisma connection to `SET app.current_tenant_id = '<uuid>'` before each query batch. Prisma 5.x supports this via middleware but it's non-trivial to get right, especially with Prisma's connection pool. Adding it during the initial multi-tenancy work risks two compounding sources of bugs.
 
-V2 plan: enable RLS, write policies on every tenant-scoped table, add connection-level tenant setter.
+V2 plan (4 phases, each separately reviewed):
+1. **Foundation — DONE.** `withTenantContext(prisma, tenantId, fn)` in `src/lib/tenant-context.ts` runs `fn` inside a transaction whose `app.current_tenant_id` GUC is set via parameter-bound `set_config(..., is_local => true)`. Transaction-local (no pooled-connection leak), inert until policies exist. Tests in `tests/rls-tenant-context.test.ts`.
+2. `CREATE POLICY USING (tenantId = current_setting('app.current_tenant_id')::uuid)` on every tenant-scoped table (~42 models). NOT enabled yet.
+3. Migrate every Server Action + HTTP endpoint off the raw `prisma` singleton to run inside `withTenantContext`. (The big one — 100+ call sites.)
+4. `FORCE ROW LEVEL SECURITY` + DB-layer cross-tenant tests proving a forgotten `where: { tenantId }` is blocked by Postgres.
+
+**Status:** Phase 1 only. Application-level WHERE-clause scoping remains the live enforcement; RLS is not yet enabled. Deficiency #12 stays open until Phase 4.
 
 ## Isolation tests
 

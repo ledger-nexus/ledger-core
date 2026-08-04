@@ -1,0 +1,66 @@
+name: SBOM
+
+# CC9 + supply-chain visibility (pairs with deficiency-log #4 npm
+# pinning).
+#
+# Generates a CycloneDX-format Software Bill of Materials on every
+# push to main. The artifact is retained 90 days so an SOC 2 auditor
+# can pull "what was in production on date X" via the GitHub Actions
+# UI.
+#
+# Why not commit to docs/sbom-{YYYY-MM-DD}.json on every push:
+#   The diff churn would dominate the git history. Quarterly snapshots
+#   to docs/ via a scheduled workflow are a separate follow-up; see
+#   docs/policies/control-deficiency-log.md #19.
+
+on:
+  push:
+    branches: [main]
+  # Also runnable ad-hoc to refresh the artifact for an auditor.
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # The repo's lockfile is `package-lock.json` (npm). A previous
+      # iteration of this workflow used pnpm, but no `pnpm-lock.yaml`
+      # was ever committed, so setup-node's `cache: pnpm` failed in
+      # ~15s on every push. Switched to npm to match the actual repo
+      # (mirrors ci.yml).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate CycloneDX SBOM
+        # cyclonedx-npm reads node_modules + package-lock.json and emits
+        # a CycloneDX JSON document. Format spec:
+        # https://cyclonedx.org/specification/overview/
+        run: |
+          npx @cyclonedx/cyclonedx-npm@latest \
+            --output-file sbom.json \
+            --output-format JSON \
+            --spec-version 1.5
+
+      - name: Show summary
+        run: |
+          echo "## SBOM summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- File: \`sbom.json\` ($(wc -c < sbom.json) bytes)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Component count: $(jq '.components | length' sbom.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- CycloneDX spec version: $(jq -r '.specVersion' sbom.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Generated at: $(jq -r '.metadata.timestamp' sbom.json)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.json
+          retention-days: 90

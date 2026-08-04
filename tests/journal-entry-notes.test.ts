@@ -43,6 +43,10 @@ import {
   deleteJournalEntryNoteAction,
 } from "@/app/actions/journal-entry-notes";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import {
+  withAuditLogMutable,
+  withAuditLogMutableTransaction,
+} from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const SUFFIX = ("NOTE" + Date.now().toString(36) + Math.floor(Math.random() * 9999)).toUpperCase();
@@ -132,23 +136,36 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.journalEntryNote.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
   await prisma.recordEvent.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { id: entityId } });
-  await prisma.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.tenant.delete({ where: { id: tenant.id } });
-  await prisma.user.deleteMany({ where: { id: { in: [author.id, otherMember.id] } } }).catch(() => {});
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.auditLog.deleteMany({
+      where: {
+        OR: [
+          { tenantId: tenant.id },
+          { actorUserId: { in: [author.id, otherMember.id] } },
+        ],
+      },
+    });
+    await tx.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
+    await tx.tenant.delete({ where: { id: tenant.id } });
+    await tx.user.deleteMany({
+      where: { id: { in: [author.id, otherMember.id] } },
+    });
+  });
   await prisma.$disconnect();
 });
 
 beforeEach(async () => {
   // Clean notes between tests so each starts fresh.
   await prisma.journalEntryNote.deleteMany({ where: { entryId } });
-  await prisma.auditLog.deleteMany({
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
     where: { tenantId: tenant.id, resource: "JournalEntryNote" },
+  });
   });
 });
 

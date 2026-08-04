@@ -12,16 +12,18 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import {
-  reassignRecord,
+  reassignRecordInTx,
+  emitReassignmentNotification,
   ReassignError,
   type ReassignableRecordType,
 } from "@/lib/ownership/reassign";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
 import {
-  requireAdmin,
-  NotAuthenticatedError,
-  NotAuthorizedError,
-} from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+  canManageReassignmentRules,
+  PermissionDeniedError,
+} from "@/lib/auth/policy";
+import { withTenantContext } from "@/lib/tenant-context";
 
 export interface AdminReassignState {
   ok: boolean;
@@ -36,8 +38,10 @@ export async function adminReassignAction(input: {
   reason?: string;
 }): Promise<AdminReassignState> {
   try {
-    const admin = await requireAdmin();
-    const tenant = await requireCurrentTenant();
+    const { user: admin, tenant } = await requirePermitted(
+      "reassignment.execute",
+      canManageReassignmentRules
+    );
 
     if (!input.recordId) return { ok: false, message: "recordId required" };
     if (!input.newOwnerId) return { ok: false, message: "newOwnerId required" };
@@ -48,7 +52,10 @@ export async function adminReassignAction(input: {
       return { ok: false, message: `recordType ${input.recordType} not reassignable` };
     }
 
-    await reassignRecord(prisma, {
+    // RLS Phase 2b Class T: tx-scoped reassignRecordInTx +
+    // outside-tx notification emit. See reassign-ap-item.ts for the
+    // two-phase rationale.
+    const reassignInput = {
       recordType: input.recordType,
       recordId: input.recordId,
       newOwner: { type: input.newOwnerType, id: input.newOwnerId },
@@ -58,13 +65,28 @@ export async function adminReassignAction(input: {
       actorTenantId: tenant.id,
       reason: input.reason?.trim() || `admin:orphan repair by ${admin.displayName}`,
       lockFromRules: true,
-    });
+    };
+    await withTenantContext(prisma, tenant.id, async (tx) =>
+      reassignRecordInTx(tx, reassignInput)
+    );
+
+    try {
+      await emitReassignmentNotification(prisma, reassignInput);
+    } catch (e) {
+      // Keep caller-controlled data out of console.warn's format-string
+      // position (CodeQL js/tainted-format-string) — pass it structured.
+      console.warn("Admin reassignment succeeded but notification emit failed:", {
+        recordType: input.recordType,
+        recordId: input.recordId.slice(0, 8),
+        error: e,
+      });
+    }
 
     revalidatePath("/admin/orphans");
     return { ok: true };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) return { ok: false, message: e.message };
-    if (e instanceof NotAuthorizedError) return { ok: false, message: e.message };
+    if (e instanceof PermissionDeniedError) return { ok: false, message: e.message };
     if (e instanceof ReassignError) {
       return { ok: false, message: `${e.code}: ${e.message}` };
     }

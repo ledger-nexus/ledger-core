@@ -15,6 +15,7 @@ This directory holds the policy documents an SOC 2 auditor will ask to see. They
 | `risk-register.md` | Top risks, likelihood × impact, mitigation status | CC3 |
 | `business-continuity.md` | RTO/RPO, backup strategy, DR test cadence | CC7, Availability |
 | `control-deficiency-log.md` | Ongoing log of identified failures and remediation | CC4 |
+| `data-subject-requests.md` | Operational procedure for GDPR Art. 15/17/16 + CPRA equivalents — channels, identity verification, per-right procedure, SLA | Privacy TSC |
 
 ## Process
 

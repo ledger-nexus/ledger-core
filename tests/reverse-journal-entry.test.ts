@@ -36,6 +36,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { reverseJournalEntryAction } from "@/app/actions/reverse-journal-entry";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -128,15 +129,21 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
   await prisma.journalEntry.deleteMany({ where: { entityId } });
   await prisma.account.deleteMany({ where: { entityId } });
   await prisma.recordEvent.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { id: entityId } });
-  await prisma.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.tenant.delete({ where: { id: tenant.id } });
-  await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.auditLog.deleteMany({
+      where: {
+        OR: [{ tenantId: tenant.id }, { actorUserId: user.id }],
+      },
+    });
+    await tx.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
+    await tx.tenant.delete({ where: { id: tenant.id } });
+    await tx.user.delete({ where: { id: user.id } });
+  });
   await prisma.$disconnect();
 });
 

@@ -2,10 +2,19 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
-import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted } from "@/lib/auth/authorize";
+import {
+  canPostJournalEntries,
+  PermissionDeniedError,
+} from "@/lib/auth/policy";
 import { requireCurrentScope, NoScopeError } from "@/lib/scope";
+import { prisma } from "@/lib/db";
+import { withTenantContext } from "@/lib/tenant-context";
+import Decimal from "decimal.js";
+import { canApproveJournalEntries } from "@/lib/auth/policy";
+import { resolveApprovalRoute } from "@/lib/accounting/approval-threshold";
 
 export interface NewEntryDraftLine {
   accountCode: string;
@@ -38,18 +47,38 @@ export async function createJournalEntryAction(
   let entryId: string;
 
   try {
-    const user = await requireCurrentUser();
+    // MEMBER floor today (every membership can post) — the gate is the
+    // seam where the read-only VIEWER role and maker-checker submission
+    // land without touching this action's body again.
+    const { user, tenant } = await requirePermitted(
+      "journalEntry.post",
+      canPostJournalEntries
+    );
     const scope = await requireCurrentScope();
 
     const documentDateStr = String(formData.get("documentDate") ?? "");
     const memo = String(formData.get("memo") ?? "").trim();
-    const source = (String(formData.get("source") ?? "MANUAL") as
-      | "MANUAL"
-      | "SYSTEM"
-      | "AI_APPROVED"
-      | "SEED"
-      | "IMPORT");
     const linesJson = String(formData.get("linesJson") ?? "[]");
+
+    // `source` is lineage, not input. This action exists to serve one
+    // caller — the manual entry form — so an entry it posts is MANUAL by
+    // definition, and we stamp that here rather than believe the client.
+    //
+    // It previously read the value from formData through a bare type
+    // assertion (`String(...) as "MANUAL" | "SYSTEM" | ...`). Assertions
+    // are erased at runtime, so this neither validated nor constrained
+    // anything: the form offered SYSTEM and AI_APPROVED outright, and a
+    // hand-rolled POST could pass SEED or IMPORT just as easily. Any of
+    // them would land in the ledger as that entry's permanent story of
+    // where it came from.
+    //
+    // That matters because AI_APPROVED is a claim about a control: it
+    // asserts an AI proposed the entry and a human approved it (the
+    // reference path is the FX revaluation gate). SYSTEM and IMPORT
+    // likewise assert machine origin. A person typing debits and credits
+    // into a form could stamp any of those on their own work, and the
+    // audit trail would repeat it back to a reviewer as fact.
+    const source = "MANUAL" as const;
 
     if (!documentDateStr) {
       return { ok: false, error: "Document date is required" };
@@ -68,27 +97,74 @@ export async function createJournalEntryAction(
       return { ok: false, error: "Entry must have at least 2 lines" };
     }
 
-    const result = await postJournalEntry(prisma, {
-      tenantId: scope.tenantId,
-      entityCode: scope.entityCode,
-      bookCode: scope.bookCode,
-      documentDate: new Date(documentDateStr),
-      memo,
-      source,
-      createdBy: user.email,
-      ownerUserId: user.id,
-      lines: lines.map((l) => ({
-        accountCode: l.accountCode,
-        debit: l.side === "DEBIT" ? l.amount : undefined,
-        credit: l.side === "CREDIT" ? l.amount : undefined,
-        partyCode: l.partyCode || undefined,
-        description: l.description || undefined,
-      })),
+    // RLS Phase 2b: wrap the JE post in withTenantContext so the
+    // SET LOCAL app.current_tenant_id GUC reaches postJournalEntry's
+    // writes. postJournalEntry already accepts both PrismaClient and
+    // TransactionClient (ledger-core v1.11 contract — see CLAUDE.md),
+    // so no helper widening is required. This is the simplest possible
+    // RLS migration: ONE prisma call → wrap + swap.
+    // Maker-checker branching: when the tenant has requireJeApproval on
+    // AND the actor can't approve entries themselves, the post lands in
+    // PENDING_APPROVAL instead of POSTED. ADMIN/OWNER bypass the queue —
+    // they ARE the approvers. Threshold: with jeApprovalMinAmount > 0,
+    // only entries whose total ≥ threshold queue; smaller ones post
+    // directly even from MEMBERs. Pure decision matrix in
+    // src/lib/accounting/approval-threshold.ts.
+    const tenantConfig = await prisma.tenant.findUnique({
+      where: { id: tenant.id },
+      select: { requireJeApproval: true, jeApprovalMinAmount: true },
     });
+    const entryTotal = lines.reduce((acc, l) => {
+      if (l.side !== "DEBIT") return acc;
+      let n: Decimal;
+      try {
+        n = new Decimal(l.amount || "0");
+      } catch {
+        return acc; // postJournalEntry rejects malformed lines with a clearer error
+      }
+      return n.isFinite() && n.greaterThan(0) ? acc.plus(n) : acc;
+    }, new Decimal(0));
+    const route = resolveApprovalRoute({
+      requireJeApproval: tenantConfig?.requireJeApproval ?? false,
+      jeApprovalMinAmount: tenantConfig?.jeApprovalMinAmount
+        ? new Decimal(tenantConfig.jeApprovalMinAmount.toString())
+        : null,
+      entryTotal,
+      actorIsApprover: canApproveJournalEntries(tenant.role),
+    });
+    const requireApproval = route === "PENDING_APPROVAL";
+
+    const result = await withTenantContext(prisma, scope.tenantId, async (tx) =>
+      postJournalEntry(tx, {
+        tenantId: scope.tenantId,
+        entityCode: scope.entityCode,
+        bookCode: scope.bookCode,
+        documentDate: new Date(documentDateStr),
+        memo,
+        source,
+        createdBy: user.email,
+        ownerUserId: user.id,
+        initialStatus: requireApproval ? "PENDING_APPROVAL" : "POSTED",
+        submittedByUserId: requireApproval ? user.id : undefined,
+        lines: lines.map((l) => ({
+          accountCode: l.accountCode,
+          debit: l.side === "DEBIT" ? l.amount : undefined,
+          credit: l.side === "CREDIT" ? l.amount : undefined,
+          partyCode: l.partyCode || undefined,
+          description: l.description || undefined,
+        })),
+      })
+    );
     entryId = result.id;
+    if (requireApproval) {
+      revalidatePath("/journal-entries/pending");
+    }
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
       return { ok: false, error: "You must be signed in to post a journal entry." };
+    }
+    if (e instanceof PermissionDeniedError) {
+      return { ok: false, error: "Your role can't post journal entries in this tenant." };
     }
     if (e instanceof NoScopeError) {
       return { ok: false, error: "No active scope — pick an entity + book first." };

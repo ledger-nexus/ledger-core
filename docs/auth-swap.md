@@ -208,7 +208,7 @@ model VerificationToken {
 }
 ```
 
-Then `pnpm db:push` to apply.
+Then `npm run db:push` to apply.
 
 ### App config
 

@@ -39,6 +39,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { logAuditEvent } from "@/lib/audit/log";
 import { GET } from "@/app/api/admin/audit-log/csv/route";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -117,7 +118,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
     where: {
       OR: [
         { tenantId: { in: [tenantA.id, tenantB.id] } },
@@ -125,14 +127,18 @@ afterAll(async () => {
       ],
     },
   });
+  });
   await prisma.tenantMembership.deleteMany({
     where: { tenantId: { in: [tenantA.id, tenantB.id] } },
   });
   await prisma.tenant.deleteMany({
     where: { id: { in: [tenantA.id, tenantB.id] } },
   });
+  // By id, not email prefix — `email` is encrypted with a random IV so
+  // `contains` matches nothing. Only the throwaway non-admin is ours;
+  // `admin` is the shared Northwind controller and must survive.
   await prisma.user.deleteMany({
-    where: { email: { contains: SUFFIX } },
+    where: { id: nonAdmin.id },
   }).catch(() => {});
   await prisma.$disconnect();
 });

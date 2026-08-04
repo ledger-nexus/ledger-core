@@ -9,16 +9,15 @@
 // Invariant: sum of currentBalance for status IN (OPEN, PARTIAL) per
 // (entity, book) === AR control account balance (Dr). See tests.
 
+import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { postJournalEntry } from "../post-journal";
+import { toDecimal } from "../../utils/decimal";
+import { isUuid } from "../../utils/uuid";
+import { CrossBookApplicationError } from "../types";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 
-function toDecimal(v: Decimal | string | number | null | undefined): Decimal {
-  if (v === undefined || v === null) return new Decimal(0);
-  if (v instanceof Decimal) return v;
-  return new Decimal(v);
-}
 
 export interface OpenArItemInput {
   entityCode: string;
@@ -149,9 +148,6 @@ export async function openArItem(
   return { id: item.id, rulesResult };
 }
 
-function isUuid(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-}
 
 export interface ApplyArPaymentInput {
   openItemId: string;
@@ -160,18 +156,47 @@ export interface ApplyArPaymentInput {
   appliedDate: Date;
 }
 
-export async function applyArPayment(
-  prisma: PrismaClient,
+// Class T (RLS Phase 2b): transactional body exported separately so
+// Server Actions can run it inside withTenantContext's transaction.
+export async function applyArPaymentInTx(
+  tx: Prisma.TransactionClient,
   input: ApplyArPaymentInput
 ): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
-  return await prisma.$transaction(async (tx) => {
+  {
     const item = await tx.arOpenItem.findUniqueOrThrow({
       where: { id: input.openItemId },
       // tenantId pulled so the application row inherits the same scope.
-      select: { currentBalance: true, originalAmount: true, status: true, tenantId: true },
+      // bookId pulled for the Phase 3.5.D cross-book guard below.
+      select: {
+        currentBalance: true,
+        originalAmount: true,
+        status: true,
+        tenantId: true,
+        bookId: true,
+        book: { select: { code: true } },
+      },
     });
     if (item.status === "APPLIED" || item.status === "WRITTEN_OFF" || item.status === "VOID") {
       throw new Error(`Cannot apply payment to AR item in ${item.status} state`);
+    }
+
+    // v0.9 NS Books Phase 3.5.D — cross-book application guard. The
+    // payment-side JE must post on the SAME book as the OpenItem; an
+    // application across books would corrupt per-book trial balance
+    // invariants (the AR Cr line on the payment JE balances the AR Dr
+    // line on the invoice JE; cross-book pairing leaves both sides
+    // imbalanced). Pattern 2 multi-book demands one book per posting.
+    const appliedByEntry = await tx.journalEntry.findUniqueOrThrow({
+      where: { id: input.appliedByEntryId },
+      select: { bookId: true, book: { select: { code: true } } },
+    });
+    if (appliedByEntry.bookId !== item.bookId) {
+      throw new CrossBookApplicationError(
+        input.openItemId,
+        item.book.code,
+        input.appliedByEntryId,
+        appliedByEntry.book.code
+      );
     }
 
     const applied = toDecimal(input.appliedAmount);
@@ -226,7 +251,14 @@ export async function applyArPayment(
     }
 
     return { applicationId: application.id, remainingBalance: newBalance, status: nextStatus };
-  });
+  }
+}
+
+export async function applyArPayment(
+  prisma: PrismaClient,
+  input: ApplyArPaymentInput
+): Promise<{ applicationId: string; remainingBalance: Decimal; status: string }> {
+  return prisma.$transaction((tx) => applyArPaymentInTx(tx, input));
 }
 
 // Write-off of an AR open item. Two methods supported:
@@ -386,10 +418,15 @@ export async function estimateBadDebtAllowance(
 export async function openArBalance(
   prisma: PrismaClient,
   entityCode: string,
-  bookCode: string
+  bookCode: string,
+  // Tenant pin — entity codes are only unique per tenant; UI/API callers
+  // MUST pass this (deficiency #16 pattern, closed for reports, was still
+  // open here). Optional for legacy substrate scripts.
+  tenantId?: string
 ): Promise<Decimal> {
   const rows = await prisma.arOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
@@ -410,10 +447,13 @@ export async function arAging(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,
-  asOf: Date
+  asOf: Date,
+  // Tenant pin — see openArBalance. Same cross-tenant same-code hole.
+  tenantId?: string
 ): Promise<ArAgingBucket[]> {
   const items = await prisma.arOpenItem.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       entity: { code: entityCode },
       book: { code: bookCode },
       status: { in: ["OPEN", "PARTIAL", "REOPENED"] },

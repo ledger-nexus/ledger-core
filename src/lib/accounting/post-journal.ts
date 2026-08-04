@@ -34,18 +34,23 @@ import {
   UnknownBookError,
   PeriodClosedError,
   AccountBookScopeError,
+  AccountCurrencyNotAllowedError,
+  AccountNotOpenError,
   TenantScopeMismatchError,
   EntityMissingTenantError,
 } from "./types";
 import { fireInsertRules, type FireRulesResult } from "../rules/integration";
+import { toDecimal } from "../utils/decimal";
 
 // Accepts either a full PrismaClient or an active TransactionClient so
 // callers can nest postJournalEntry inside a larger transaction (e.g.
 // the fixed-asset record-depreciation endpoint posts N JEs + advances
 // FixedAssetBookAttributes in one atomic operation). When given a
 // TransactionClient, the internal $transaction wrapper is skipped —
-// the outer transaction provides atomicity.
-export type DbClient = PrismaClient | Prisma.TransactionClient;
+// the outer transaction provides atomicity. Canonical definition lives
+// in @/lib/db; re-exported here for existing importers.
+export type { DbClient } from "../db";
+import type { DbClient } from "../db";
 
 function hasTransaction(db: DbClient): db is PrismaClient {
   // TransactionClient is Omit<PrismaClient, "$transaction" | "$connect" | ...>.
@@ -60,11 +65,6 @@ Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
 const DEFAULT_BOOK = "US_GAAP";
 
-function toDecimal(v: Decimal | string | number | undefined): Decimal {
-  if (v === undefined || v === null) return new Decimal(0);
-  if (v instanceof Decimal) return v;
-  return new Decimal(v);
-}
 
 export async function postJournalEntry(
   prisma: DbClient,
@@ -214,15 +214,38 @@ export async function postJournalEntry(
       active: true,
       OR: [{ entityId: null }, { entityId: entity.id }],
     },
-    select: { id: true, code: true, entityId: true, bookScope: true },
+    select: {
+      id: true,
+      code: true,
+      entityId: true,
+      bookScope: true,
+      allowedCurrencies: true,
+      openedOn: true,
+      closedOn: true,
+    },
   });
 
   // Build code -> account map. Prefer entity-specific over shared if both exist.
-  const codeToAccount = new Map<string, { id: string; bookScope: string[] }>();
+  const codeToAccount = new Map<
+    string,
+    {
+      id: string;
+      bookScope: string[];
+      allowedCurrencies: string[];
+      openedOn: Date | null;
+      closedOn: Date | null;
+    }
+  >();
   for (const a of accounts) {
     const existing = codeToAccount.get(a.code);
     if (!existing || (a.entityId !== null && existing && a.entityId === entity.id)) {
-      codeToAccount.set(a.code, { id: a.id, bookScope: a.bookScope });
+      codeToAccount.set(a.code, {
+        id: a.id,
+        bookScope: a.bookScope,
+        allowedCurrencies: a.allowedCurrencies,
+        openedOn: a.openedOn,
+        closedOn: a.closedOn,
+      });
     }
   }
 
@@ -231,6 +254,32 @@ export async function postJournalEntry(
     if (!acct) throw new UnknownAccountError(line.accountCode);
     if (acct.bookScope.length > 0 && !acct.bookScope.includes(book.code)) {
       throw new AccountBookScopeError(line.accountCode, book.code);
+    }
+    // Commodity constraint. Empty = unconstrained, so this is inert for any
+    // account that hasn't opted in.
+    if (
+      acct.allowedCurrencies.length > 0 &&
+      !acct.allowedCurrencies.includes(currencyCode)
+    ) {
+      throw new AccountCurrencyNotAllowedError(
+        line.accountCode,
+        currencyCode,
+        acct.allowedCurrencies
+      );
+    }
+    // Dated lifecycle, checked against the DOCUMENT date (the date the
+    // transaction is dated, which is also what resolves the period) rather than
+    // the posting date. Boundaries inclusive; null = unbounded.
+    if (
+      (acct.openedOn && input.documentDate < acct.openedOn) ||
+      (acct.closedOn && input.documentDate > acct.closedOn)
+    ) {
+      throw new AccountNotOpenError(
+        line.accountCode,
+        input.documentDate,
+        acct.openedOn,
+        acct.closedOn
+      );
     }
   }
 
@@ -291,7 +340,12 @@ export async function postJournalEntry(
 
   // ---- 6. Check the (entity, book, period) close lock --------------------
 
-  if (period) {
+  // Skipped for PENDING_APPROVAL entries — the entry doesn't hit the
+  // ledger until approval, and approval re-runs this check. If the
+  // period closes between submit and approve, the approve action fails
+  // (and the approver can void / move the entry). This matches the
+  // real-world maker-checker flow where stale drafts are common.
+  if (period && input.initialStatus !== "PENDING_APPROVAL") {
     const closed = await prisma.periodClose.findUnique({
       where: {
         entityId_bookId_periodId: {
@@ -320,6 +374,17 @@ export async function postJournalEntry(
     });
     const entryNumber = `${entity.code}-${book.code}-${String(existingCount + 1).padStart(5, "0")}`;
 
+    // Denormalized line sums for the NS SuiteAnalytics Saved-Search
+    // amount filter + future reporting (migration 0012). The
+    // postJournalEntry invariant (debits == credits) holds at this
+    // point — both totals will be equal.
+    const sumTotalDebit = normalizedLines
+      .reduce((acc, l) => acc.plus(l.debit), new Decimal(0))
+      .toFixed(4);
+    const sumTotalCredit = normalizedLines
+      .reduce((acc, l) => acc.plus(l.credit), new Decimal(0))
+      .toFixed(4);
+
     const entry = await tx.journalEntry.create({
       data: {
         entryNumber,
@@ -334,8 +399,18 @@ export async function postJournalEntry(
         memo: input.memo,
         currencyId: currencyCode,
         fxRate: fxRate.toFixed(10),
+        totalDebit: sumTotalDebit,
+        totalCredit: sumTotalCredit,
         source: input.source ?? "MANUAL",
-        status: "POSTED",
+        // Maker-checker: when the caller asks for PENDING_APPROVAL, the
+        // entry persists with lines but has NO ledger effect — every
+        // aggregation site filters to LEDGER_EFFECTIVE_STATUSES.
+        // approveJournalEntry (src/lib/accounting/approval.ts) flips it
+        // to POSTED after a second pair of eyes.
+        status: input.initialStatus ?? "POSTED",
+        submittedById: input.submittedByUserId,
+        submittedAt:
+          input.initialStatus === "PENDING_APPROVAL" ? new Date() : null,
         createdBy: input.createdBy,
         updatedBy: input.createdBy,
         ownerId: input.ownerUserId,
@@ -389,7 +464,13 @@ export async function postJournalEntry(
   // This is also why the system/seed depreciation post (ownerUserId
   // null) is the typical caller for the tx path — no routing needed.
   let rulesResult: FireRulesResult | undefined;
-  if (input.ownerUserId && hasTransaction(prisma)) {
+  // Pending entries don't fire ON_INSERT rules — they haven't really
+  // landed yet. approveJournalEntry wires the second-pass firing.
+  if (
+    input.ownerUserId &&
+    hasTransaction(prisma) &&
+    input.initialStatus !== "PENDING_APPROVAL"
+  ) {
     try {
       // Load the entry shape rules might match on (memo, source, etc.).
       const fullEntry = await prisma.journalEntry.findUniqueOrThrow({

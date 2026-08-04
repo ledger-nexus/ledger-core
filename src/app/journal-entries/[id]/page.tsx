@@ -9,9 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
+import { canModerateNotes, canApproveJournalEntries } from "@/lib/auth/policy";
+import { ApprovalActions } from "./approval-actions";
+import { WithdrawAction } from "./withdraw-action";
 import { formatDate, formatMoney } from "@/lib/utils/format";
+import { getEntryLineage } from "@/lib/accounting/lineage";
 import ReverseButton from "./reverse-button";
 import NotesCard from "./notes-card";
 
@@ -33,8 +37,6 @@ export default async function JournalEntryDetailPage({
       entity: { select: { code: true } },
       book: { select: { code: true } },
       currency: { select: { code: true } },
-      reversalOf: { select: { id: true, entryNumber: true } },
-      reversedBy: { select: { id: true, entryNumber: true } },
       lines: {
         include: {
           account: { select: { code: true, name: true } },
@@ -62,6 +64,13 @@ export default async function JournalEntryDetailPage({
     notFound();
   }
 
+  // Correction / reversal lineage — what this entry reverses or corrects, and
+  // what reverses or corrects it. Scoped to the entry's own tenant.
+  const lineage = await getEntryLineage(prisma, {
+    tenantId: entry.tenantId,
+    entryId: entry.id,
+  });
+
   const totalDebit = entry.lines.reduce(
     (acc, l) => acc.plus(new Decimal(l.debit.toString())),
     new Decimal(0)
@@ -86,7 +95,17 @@ export default async function JournalEntryDetailPage({
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-1.5">
-            <Badge tone="info">{entry.status}</Badge>
+            <Badge
+              tone={
+                entry.status === "PENDING_APPROVAL"
+                  ? "warning"
+                  : entry.status === "VOID"
+                    ? "negative"
+                    : "info"
+              }
+            >
+              {entry.status}
+            </Badge>
             <Badge tone="neutral">{entry.source}</Badge>
             {entry.sourceSystem && (
               <Badge tone="neutral">
@@ -109,7 +128,7 @@ export default async function JournalEntryDetailPage({
               id={entry.id}
               entryNumber={entry.entryNumber}
               status={entry.status}
-              reversedByEntryNumber={entry.reversedBy[0]?.entryNumber}
+              reversedByEntryNumber={lineage?.reversedBy[0]?.entryNumber}
             />
             <a href={`/api/journal-entries/${entry.id}/csv`} download>
               <Button size="sm" variant="ghost">
@@ -119,6 +138,44 @@ export default async function JournalEntryDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Maker-checker panel. Approvers who are NOT the submitter get the
+          approve/reject controls (separation of duties — the server
+          re-checks); the submitter gets withdraw; everyone else sees why
+          the entry has no ledger effect yet. */}
+      {entry.status === "PENDING_APPROVAL" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="text-sm font-medium text-amber-900">
+            Awaiting approval — this entry has no ledger effect until an
+            approver posts it.
+          </div>
+          <div className="mt-3">
+            {tenant &&
+            canApproveJournalEntries(tenant.role) &&
+            entry.submittedById !== currentUser?.id ? (
+              <ApprovalActions entryId={entry.id} entryNumber={entry.entryNumber} />
+            ) : entry.submittedById === currentUser?.id ? (
+              <WithdrawAction entryId={entry.id} entryNumber={entry.entryNumber} />
+            ) : (
+              <p className="text-xs text-amber-800">
+                An ADMIN or OWNER (other than the submitter) can approve or
+                reject it.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      {entry.status === "VOID" && entry.rejectionReason && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <span className="font-medium">
+            {entry.rejectionReason.startsWith("Withdrawn")
+              ? "Withdrawn by submitter"
+              : "Rejected"}
+            :
+          </span>{" "}
+          {entry.rejectionReason}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Field label="Entity" value={entry.entity.code} />
@@ -130,35 +187,17 @@ export default async function JournalEntryDetailPage({
           <Field label="Source record ID" value={entry.sourceRecordId} className="font-mono" />
         )}
         {entry.mappingVersion && <Field label="Mapping version" value={entry.mappingVersion} />}
-        {entry.reversalOf && (
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
-              Reverses
-            </div>
-            <div className="mt-0.5 text-sm">
-              <Link
-                href={`/journal-entries/${entry.reversalOf.id}`}
-                className="font-mono text-link hover:underline"
-              >
-                {entry.reversalOf.entryNumber}
-              </Link>
-            </div>
-          </div>
+        {lineage?.reverses && (
+          <LineageField label="Reverses" nodes={[lineage.reverses]} />
         )}
-        {entry.reversedBy.length > 0 && (
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
-              Reversed by
-            </div>
-            <div className="mt-0.5 text-sm">
-              <Link
-                href={`/journal-entries/${entry.reversedBy[0].id}`}
-                className="font-mono text-link hover:underline"
-              >
-                {entry.reversedBy[0].entryNumber}
-              </Link>
-            </div>
-          </div>
+        {lineage && lineage.reversedBy.length > 0 && (
+          <LineageField label="Reversed by" nodes={lineage.reversedBy} />
+        )}
+        {lineage?.corrects && (
+          <LineageField label="Corrects" nodes={[lineage.corrects]} />
+        )}
+        {lineage && lineage.correctedBy.length > 0 && (
+          <LineageField label="Corrected by" nodes={lineage.correctedBy} />
         )}
       </div>
 
@@ -234,7 +273,7 @@ export default async function JournalEntryDetailPage({
           resolvedBy: n.resolvedBy,
         }))}
         currentUserId={currentUser?.id ?? null}
-        currentUserIsAdmin={isAdmin(currentUser)}
+        currentUserIsAdmin={canModerateNotes(tenant?.role)}
       />
 
       {entry.sourcePayload && (
@@ -261,6 +300,33 @@ function Field({ label, value, className }: { label: string; value: string; clas
     <div>
       <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">{label}</div>
       <div className={`mt-0.5 text-sm text-ink-800 ${className ?? ""}`}>{value}</div>
+    </div>
+  );
+}
+
+// Renders one lineage relationship (Reverses / Reversed by / Corrects /
+// Corrected by) as a labeled list of links to the related entries.
+function LineageField({
+  label,
+  nodes,
+}: {
+  label: string;
+  nodes: { id: string; entryNumber: string }[];
+}) {
+  return (
+    <div>
+      <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">{label}</div>
+      <div className="mt-0.5 flex flex-col gap-0.5 text-sm">
+        {nodes.map((n) => (
+          <Link
+            key={n.id}
+            href={`/journal-entries/${n.id}`}
+            className="font-mono text-link hover:underline"
+          >
+            {n.entryNumber}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

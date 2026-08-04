@@ -42,6 +42,10 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import { _internal as authInternal } from "@/lib/auth/current-user";
 import { setupFirstEntityAction } from "@/app/actions/setup-first-entity";
+import {
+  withAuditLogMutable,
+  withAuditLogMutableTransaction,
+} from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -86,11 +90,17 @@ afterAll(async () => {
   await prisma.period.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.recordEvent.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.tenant.deleteMany({ where: { id: tenant.id } });
-  await prisma.user.deleteMany({ where: { id: admin.id } }).catch(() => {});
+  await withAuditLogMutableTransaction(prisma, async (tx) => {
+    await tx.auditLog.deleteMany({
+      where: {
+        OR: [{ tenantId: tenant.id }, { actorUserId: admin.id }],
+      },
+    });
+    await tx.tenantMembership.deleteMany({ where: { tenantId: tenant.id } });
+    await tx.tenant.deleteMany({ where: { id: tenant.id } });
+    await tx.user.deleteMany({ where: { id: admin.id } });
+  });
   await prisma.$disconnect();
 });
 
@@ -102,8 +112,10 @@ beforeEach(async () => {
   await prisma.period.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tenant.id } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.auditLog.deleteMany({
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({
     where: { tenantId: tenant.id, action: "setup-first-entity" },
+  });
   });
   mockCookieStore.clear();
 });

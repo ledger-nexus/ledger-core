@@ -1,32 +1,36 @@
-// Dashboard — first thing a recruiter sees. Shows that the substrate is
-// alive: cash, AR open, AP open, fixed-asset NBV for the current scope,
-// plus a cross-book P&L delta if there's a Tax book to diff against, and
-// the most recent journal entries.
+// Dashboard — the current financial position for the active (entity, book):
+// cash, net assets, YTD P&L, plus a cross-book delta if there's a Tax book
+// to diff against, and the most recent journal entries.
+//
+// KPI tiles are relevance-gated (Selective Attention): a wall of identical
+// 0.00 tiles hides the numbers that matter, so sub-ledger tiles only render
+// for books that actually use that sub-ledger. Nothing is removed — a book
+// with AR shows AR.
 
 import Link from "next/link";
 import { Decimal } from "decimal.js";
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
+import { getCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { listMyTenants, getCurrentTenant } from "@/lib/auth/tenant";
+import { listMyTenants } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { formatMoney, formatDate, moneyClass } from "@/lib/utils/format";
-import { getBalanceSheet, getIncomeStatement } from "@/lib/accounting/reports";
-import { openArBalance } from "@/lib/accounting/sub-ledgers/ar";
-import { openApBalance } from "@/lib/accounting/sub-ledgers/ap";
-import { netBookValue } from "@/lib/accounting/sub-ledgers/fixed-assets";
-import { getBookTaxDifference } from "@/lib/accounting/reports/book-tax-difference";
-import { enumerateDueDates } from "@/lib/accounting/recurring";
-import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
-
-const ASOF = new Date("2026-06-30"); // demo cutoff matching the seed
-const YEAR_START = new Date("2026-01-01");
+import { getDashboardSnapshot } from "@/lib/dashboard/snapshot";
 
 export default async function DashboardPage() {
-  const scope = getScope();
+  // As-of is *now*, resolved per request.
+  //
+  // This was previously a module-level `new Date("2026-06-30")` — the demo
+  // seed's cutoff. Every balance below is computed as-of this date, so the
+  // hardcoded value silently hid every entry posted after it: a real book
+  // reported 0.00 across the board while its entries sat there, dated later.
+  // Module scope would also freeze the value at server start, so it's
+  // computed inside the request.
+  const now = new Date();
+  const ASOF = now;
 
   // Onboarding gate: three states the signed-in user can be in.
   //
@@ -80,9 +84,37 @@ export default async function DashboardPage() {
     }
   }
 
+  // Tenant-verified scope for every read below.
+  //
+  // This page previously read `getScope()` — the RAW lc-scope cookie —
+  // and fed scope.entityCode straight into report calls and Prisma
+  // queries. A signed-in user could hand-edit the cookie to ANOTHER
+  // tenant's entity code and have the dashboard render that entity's
+  // balances, JE metadata, and activity (a cross-tenant read leak).
+  // getCurrentScope() resolves the cookie against THIS tenant's entities
+  // and pre-resolves entityId + tenantId, so every query below is pinned
+  // to a (tenantId, entityId) the caller actually owns. Fail closed when
+  // it can't resolve (not signed in, or the tenant has no entity).
+  const scope = await getCurrentScope();
+  if (!scope) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-ink-900">Dashboard</h2>
+        <EmptyState
+          title="Sign in to view your dashboard"
+          description="Your financial position appears here once you're signed in to a workspace with at least one entity."
+        />
+      </div>
+    );
+  }
+
   // Bail early with an empty state if the seed hasn't been run.
   const entryCount = await prisma.journalEntry.count({
-    where: { entity: { code: scope.entityCode }, book: { code: scope.bookCode } },
+    where: {
+      tenantId: scope.tenantId,
+      entityId: scope.entityId,
+      book: { code: scope.bookCode },
+    },
   });
   if (entryCount === 0) {
     return (
@@ -90,180 +122,38 @@ export default async function DashboardPage() {
         <h2 className="text-xl font-semibold text-ink-900">Dashboard</h2>
         <EmptyState
           title="No journal entries in this scope yet"
-          description="Run `pnpm db:seed` to load the Northwind Cloud demo, or import a QBO/NetSuite export."
+          description="Post your first journal entry to get started — most books open with an entry recording your opening balances."
         />
       </div>
     );
   }
 
-  // Parallel data fetches: KPIs + activity-surfaces ("what needs my
-  // attention") for the dashboard's secondary panels.
-  const [
-    bs,
+  // Every tenant-scoped read the dashboard renders lives behind one
+  // boundary: getDashboardSnapshot takes the AuthorizedLedgerScope and
+  // returns already-scoped figures, so this component stays presentation.
+  const {
     pnl,
     arOpen,
     apOpen,
     nbv,
     recent,
     openNoteCount,
-    recurringTemplates,
     lastClose,
     openPeriodCount,
     subledgerTies,
-  ] = await Promise.all([
-    getBalanceSheet(prisma, scope, ASOF),
-    getIncomeStatement(prisma, scope, YEAR_START, ASOF),
-    openArBalance(prisma, scope.entityCode, scope.bookCode),
-    openApBalance(prisma, scope.entityCode, scope.bookCode),
-    netBookValue(prisma, scope.entityCode, scope.bookCode),
-    prisma.journalEntry.findMany({
-      where: {
-        entity: { code: scope.entityCode },
-        book: { code: scope.bookCode },
-      },
-      orderBy: [{ documentDate: "desc" }, { createdAt: "desc" }],
-      take: 10,
-      select: {
-        id: true,
-        entryNumber: true,
-        documentDate: true,
-        memo: true,
-        source: true,
-        sourceSystem: true,
-        sourceRecordType: true,
-        lines: { select: { debit: true } },
-      },
-    }),
-    // Open review notes attached to JEs in the active scope. A pure
-    // count is enough for the badge; the user clicks through to find
-    // them in /journal-entries (filtered list shows the "N open" badge).
-    prisma.journalEntryNote.count({
-      where: {
-        resolvedAt: null,
-        entry: {
-          entity: { code: scope.entityCode },
-          book: { code: scope.bookCode },
-        },
-      },
-    }),
-    // Active recurring templates for this (entity, book). We compute
-    // "due today" client-side via enumerateDueDates so the cadence
-    // math stays in one place.
-    prisma.recurringEntry.findMany({
-      where: {
-        isActive: true,
-        entity: { code: scope.entityCode },
-        book: { code: scope.bookCode },
-      },
-      select: {
-        cadence: true,
-        startDate: true,
-        endDate: true,
-        lastPostedDate: true,
-      },
-    }),
-    // Most recent period close for this (entity, book). Lets the
-    // dashboard show "May 2026 closed 4 days ago by …".
-    prisma.periodClose.findFirst({
-      where: {
-        entity: { code: scope.entityCode },
-        book: { code: scope.bookCode },
-      },
-      orderBy: { closedAt: "desc" },
-      select: {
-        closedAt: true,
-        closedBy: true,
-        period: { select: { code: true } },
-      },
-    }),
-    // Count of periods on the entity's calendar that don't have a
-    // close row for this book. "Open periods" = posting still allowed
-    // there. Useful at month-end: "you have 3 open periods — close
-    // April before you close May."
-    prisma.period.count({
-      where: {
-        calendar: { entity: { code: scope.entityCode } },
-        // No close row for THIS book.
-        NOT: {
-          closes: {
-            some: {
-              book: { code: scope.bookCode },
-            },
-          },
-        },
-      },
-    }),
-    // Sub-ledger ties: AR control vs sum-of-open-AR, AP control vs
-    // sum-of-open-AP. Broken ties point at a real bug — either a JE
-    // posted to a control account without flowing through the sub-
-    // ledger, or a sub-ledger write that drifted from the JE total.
-    checkSubledgerTies(prisma, {
-      entityCode: scope.entityCode,
-      bookCode: scope.bookCode,
-      asOf: ASOF,
-    }),
-  ]);
+    brokenTies,
+    arItemCount,
+    apItemCount,
+    fixedAssetCount,
+    forReviewCount,
+    closeProgress,
+    recurringDueCount,
+    daysSinceClose,
+    cash,
+    netAssets,
+    btdSummary,
+  } = await getDashboardSnapshot(prisma, scope, now);
 
-  // Count of broken ties for the dashboard badge.
-  const brokenTies = subledgerTies.filter((t) => t.status === "broken").length;
-
-  // Compute "due today" count from the active recurring templates.
-  // Pure client-side math — the runner uses the same helper.
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const recurringDueCount = recurringTemplates.reduce((sum, t) => {
-    const due = enumerateDueDates({
-      cadence: t.cadence,
-      startDate: t.startDate,
-      lastPostedDate: t.lastPostedDate,
-      endDate: t.endDate,
-      throughDate: today,
-    });
-    return sum + due.length;
-  }, 0);
-
-  // Days since last close (for the "closed N days ago" tooltip).
-  const daysSinceClose =
-    lastClose != null
-      ? Math.floor(
-          (Date.now() - lastClose.closedAt.getTime()) / (1000 * 60 * 60 * 24)
-        )
-      : null;
-
-  // Aggregate cash from bank-flagged accounts on the BS.
-  const cash = bs.assets
-    .filter((a) => /^10\d{2}$|^Q1$|^NS1000$/.test(a.code))
-    .reduce((acc, a) => acc.plus(a.amount), new Decimal(0));
-
-  // Cross-book BTD vs US_TAX, only if scope is US_GAAP (the obvious pairing).
-  let btdSummary: { delta: Decimal; otherBook: string } | null = null;
-  if (scope.bookCode === "US_GAAP") {
-    const otherBook = "US_TAX";
-    const hasTaxBook = await prisma.book.findUnique({
-      where: { code: otherBook },
-      select: { id: true },
-    });
-    const taxEntries = hasTaxBook
-      ? await prisma.journalEntry.count({
-          where: { entity: { code: scope.entityCode }, book: { code: otherBook } },
-        })
-      : 0;
-    if (taxEntries > 0) {
-      // SOC 2 CC6.1: thread tenant id so the BTD report scopes its
-      // Account lookups to this tenant only. Dashboard uses LedgerScope
-      // (cookie-only) — fetch the current tenant separately.
-      const currentTenant = await getCurrentTenant();
-      const btd = await getBookTaxDifference(prisma, {
-        entityCode: scope.entityCode,
-        fromBookCode: scope.bookCode,
-        toBookCode: otherBook,
-        periodStart: YEAR_START,
-        periodEnd: ASOF,
-        tenantId: currentTenant?.id,
-      });
-      btdSummary = { delta: btd.totalDelta, otherBook };
-    }
-  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -274,12 +164,21 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      {/* KPI grid */}
+      {/* KPI grid. Cash and net assets lead: they answer "what do I have"
+          and "what am I worth", which is what the page is opened for
+          (Serial Position). Sub-ledger tiles render only for books that
+          use those sub-ledgers. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="Cash" value={cash} />
-        <Kpi label="Accounts receivable (open)" value={arOpen} />
-        <Kpi label="Accounts payable (open)" value={apOpen} />
-        <Kpi label="Fixed-asset NBV" value={nbv.nbv} />
+        <Kpi
+          label="Net assets"
+          value={netAssets}
+          hint="assets − liabilities"
+          tone={netAssets.isNegative() ? "negative" : "positive"}
+        />
+        {arItemCount > 0 && <Kpi label="Accounts receivable (open)" value={arOpen} />}
+        {apItemCount > 0 && <Kpi label="Accounts payable (open)" value={apOpen} />}
+        {fixedAssetCount > 0 && <Kpi label="Fixed-asset NBV" value={nbv.nbv} />}
         <Kpi label="Revenue YTD" value={pnl.totalRevenue} />
         <Kpi label="Expenses YTD" value={pnl.totalExpenses} />
         <Kpi label="Net income YTD" value={pnl.netIncome} tone={pnl.netIncome.isNegative() ? "negative" : "positive"} />
@@ -305,6 +204,38 @@ export default async function DashboardPage() {
             </span>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
+            <ActionRow
+              label="Bank lines to review"
+              count={forReviewCount}
+              href="/banking"
+              urgentAt={1}
+              urgentLabel="waiting in the feed"
+              emptyLabel="inbox zero"
+            />
+            {closeProgress && (
+              <Link
+                href="/close/tasks"
+                className="group flex items-center justify-between gap-3"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="text-sm text-ink-900 group-hover:underline">
+                    Close {closeProgress.periodCode}
+                  </span>
+                  <span className="text-xs text-ink-500">
+                    {closeProgress.done} of {closeProgress.total} tasks done
+                  </span>
+                </div>
+                {/* Goal-gradient: the bar itself, not just the fraction. */}
+                <div className="h-1.5 w-24 shrink-0 rounded-full bg-ink-100">
+                  <div
+                    className="h-1.5 rounded-full bg-ink-900"
+                    style={{
+                      width: `${Math.round((closeProgress.done / closeProgress.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </Link>
+            )}
             <ActionRow
               label="Open review notes"
               count={openNoteCount}
@@ -535,13 +466,14 @@ function Kpi({
   hint?: string;
   tone?: "positive" | "negative" | "neutral";
 }) {
-  const num = value.toNumber();
+  // Sign check stays in Decimal — never round-trip money through a JS
+  // number just to read its sign (precision loss on large balances).
   const accent =
     tone === "positive"
       ? "text-positive"
       : tone === "negative"
         ? "text-negative"
-        : num < 0
+        : value.isNegative()
           ? "text-negative"
           : "text-ink-900";
   return (

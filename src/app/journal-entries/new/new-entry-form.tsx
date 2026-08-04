@@ -150,14 +150,14 @@ export function NewEntryForm({
               defaultValue={new Date().toISOString().slice(0, 10)}
             />
           </div>
-          <div>
-            <Label htmlFor="source">Source</Label>
-            <Select name="source" id="source" defaultValue="MANUAL">
-              <option value="MANUAL">MANUAL</option>
-              <option value="SYSTEM">SYSTEM</option>
-              <option value="AI_APPROVED">AI_APPROVED</option>
-            </Select>
-          </div>
+          {/* No Source control by design. `source` is lineage — the record
+              of HOW an entry came to exist — not a user preference. An
+              entry typed into this form is MANUAL, and the Server Action
+              stamps that server-side. SYSTEM / AI_APPROVED / IMPORT belong
+              to the code paths that genuinely produce them (the recurring
+              runner, the FX revaluation approval gate, the ERP importers);
+              offering them here only let a human hand-type an entry and
+              label it as machine-originated. */}
           <div className="sm:col-span-3">
             <Label htmlFor="memo">Memo</Label>
             <Input
@@ -222,6 +222,7 @@ export function NewEntryForm({
                       placeholder="Type code or name"
                       className="min-w-[260px] font-mono"
                       autoComplete="off"
+                      data-je-line-account
                     />
                   </TD>
                   <TD>
@@ -245,6 +246,35 @@ export function NewEntryForm({
                     <Input
                       value={line.amount}
                       onChange={(e) => updateLine(line.uid, { amount: e.target.value })}
+                      onKeyDown={(e) => {
+                        // Tab from the LAST row's Amount cell appends a
+                        // new line of the same side. Shift+Tab is
+                        // navigation-backwards; leave it alone. Letting
+                        // the browser take Tab AFTER append focuses the
+                        // ✕ Remove button by default — we explicitly
+                        // focus the new line's account select with a
+                        // microtask after React re-renders.
+                        if (
+                          e.key === "Tab" &&
+                          !e.shiftKey &&
+                          line.uid === lines[lines.length - 1].uid
+                        ) {
+                          e.preventDefault();
+                          addLine(line.side);
+                          // Focus the new last row's first focusable
+                          // input after React commits. The new row's
+                          // <select> is named `line-accountCode` —
+                          // querySelectorAll inside the tbody returns
+                          // the rendered rows in order.
+                          requestAnimationFrame(() => {
+                            const accounts = document.querySelectorAll<HTMLInputElement>(
+                              'input[data-je-line-account]'
+                            );
+                            const last = accounts[accounts.length - 1];
+                            last?.focus();
+                          });
+                        }
+                      }}
                       placeholder="0.00"
                       inputMode="decimal"
                       className="text-right font-mono tabular-nums"
@@ -274,13 +304,16 @@ export function NewEntryForm({
                 </TD>
                 <TD />
               </tr>
+              {/* The one line on this form that decides whether the entry
+                  can post, so it says what it means: "Δ (Dr − Cr)" named
+                  the arithmetic, not the consequence. */}
               <tr className="bg-ink-50">
                 <TD colSpan={4} className="text-ink-700">
-                  Δ (Dr − Cr)
+                  {balanced ? "Balanced" : "Out of balance by"}
                 </TD>
                 <TD className="text-right">
                   <Badge tone={balanced ? "positive" : "negative"}>
-                    {balanced ? "balanced ✓" : `Δ ${formatMoney(difference)}`}
+                    {balanced ? "✓" : formatMoney(difference.abs())}
                   </Badge>
                 </TD>
                 <TD />

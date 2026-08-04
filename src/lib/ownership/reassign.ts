@@ -24,7 +24,7 @@
 // rather than dynamic. Each new ownership-bearing model is added here
 // deliberately.
 
-import { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { type Target } from "../rules/types";
 import { notify, type NotificationCategory } from "../notifications";
 
@@ -84,15 +84,27 @@ export class ReassignError extends Error {
   }
 }
 
-export async function reassignRecord(
-  prisma: PrismaClient,
+/**
+ * Inner half of reassignRecord — runs inside an existing transaction.
+ * RLS Phase 2b Class T pattern (see docs/architecture/rls-phase-2b-
+ * migration-guide.md). All reads + writes for the reassignment (owner
+ * validation + record update + RecordEvent create) run on the supplied
+ * tx so the SET LOCAL app.current_tenant_id GUC propagates.
+ *
+ * Notification emit is INTENTIONALLY excluded from this inner half — it
+ * stays in the outer wrapper as a non-fatal side effect. A failed
+ * notification must not roll back a successful reassignment (existing
+ * contract per the original implementation).
+ */
+export async function reassignRecordInTx(
+  tx: Prisma.TransactionClient,
   input: ReassignInput
 ): Promise<ReassignResult> {
   const lock = input.lockFromRules ?? true;
 
   // 1. Validate the new owner exists and is active.
   if (input.newOwner.type === "USER") {
-    const u = await prisma.user.findUnique({
+    const u = await tx.user.findUnique({
       where: { id: input.newOwner.id },
       select: { id: true, isActive: true },
     });
@@ -100,7 +112,7 @@ export async function reassignRecord(
     if (!u.isActive)
       throw new ReassignError("OWNER_INACTIVE", `User ${input.newOwner.id} is deactivated`);
   } else if (input.newOwner.type === "QUEUE") {
-    const q = await prisma.queue.findUnique({
+    const q = await tx.queue.findUnique({
       where: { id: input.newOwner.id },
       select: { id: true, isActive: true, deletedAt: true },
     });
@@ -116,19 +128,31 @@ export async function reassignRecord(
   }
 
   // 2. Dispatch on recordType. Each branch fetches, validates reassignable
-  // state, updates the record, and writes the RecordEvent in a transaction.
-  let result: ReassignResult;
+  // state, updates the record, and writes the RecordEvent — all in the
+  // supplied tx (no nested $transaction).
   switch (input.recordType) {
     case "JournalEntry":
-      result = await reassignJournalEntry(prisma, input, lock);
-      break;
+      return reassignJournalEntryInTx(tx, input, lock);
     case "ArOpenItem":
-      result = await reassignArOpenItem(prisma, input, lock);
-      break;
+      return reassignArOpenItemInTx(tx, input, lock);
     case "ApOpenItem":
-      result = await reassignApOpenItem(prisma, input, lock);
-      break;
+      return reassignApOpenItemInTx(tx, input, lock);
   }
+}
+
+/**
+ * Outer wrapper — opens its own $transaction and delegates to the inner.
+ * Preserved for legacy callers (seeds, internal scripts, rules-engine
+ * paths that don't yet run inside withTenantContext). New Server Actions
+ * should call reassignRecordInTx directly from within their
+ * withTenantContext block, then run emitReassignmentNotification
+ * after the tx returns (preserving the non-fatal-notification contract).
+ */
+export async function reassignRecord(
+  prisma: PrismaClient,
+  input: ReassignInput
+): Promise<ReassignResult> {
+  const result = await prisma.$transaction((tx) => reassignRecordInTx(tx, input));
 
   // Emit a Notification to the new owner (unless silent OR the new owner
   // IS the actor — notify-self filtering is also done inside notify()).
@@ -138,17 +162,29 @@ export async function reassignRecord(
     try {
       await emitReassignmentNotification(prisma, input);
     } catch (e) {
-      console.warn(
-        `Reassignment of ${input.recordType} ${input.recordId.slice(0, 8)} succeeded but notification emit failed:`,
-        e
-      );
+      // Pass the dynamic (caller-influenced) values as structured
+      // arguments rather than interpolating them into console.warn's
+      // format-string position — keeps user-controlled data out of the
+      // format sink (satisfies CodeQL js/tainted-format-string) and is
+      // better structured-logging hygiene.
+      console.warn("Reassignment succeeded but notification emit failed:", {
+        recordType: input.recordType,
+        recordId: input.recordId.slice(0, 8),
+        error: e,
+      });
     }
   }
 
   return result;
 }
 
-async function emitReassignmentNotification(
+/**
+ * Emit the post-reassignment notification. Exported so RLS Phase 2b
+ * Server Actions can call this AFTER the withTenantContext tx returns
+ * — preserving the original contract that a failed notification must
+ * not roll back a successful reassignment.
+ */
+export async function emitReassignmentNotification(
   prisma: PrismaClient,
   input: ReassignInput
 ): Promise<void> {
@@ -212,12 +248,12 @@ function recordLinkFor(recordType: ReassignableRecordType, id: string): string {
   }
 }
 
-async function reassignJournalEntry(
-  prisma: PrismaClient,
+async function reassignJournalEntryInTx(
+  tx: Prisma.TransactionClient,
   input: ReassignInput,
   lock: boolean
 ): Promise<ReassignResult> {
-  const je = await prisma.journalEntry.findFirst({
+  const je = await tx.journalEntry.findFirst({
     where: {
       id: input.recordId,
       ...(input.actorTenantId ? { tenantId: input.actorTenantId } : {}),
@@ -245,31 +281,28 @@ async function reassignJournalEntry(
   const previousOwner = { ownerId: je.ownerId, ownerType: je.ownerType };
   const newOwnerType = input.newOwner.type;
 
-  const eventId = await prisma.$transaction(async (tx) => {
-    await tx.journalEntry.update({
-      where: { id: input.recordId },
-      data: {
-        ownerId: input.newOwner.id,
-        ownerType: newOwnerType,
-        reassignmentLockedAt: lock ? new Date() : null,
-        updatedBy: input.actorUserId,
-      },
-    });
-    const event = await tx.recordEvent.create({
-      data: {
-        tenantId: je.tenantId,
-        recordType: "JournalEntry",
-        recordId: input.recordId,
-        eventType: "OWNER_CHANGED",
-        previousValue: previousOwner as object,
-        newValue: { ownerId: input.newOwner.id, ownerType: newOwnerType },
-        actorUserId: input.actorUserId === "system" ? null : input.actorUserId,
-        actorReason: input.reason,
-        journalEntryId: input.recordId,
-      },
-      select: { id: true },
-    });
-    return event.id;
+  await tx.journalEntry.update({
+    where: { id: input.recordId },
+    data: {
+      ownerId: input.newOwner.id,
+      ownerType: newOwnerType,
+      reassignmentLockedAt: lock ? new Date() : null,
+      updatedBy: input.actorUserId,
+    },
+  });
+  const event = await tx.recordEvent.create({
+    data: {
+      tenantId: je.tenantId,
+      recordType: "JournalEntry",
+      recordId: input.recordId,
+      eventType: "OWNER_CHANGED",
+      previousValue: previousOwner as object,
+      newValue: { ownerId: input.newOwner.id, ownerType: newOwnerType },
+      actorUserId: input.actorUserId === "system" ? null : input.actorUserId,
+      actorReason: input.reason,
+      journalEntryId: input.recordId,
+    },
+    select: { id: true },
   });
 
   return {
@@ -277,16 +310,16 @@ async function reassignJournalEntry(
     recordId: input.recordId,
     previousOwner,
     newOwner: { ownerId: input.newOwner.id, ownerType: newOwnerType },
-    recordEventId: eventId,
+    recordEventId: event.id,
   };
 }
 
-async function reassignArOpenItem(
-  prisma: PrismaClient,
+async function reassignArOpenItemInTx(
+  tx: Prisma.TransactionClient,
   input: ReassignInput,
   lock: boolean
 ): Promise<ReassignResult> {
-  const item = await prisma.arOpenItem.findFirst({
+  const item = await tx.arOpenItem.findFirst({
     where: {
       id: input.recordId,
       ...(input.actorTenantId ? { tenantId: input.actorTenantId } : {}),
@@ -320,31 +353,28 @@ async function reassignArOpenItem(
   const previousOwner = { ownerId: item.ownerId, ownerType: item.ownerType };
   const newOwnerType = input.newOwner.type;
 
-  const eventId = await prisma.$transaction(async (tx) => {
-    await tx.arOpenItem.update({
-      where: { id: input.recordId },
-      data: {
-        ownerId: input.newOwner.id,
-        ownerType: newOwnerType,
-        reassignmentLockedAt: lock ? new Date() : null,
-        updatedBy: input.actorUserId,
-      },
-    });
-    const event = await tx.recordEvent.create({
-      data: {
-        tenantId: item.tenantId,
-        recordType: "ArOpenItem",
-        recordId: input.recordId,
-        eventType: "OWNER_CHANGED",
-        previousValue: previousOwner as object,
-        newValue: { ownerId: input.newOwner.id, ownerType: newOwnerType },
-        actorUserId: input.actorUserId === "system" ? null : input.actorUserId,
-        actorReason: input.reason,
-        arOpenItemId: input.recordId,
-      },
-      select: { id: true },
-    });
-    return event.id;
+  await tx.arOpenItem.update({
+    where: { id: input.recordId },
+    data: {
+      ownerId: input.newOwner.id,
+      ownerType: newOwnerType,
+      reassignmentLockedAt: lock ? new Date() : null,
+      updatedBy: input.actorUserId,
+    },
+  });
+  const event = await tx.recordEvent.create({
+    data: {
+      tenantId: item.tenantId,
+      recordType: "ArOpenItem",
+      recordId: input.recordId,
+      eventType: "OWNER_CHANGED",
+      previousValue: previousOwner as object,
+      newValue: { ownerId: input.newOwner.id, ownerType: newOwnerType },
+      actorUserId: input.actorUserId === "system" ? null : input.actorUserId,
+      actorReason: input.reason,
+      arOpenItemId: input.recordId,
+    },
+    select: { id: true },
   });
 
   return {
@@ -352,16 +382,16 @@ async function reassignArOpenItem(
     recordId: input.recordId,
     previousOwner,
     newOwner: { ownerId: input.newOwner.id, ownerType: newOwnerType },
-    recordEventId: eventId,
+    recordEventId: event.id,
   };
 }
 
-async function reassignApOpenItem(
-  prisma: PrismaClient,
+async function reassignApOpenItemInTx(
+  tx: Prisma.TransactionClient,
   input: ReassignInput,
   lock: boolean
 ): Promise<ReassignResult> {
-  const item = await prisma.apOpenItem.findFirst({
+  const item = await tx.apOpenItem.findFirst({
     where: {
       id: input.recordId,
       ...(input.actorTenantId ? { tenantId: input.actorTenantId } : {}),
@@ -393,31 +423,28 @@ async function reassignApOpenItem(
   const previousOwner = { ownerId: item.ownerId, ownerType: item.ownerType };
   const newOwnerType = input.newOwner.type;
 
-  const eventId = await prisma.$transaction(async (tx) => {
-    await tx.apOpenItem.update({
-      where: { id: input.recordId },
-      data: {
-        ownerId: input.newOwner.id,
-        ownerType: newOwnerType,
-        reassignmentLockedAt: lock ? new Date() : null,
-        updatedBy: input.actorUserId,
-      },
-    });
-    const event = await tx.recordEvent.create({
-      data: {
-        tenantId: item.tenantId,
-        recordType: "ApOpenItem",
-        recordId: input.recordId,
-        eventType: "OWNER_CHANGED",
-        previousValue: previousOwner as object,
-        newValue: { ownerId: input.newOwner.id, ownerType: newOwnerType },
-        actorUserId: input.actorUserId === "system" ? null : input.actorUserId,
-        actorReason: input.reason,
-        apOpenItemId: input.recordId,
-      },
-      select: { id: true },
-    });
-    return event.id;
+  await tx.apOpenItem.update({
+    where: { id: input.recordId },
+    data: {
+      ownerId: input.newOwner.id,
+      ownerType: newOwnerType,
+      reassignmentLockedAt: lock ? new Date() : null,
+      updatedBy: input.actorUserId,
+    },
+  });
+  const event = await tx.recordEvent.create({
+    data: {
+      tenantId: item.tenantId,
+      recordType: "ApOpenItem",
+      recordId: input.recordId,
+      eventType: "OWNER_CHANGED",
+      previousValue: previousOwner as object,
+      newValue: { ownerId: input.newOwner.id, ownerType: newOwnerType },
+      actorUserId: input.actorUserId === "system" ? null : input.actorUserId,
+      actorReason: input.reason,
+      apOpenItemId: input.recordId,
+    },
+    select: { id: true },
   });
 
   return {
@@ -425,7 +452,7 @@ async function reassignApOpenItem(
     recordId: input.recordId,
     previousOwner,
     newOwner: { ownerId: input.newOwner.id, ownerType: newOwnerType },
-    recordEventId: eventId,
+    recordEventId: event.id,
   };
 }
 

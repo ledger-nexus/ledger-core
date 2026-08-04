@@ -32,6 +32,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -52,6 +53,43 @@ beforeAll(async () => {
   });
   if (!owner) {
     throw new Error("Run Northwind seed first.");
+  }
+
+  // Self-healing safety net: scrub orphan tenants from prior killed runs.
+  // If a previous sweep was interrupted (kill signal, OOM, CI timeout),
+  // afterAll didn't run and acc-leak-* tenants leaked. These tenants
+  // hold accounts at code "1000" with entityId=null + tenantId=<orphan>,
+  // which getTrialBalance picks up (it doesn't tenant-scope account
+  // queries — a pre-existing gap that RLS Phase 3 FORCE will fix
+  // portfolio-wide; see task #127). The leaked accounts then poison
+  // FX consolidation tests by replacing the global "Cash" account in
+  // their dedup, blanking the cash row.
+  //
+  // Cheap to run: O(orphans), zero rows for the happy path.
+  const orphans = await prisma.tenant.findMany({
+    where: { slug: { startsWith: "acc-leak-" } },
+    select: { id: true },
+  });
+  const orphanIds = orphans.map((o) => o.id);
+  if (orphanIds.length > 0) {
+    await prisma.journalLine.deleteMany({
+      where: { entry: { tenantId: { in: orphanIds } } },
+    });
+    await prisma.journalEntry.deleteMany({
+      where: { tenantId: { in: orphanIds } },
+    });
+    await prisma.account.deleteMany({
+      where: { tenantId: { in: orphanIds } },
+    });
+    await prisma.legalEntity.deleteMany({
+      where: { tenantId: { in: orphanIds } },
+    });
+    await prisma.auditLog.deleteMany({
+      where: { tenantId: { in: orphanIds } },
+    });
+    await prisma.tenant.deleteMany({
+      where: { id: { in: orphanIds } },
+    });
   }
 
   tenantA = await prisma.tenant.create({
@@ -153,7 +191,9 @@ afterAll(async () => {
   await prisma.legalEntity.deleteMany({
     where: { tenantId: { in: tenantIds } },
   });
-  await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  });
   await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
   await prisma.$disconnect();
 });

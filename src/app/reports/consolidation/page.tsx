@@ -40,13 +40,19 @@ export default async function ConsolidationPage({
   // sensible roots. Tenant-scoped (Phase 4c): only show the current
   // tenant's entities so consolidation can't cross tenant boundaries.
   const tenant = await getCurrentTenant();
-  const allEntities = tenant
-    ? await prisma.legalEntity.findMany({
-        where: { tenantId: tenant.id },
-        select: { id: true, code: true, name: true, parentEntityId: true },
-        orderBy: { code: "asc" },
-      })
-    : [];
+  if (!tenant) {
+    return (
+      <EmptyState
+        title="No tenant available"
+        description="Sign in and select a tenant with at least one entity before viewing reports."
+      />
+    );
+  }
+  const allEntities = await prisma.legalEntity.findMany({
+    where: { tenantId: tenant.id },
+    select: { id: true, code: true, name: true, parentEntityId: true },
+    orderBy: { code: "asc" },
+  });
   const parentIdSet = new Set(allEntities.map((e) => e.parentEntityId).filter(Boolean) as string[]);
   const rootCandidates = allEntities.filter((e) => parentIdSet.has(e.id));
 
@@ -58,16 +64,20 @@ export default async function ConsolidationPage({
         <h2 className="text-xl font-semibold text-ink-900">Consolidation</h2>
         <EmptyState
           title="No multi-entity hierarchy in the database"
-          description="The Northwind seed creates a single entity. Run pnpm db:seed (or POST /api/admin/reset) to load the Acme Group consolidation demo (parent + 2 subs)."
+          description="Consolidation combines a parent entity with its subsidiaries. This book has a single entity, so there is nothing to consolidate."
         />
       </div>
     );
   }
 
+  // tenantId from the session, never from the URL: ?root= is
+  // client-controlled, and without the tenant pin it could name another
+  // tenant's entity code and consolidate that tenant's books.
   const report = await getConsolidatedTrialBalance(prisma, {
     rootEntityCode: root,
     bookCode: scope.bookCode,
     asOf: new Date(asOf),
+    tenantId: tenant.id,
   });
 
   const csvUrl = `/api/reports/consolidation/csv?root=${root}&asOf=${asOf}`;
@@ -116,6 +126,49 @@ export default async function ConsolidationPage({
           </Link>
         </div>
       </div>
+
+      {/* Multi-currency disclosure (CPA credibility). When the included
+          entities span more than one functional currency, the
+          consolidated totals are NOT FX-translated — they're naïve sums
+          of debit/credit values in each entity's own currency. Show the
+          limitation rather than hide it. The proper ASC 830 translation
+          (current rate / temporal / CTA accounting) is a follow-up arc. */}
+      {report.hasMultiCurrency && (
+        <Card>
+          <CardContent className="border-l-4 border-warning bg-warning/5 px-5 py-4">
+            <div className="flex items-start gap-3">
+              <Badge tone="warning">FX translation not active</Badge>
+              <div className="text-sm text-ink-900">
+                <div>
+                  Included entities use{" "}
+                  {report.distinctCurrencies.length} distinct functional
+                  currencies:{" "}
+                  {report.distinctCurrencies.map((c, i) => (
+                    <span key={c}>
+                      <code className="rounded bg-white px-1.5 py-0.5 text-xs ring-1 ring-ink-200">
+                        {c}
+                      </code>
+                      {i < report.distinctCurrencies.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                  . The consolidated totals below are{" "}
+                  <strong>naïve sums of debit/credit values in each
+                    entity's own currency</strong>{" "}
+                  — they are NOT FX-translated to a single reporting
+                  currency.
+                </div>
+                <div className="mt-1.5 text-xs text-ink-500">
+                  Proper ASC 830 translation (current rate / temporal /
+                  CTA accounting) is on the roadmap. Until then, treat
+                  cross-currency consolidated balances as indicative
+                  only. Per-entity TBs (in their own currency) are
+                  accurate.
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary */}
       <Card>

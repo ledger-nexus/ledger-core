@@ -12,6 +12,7 @@
 // diffs two single-book report results — not a fourth book-agnostic report.
 
 import { PrismaClient } from "@prisma/client";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { Decimal } from "decimal.js";
 import { AccountType, signFor } from "./types";
 
@@ -29,7 +30,7 @@ async function resolveEntityBook(
   entityCode: string,
   bookCode: string,
   tenantId?: string
-): Promise<{ entityId: string; bookId: string; tenantId: string }> {
+): Promise<{ entityId: string; bookId: string; entityTenantId: string }> {
   const [entity, book] = await Promise.all([
     prisma.legalEntity.findFirst({
       where: tenantId ? { tenantId, code: entityCode } : { code: entityCode },
@@ -42,11 +43,10 @@ async function resolveEntityBook(
   ]);
   if (!entity) throw new Error(`Unknown entity: ${entityCode}`);
   if (!book) throw new Error(`Unknown book: ${bookCode}`);
-  // Return the entity's tenantId so downstream Account queries can
-  // scope to it even when ReportScope.tenantId was not supplied
-  // (substrate seeds, scripts). PR 7 closes the cross-tenant Account
-  // read gap PR 5 documented.
-  return { entityId: entity.id, bookId: book.id, tenantId: entity.tenantId };
+  // The entity's own tenant — callers use it to scope account scans.
+  // Shared accounts (entityId=null) exist per tenant, so "all shared
+  // accounts" without a tenant filter would mix in other tenants' charts.
+  return { entityId: entity.id, bookId: book.id, entityTenantId: entity.tenantId };
 }
 
 export interface ReportScope {
@@ -81,7 +81,7 @@ export async function getTrialBalance(
   scope: ReportScope,
   asOf: Date
 ): Promise<{ rows: TrialBalanceRow[]; totalDebit: Decimal; totalCredit: Decimal }> {
-  const { entityId, bookId, tenantId } = await resolveEntityBook(
+  const { entityId, bookId, entityTenantId } = await resolveEntityBook(
     prisma,
     scope.entityCode,
     scope.bookCode ?? DEFAULT_BOOK,
@@ -91,21 +91,27 @@ export async function getTrialBalance(
   // Pull lines for the (entity, book) on/before asOf, grouped by account.
   // Include the parent's code (Phase 7 hierarchy) so reports can render
   // sub-totals without a second query.
-  // SECURITY (SOC 2 CC6.1): tenant-scope the Account query. Without
-  // this, shared accounts (entityId: null) from OTHER tenants with a
-  // colliding `code` would surface — balances stay correct (lines are
-  // entity-filtered) but metadata (name, parentCode) bleed across
-  // tenants. PR 7 closure of the gap PR 5 documented.
+  //
+  // DELIBERATE: the per-account sums run in JS over decimal.js, not via
+  // Prisma groupBy/_sum. The entity-specific-overrides-shared dedup below
+  // has to happen in JS regardless, decimal.js summation is exact and
+  // auditable, and row volumes here are small. Don't "optimize" this into
+  // an aggregate without re-validating both points.
+  //
+  // tenantId pin: shared accounts (entityId=null) exist PER TENANT, so
+  // without the filter every tenant's shared chart lands in this scan —
+  // zero-balance rows from other tenants leak their codes/names, and the
+  // same-code dedup below can shadow this tenant's real account.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
-      tenantId,
+      tenantId: entityTenantId,
       OR: [{ entityId: null }, { entityId }],
     },
     include: {
       lines: {
         where: {
-          entry: { entityId, bookId, documentDate: { lte: asOf } },
+          entry: { entityId, bookId, documentDate: { lte: asOf }, status: { in: [...LEDGER_EFFECTIVE_STATUSES] } },
         },
         select: { debit: true, credit: true },
       },
@@ -174,6 +180,12 @@ export interface FinancialStatementRow {
   amount: Decimal;
   parentCode: string | null;
   isContra: boolean;
+  /**
+   * Mirrors `Account.isBank`. Carried on the row so callers can aggregate
+   * cash from the chart's own flag rather than pattern-matching account
+   * codes — code ranges are a per-install convention, not a contract.
+   */
+  isBank: boolean;
 }
 
 export interface IncomeStatement {
@@ -194,15 +206,19 @@ export async function getIncomeStatement(
   periodEnd: Date
 ): Promise<IncomeStatement> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId, tenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, entityTenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the IS page renderer can
   // build a tree via buildHierarchy() without a second query.
-  // SECURITY (SOC 2 CC6.1): tenant-scope — see getTrialBalance.
+  //
+  // tenantId pin: shared accounts (entityId=null) exist PER TENANT, so
+  // without the filter every tenant's shared chart lands in this scan —
+  // zero-balance rows from other tenants leak their codes/names, and the
+  // same-code dedup below can shadow this tenant's real account.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
-      tenantId,
+      tenantId: entityTenantId,
       type: { in: ["REVENUE", "EXPENSE"] },
       OR: [{ entityId: null }, { entityId }],
     },
@@ -213,6 +229,7 @@ export async function getIncomeStatement(
             entityId,
             bookId,
             documentDate: { gte: periodStart, lte: periodEnd },
+            status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
           },
         },
         select: { debit: true, credit: true },
@@ -254,11 +271,11 @@ export async function getIncomeStatement(
     const parentCode = acct.parent?.code ?? null;
     if (acct.type === "REVENUE") {
       const amount = credit.minus(debit);
-      revenue.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra });
+      revenue.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra, isBank: false });
       totalRevenue = totalRevenue.plus(amount);
     } else {
       const amount = debit.minus(credit);
-      expenses.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra });
+      expenses.push({ code: acct.code, name: acct.name, amount, parentCode, isContra: acct.isContra, isBank: false });
       totalExpenses = totalExpenses.plus(amount);
     }
   }
@@ -295,22 +312,26 @@ export async function getBalanceSheet(
   asOf: Date
 ): Promise<BalanceSheet> {
   const bookCode = scope.bookCode ?? DEFAULT_BOOK;
-  const { entityId, bookId, tenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
+  const { entityId, bookId, entityTenantId } = await resolveEntityBook(prisma, scope.entityCode, bookCode, scope.tenantId);
 
   // Phase 7 hierarchy: include parent.code so the BS page renderer can
   // build a tree via buildHierarchy() without a second query.
-  // SECURITY (SOC 2 CC6.1): tenant-scope — see getTrialBalance.
+  //
+  // tenantId pin: shared accounts (entityId=null) exist PER TENANT, so
+  // without the filter every tenant's shared chart lands in this scan —
+  // zero-balance rows from other tenants leak their codes/names, and the
+  // same-code dedup below can shadow this tenant's real account.
   const rawAccounts = await prisma.account.findMany({
     where: {
       active: true,
-      tenantId,
+      tenantId: entityTenantId,
       type: { in: ["ASSET", "LIABILITY", "EQUITY"] },
       OR: [{ entityId: null }, { entityId }],
     },
     include: {
       lines: {
         where: {
-          entry: { entityId, bookId, documentDate: { lte: asOf } },
+          entry: { entityId, bookId, documentDate: { lte: asOf }, status: { in: [...LEDGER_EFFECTIVE_STATUSES] } },
         },
         select: { debit: true, credit: true },
       },
@@ -375,6 +396,7 @@ export async function getBalanceSheet(
       amount,
       parentCode,
       isContra: acct.isContra,
+      isBank: acct.isBank,
     };
     if (acct.type === "ASSET") {
       assets.push(row);
@@ -407,6 +429,7 @@ export async function getBalanceSheet(
     // in the Equity hierarchy.
     parentCode: null,
     isContra: false,
+    isBank: false,
   });
   totalEquity = totalEquity.plus(retainedEarnings);
 

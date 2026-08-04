@@ -10,7 +10,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "../accounting/post-journal";
-import { CHART_OF_ACCOUNTS } from "../db/chart-of-accounts";
+import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../db/chart-of-accounts";
 import { openArItem, applyArPayment } from "../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../accounting/sub-ledgers/ap";
 import { getDefaultTenantId } from "./default-tenant";
@@ -55,6 +55,55 @@ function postToBooksFactory(prisma: PrismaClient) {
   };
 }
 
+// ---- FX rates -------------------------------------------------------
+
+// Illustrative H1 2026 month-end CLOSE rates + period AVG rates, stored
+// foreign->USD (EUR->USD, GBP->USD). resolveFxRate inverts on demand for
+// the reverse direction, so we only seed one leg. CLOSE drives balance-
+// sheet revaluation; AVG translates the P&L. Idempotent: keyed on the
+// FxRate @@unique([from, to, asOf, rateType]) composite.
+async function seedFxRates(prisma: PrismaClient) {
+  // [from, to, YYYY-MM-DD, rateType, rate]
+  const rates: Array<
+    [string, string, string, "SPOT" | "AVG" | "CLOSE" | "HISTORICAL", string]
+  > = [
+    // EUR->USD — euro strengthens through H1.
+    ["EUR", "USD", "2026-01-31", "CLOSE", "1.0850"],
+    ["EUR", "USD", "2026-02-28", "CLOSE", "1.0910"],
+    ["EUR", "USD", "2026-03-31", "CLOSE", "1.0975"],
+    ["EUR", "USD", "2026-04-30", "CLOSE", "1.1020"],
+    ["EUR", "USD", "2026-05-31", "CLOSE", "1.1080"],
+    ["EUR", "USD", "2026-06-30", "CLOSE", "1.1150"],
+    ["EUR", "USD", "2026-06-30", "AVG", "1.1015"],
+    // GBP->USD.
+    ["GBP", "USD", "2026-01-01", "CLOSE", "1.2700"],
+    ["GBP", "USD", "2026-03-31", "CLOSE", "1.2680"],
+    ["GBP", "USD", "2026-06-30", "CLOSE", "1.2810"],
+    ["GBP", "USD", "2026-06-30", "AVG", "1.2745"],
+  ];
+
+  for (const [from, to, asOf, rateType, rate] of rates) {
+    await prisma.fxRate.upsert({
+      where: {
+        fromCurrencyId_toCurrencyId_asOf_rateType: {
+          fromCurrencyId: from,
+          toCurrencyId: to,
+          asOf: new Date(asOf),
+          rateType,
+        },
+      },
+      create: {
+        fromCurrencyId: from,
+        toCurrencyId: to,
+        asOf: new Date(asOf),
+        rateType,
+        rate,
+      },
+      update: { rate },
+    });
+  }
+}
+
 // ---- Master data ----------------------------------------------------
 
 async function seedMasterData(prisma: PrismaClient) {
@@ -68,6 +117,18 @@ async function seedMasterData(prisma: PrismaClient) {
     create: { code: "EUR", name: "Euro", decimals: 2, symbol: "€" },
     update: {},
   });
+  await prisma.currency.upsert({
+    where: { code: "GBP" },
+    create: { code: "GBP", name: "Pound Sterling", decimals: 2, symbol: "£" },
+    update: {},
+  });
+
+  // FX rates — the first rates seeded into the dormant FxRate table.
+  // CLOSE rates at H1 2026 month-ends drive period-end revaluation; the
+  // AVG rates translate P&L. Stored EUR->USD / GBP->USD (foreign->
+  // functional); resolveFxRate inverts for the reverse direction. Rates
+  // are illustrative, not a live feed.
+  await seedFxRates(prisma);
 
   // Multi-tenancy: every entity belongs to a Tenant. Seeds belong to
   // the migration-created "default" tenant (the single-tenant fallback
@@ -151,7 +212,14 @@ async function seedAccounts(prisma: PrismaClient) {
         isContra: acct.isContra ?? false,
         isControlAccount: acct.isControlAccount ?? false,
         isBank: acct.isBank ?? false,
+        isMonetary: acct.isMonetary ?? false,
         subtype: acct.subtype,
+        // v0.8 FX Phase 4a — explicit override on the seed wins;
+        // otherwise compute the default from type + subtype. Setting
+        // it at seed time means the chart is intentional from day 1.
+        translationCategory:
+          acct.translationCategory ??
+          defaultTranslationCategory({ type: acct.type, subtype: acct.subtype }),
       },
     });
   }
@@ -191,7 +259,9 @@ async function seedParties(prisma: PrismaClient) {
 // ---- Sub-ledger setup ----------------------------------------------
 
 async function setupFixedAssets(prisma: PrismaClient) {
+  const tenantId = await getDefaultTenantId(prisma);
   await createFixedAsset(prisma, {
+    tenantId,
     entityCode: ENTITY_CODE,
     code: "LAPTOPS-2026-001",
     description: "8 MacBooks (engineering team) @ $3,000",
@@ -683,10 +753,42 @@ export async function seedTestUsersAndQueues(
     { email: "auditor@deloitte.test", displayName: "Devon Auditor (Deloitte)" },
   ];
   for (const spec of userSpecs) {
+    // CC6: User.email is encrypted at rest (random IV per write), so
+    // upsert-by-email doesn't work — same plaintext → different
+    // ciphertext every call. Match by the deterministic emailHash
+    // instead. See docs/design/deterministic-encryption.md.
     await prisma.user.upsert({
       where: { email: spec.email },
       create: spec,
       update: { displayName: spec.displayName, isActive: true },
+    });
+  }
+
+  // ─── Tenant memberships ──────────────────────────────────────────────────
+  // Roles are per-tenant facts (TenantMembership.role), not global ones —
+  // the policy catalog in src/lib/auth/policy.ts reads these. Floors match
+  // the org chart above: the controller is the tenant admin; accountants
+  // and clerks are members; the external auditor is read-only VIEWER.
+  const membershipTenantId = await getDefaultTenantId(prisma);
+  const roleSpecs: { email: string; role: "ADMIN" | "MEMBER" | "VIEWER" }[] = [
+    { email: "controller@northwind.test", role: "ADMIN" },
+    { email: "gl@northwind.test", role: "MEMBER" },
+    { email: "ar-clerk@northwind.test", role: "MEMBER" },
+    { email: "auditor@deloitte.test", role: "VIEWER" },
+  ];
+  for (const spec of roleSpecs) {
+    // where: { email } resolves through the encrypted-fields extension's
+    // hash rewrite, same as the user upsert above.
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { email: spec.email },
+      select: { id: true },
+    });
+    await prisma.tenantMembership.upsert({
+      where: {
+        tenantId_userId: { tenantId: membershipTenantId, userId: user.id },
+      },
+      create: { tenantId: membershipTenantId, userId: user.id, role: spec.role },
+      update: { role: spec.role },
     });
   }
 
@@ -751,6 +853,7 @@ export async function seedTestUsersAndQueues(
     { userEmail: "gl@northwind.test", queueCode: "GL_APPROVAL" },
   ];
   for (const m of memberships) {
+    // See CC6 comment above re: encrypted email + emailHash lookup.
     const user = await prisma.user.findUniqueOrThrow({
       where: { email: m.userEmail },
       select: { id: true },

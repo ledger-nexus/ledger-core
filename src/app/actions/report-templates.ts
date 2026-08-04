@@ -7,8 +7,10 @@
 // resolution + audit + auth pattern works end-to-end.
 //
 // SOC 2 baseline:
-// - CC6.3 Authorization: every action requires a signed-in user with a
-//   current tenant. requireCurrentTenant throws if not authenticated.
+// - CC6.3 Authorization: every mutation gates on canManageReportTemplates
+//   (ADMIN floor) via requirePermitted, which also writes the
+//   ACCESS_DENIED audit row on refusal. Rendering/viewing stays
+//   VIEWER+ — the floor here is for changing what statements look like.
 // - CC6.1 Multi-tenant: all writes carry the resolved tenantId.
 //   Composite unique `(tenantId, code)` is enforced at the DB layer.
 // - CC6.8 Input validation: Zod schemas on every input.
@@ -29,8 +31,12 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
-import { requireCurrentUser } from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { requirePermitted, type AuthzContext } from "@/lib/auth/authorize";
+import {
+  canManageReportTemplates,
+  PermissionDeniedError,
+} from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 
 import { SYSTEM_TEMPLATES } from "@/lib/accounting/reports/builder/templates";
@@ -79,6 +85,27 @@ export type ActionResult =
   | { ok: true; templateId?: string }
   | { ok: false; error: string };
 
+// Shared authz gate for the four mutations. requirePermitted writes the
+// ACCESS_DENIED audit row on refusal; this wrapper converts the throw
+// into the ActionResult shape the editor UI renders inline. Unknown
+// errors keep propagating — only authn/authz outcomes are "expected".
+async function requireTemplateManager(): Promise<
+  { ctx: AuthzContext; refusal: null } | { ctx: null; refusal: ActionResult }
+> {
+  try {
+    const ctx = await requirePermitted(
+      "reportTemplate.manage",
+      canManageReportTemplates
+    );
+    return { ctx, refusal: null };
+  } catch (e) {
+    if (e instanceof PermissionDeniedError || e instanceof NotAuthenticatedError) {
+      return { ctx: null, refusal: { ok: false, error: e.message } };
+    }
+    throw e;
+  }
+}
+
 /**
  * Clone a system template into a tenant-scoped user-defined row. The
  * source can be:
@@ -100,8 +127,9 @@ export async function cloneReportTemplate(
   const upperSource = sourceCode.toUpperCase();
   const upperNew = newCode.toUpperCase();
 
-  const user = await requireCurrentUser();
-  const tenant = await requireCurrentTenant();
+  const { ctx, refusal } = await requireTemplateManager();
+  if (refusal) return refusal;
+  const { user, tenant } = ctx;
 
   // Resolve the source: prefer the tenant's DB row; fall back to the
   // hard-coded SYSTEM_TEMPLATES registry (covers tenants that haven't
@@ -174,8 +202,9 @@ export async function renameReportTemplate(
   }
   const { templateId, newName } = parsed.data;
 
-  const user = await requireCurrentUser();
-  const tenant = await requireCurrentTenant();
+  const { ctx, refusal } = await requireTemplateManager();
+  if (refusal) return refusal;
+  const { user, tenant } = ctx;
 
   // Authorization: must exist AND belong to this tenant AND be user-defined.
   const existing = await prisma.reportTemplate.findFirst({
@@ -240,8 +269,9 @@ export async function updateReportTemplateDefinition(
   }
   const { templateId, definitionJson, expectedVersion } = parsed.data;
 
-  const user = await requireCurrentUser();
-  const tenant = await requireCurrentTenant();
+  const { ctx, refusal } = await requireTemplateManager();
+  if (refusal) return refusal;
+  const { user, tenant } = ctx;
 
   // Step 2: JSON.parse.
   let raw: unknown;
@@ -364,8 +394,9 @@ export async function deleteReportTemplate(
   }
   const { templateId } = parsed.data;
 
-  const user = await requireCurrentUser();
-  const tenant = await requireCurrentTenant();
+  const { ctx, refusal } = await requireTemplateManager();
+  if (refusal) return refusal;
+  const { user, tenant } = ctx;
 
   const existing = await prisma.reportTemplate.findFirst({
     where: { id: templateId, tenantId: tenant.id },

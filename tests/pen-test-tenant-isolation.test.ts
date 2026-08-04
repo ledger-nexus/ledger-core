@@ -51,9 +51,14 @@ import { applyApPaymentAction } from "@/app/actions/apply-ap-payment";
 import { applyArPaymentAction } from "@/app/actions/apply-ar-payment";
 import { reassignArItemAction } from "@/app/actions/reassign-ar-item";
 import { reassignApItemAction } from "@/app/actions/reassign-ap-item";
+import {
+  categorizeBankTransactionAction,
+  matchBankTransactionAction,
+} from "@/app/actions/bank-feed";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";
 import { openApItem } from "@/lib/accounting/sub-ledgers/ap";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 const SUFFIX = ("PEN" + Date.now().toString(36)).toUpperCase();
@@ -66,6 +71,7 @@ let entityIdA: string;
 let entityIdB: string;
 let arItemA: string;
 let apItemA: string;
+let bankTxnA: string;
 
 beforeAll(async () => {
   await prisma.currency.upsert({
@@ -210,11 +216,41 @@ beforeAll(async () => {
       controlAccountCode: "2000",
     })
   ).id;
+
+  // A FOR_REVIEW bank line in tenant A — the bait the cross-tenant
+  // categorize test tries to reach from tenant B.
+  const bookA = await prisma.book.findUniqueOrThrow({ where: { code: "US_GAAP" }, select: { id: true } });
+  const cashA = await prisma.account.findFirstOrThrow({
+    where: { tenantId: tenantA.id, code: "1000", entityId: entityIdA },
+    select: { id: true },
+  });
+  bankTxnA = (
+    await prisma.bankTransaction.create({
+      data: {
+        tenantId: tenantA.id,
+        entityId: entityIdA,
+        bookId: bookA.id,
+        bankAccountId: cashA.id,
+        postedDate: new Date("2026-05-20"),
+        description: "PEN BANK LINE",
+        amount: "-25.0000",
+        dedupeHash: `pen-${SUFFIX}`,
+        status: "FOR_REVIEW",
+      },
+      select: { id: true },
+    })
+  ).id;
 });
 
 afterAll(async () => {
   for (const tid of [tenantA?.id, tenantB?.id]) {
     if (!tid) continue;
+    await prisma.bankTransaction.deleteMany({ where: { tenantId: tid } });
+    // Learned merchant→category rules FK to categoryAccountId, so they must
+    // go before the accounts below — the categorize happy-path test creates
+    // one, and a leaked account (translationCategory NULL, code startsWith
+    // "ACME") otherwise poisons the fx-translation-category dev-DB scan.
+    await prisma.bankRule.deleteMany({ where: { tenantId: tid } });
     await prisma.arApplication.deleteMany({ where: { openItem: { tenantId: tid } } });
     await prisma.apApplication.deleteMany({ where: { openItem: { tenantId: tid } } });
     await prisma.arOpenItem.deleteMany({ where: { tenantId: tid } });
@@ -226,7 +262,9 @@ afterAll(async () => {
     await prisma.period.deleteMany({ where: { calendar: { tenantId: tid } } });
     await prisma.fiscalCalendar.deleteMany({ where: { tenantId: tid } });
     await prisma.recordEvent.deleteMany({ where: { tenantId: tid } });
-    await prisma.auditLog.deleteMany({ where: { tenantId: tid } });
+    await withAuditLogMutable(prisma, async () => {
+      await prisma.auditLog.deleteMany({ where: { tenantId: tid } });
+    });
     await prisma.legalEntity.deleteMany({ where: { tenantId: tid } });
     await prisma.tenantMembership.deleteMany({ where: { tenantId: tid } });
     await prisma.tenant.delete({ where: { id: tid } });
@@ -292,6 +330,247 @@ describe("createJournalEntryAction — tenant scope", () => {
     const afterB = await prisma.journalEntry.count({ where: { tenantId: tenantB.id } });
     expect(afterA).toBe(beforeA + 1);
     expect(afterB).toBe(beforeB); // tenant B untouched
+  });
+});
+
+describe("createJournalEntryAction — provenance is not client input", () => {
+  it("stamps MANUAL even when the request claims AI_APPROVED (was: client-chosen source)", async () => {
+    // `source` is lineage: the ledger's permanent record of HOW an entry
+    // came to exist. AI_APPROVED specifically asserts a control ran — an
+    // AI proposed the entry and a human approved it (see the FX
+    // revaluation gate). SYSTEM/IMPORT assert machine origin.
+    //
+    // The action used to read this straight off the form body through a
+    // bare type assertion, which is erased at runtime — so a hand-typed
+    // entry could be stamped with any origin its author fancied, and the
+    // audit trail would repeat that back to a reviewer as fact. The
+    // manual form is this action's only caller, so anything it posts is
+    // MANUAL by definition and the server says so, not the client.
+    signInAs(tenantA);
+    const fd = buildJeFormData();
+    fd.set("source", "AI_APPROVED"); // forged — must be ignored
+    fd.set("memo", "provenance-forgery-attempt");
+    try {
+      await createJournalEntryAction({}, fd);
+    } catch (e) {
+      if (!(e instanceof Error) || !/NEXT_REDIRECT/.test(e.message)) throw e;
+    }
+    // Identified by recency rather than memo. `prisma` in this file is a
+    // raw client with no encryption extension, and JournalEntry.memo is an
+    // encrypted column — a plaintext filter can't match the ciphertext on
+    // disk, and a read here returns the ciphertext rather than the memo.
+    // `source` is not encrypted, which is the field under test.
+    const entry = await prisma.journalEntry.findFirstOrThrow({
+      where: { tenantId: tenantA.id },
+      orderBy: { createdAt: "desc" },
+      select: { source: true },
+    });
+    expect(entry.source).toBe("MANUAL");
+  });
+
+  it("stamps MANUAL for an origin the form never offered (SEED)", async () => {
+    // The old cast listed SEED and IMPORT among its union members, so a
+    // request that skipped the UI could reach for them even though no
+    // dropdown ever rendered them.
+    signInAs(tenantA);
+    const fd = buildJeFormData();
+    fd.set("source", "SEED");
+    fd.set("memo", "provenance-forgery-attempt-seed");
+    try {
+      await createJournalEntryAction({}, fd);
+    } catch (e) {
+      if (!(e instanceof Error) || !/NEXT_REDIRECT/.test(e.message)) throw e;
+    }
+    const entry = await prisma.journalEntry.findFirstOrThrow({
+      where: { tenantId: tenantA.id },
+      orderBy: { createdAt: "desc" },
+      select: { source: true },
+    });
+    expect(entry.source).toBe("MANUAL");
+  });
+});
+
+describe("categorizeBankTransactionAction — auth + tenant scope", () => {
+  it("refuses an anonymous categorize (was: n/a — new surface)", async () => {
+    signOut();
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("categoryAccountCode", "6000");
+    const r = await categorizeBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/signed in/i);
+  });
+
+  it("refuses a cross-tenant bank line (reads as not found, no post)", async () => {
+    // Signed in to tenant B, categorize tenant A's bank line. The
+    // tenant-scoped load returns nothing → "not found", and no JE posts.
+    signInAs(tenantB);
+    const before = await prisma.journalEntry.count({ where: { tenantId: tenantB.id } });
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("categoryAccountCode", "6000");
+    const r = await categorizeBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/not found/i);
+    // Tenant A's line is untouched, still FOR_REVIEW.
+    const txn = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: bankTxnA } });
+    expect(txn.status).toBe("FOR_REVIEW");
+    expect(await prisma.journalEntry.count({ where: { tenantId: tenantB.id } })).toBe(before);
+  });
+});
+
+describe("matchBankTransactionAction — auth + tenant scope", () => {
+  it("refuses an anonymous match", async () => {
+    signOut();
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("entryId", "00000000-0000-0000-0000-000000000000");
+    const r = await matchBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/signed in/i);
+  });
+
+  it("refuses matching a cross-tenant bank line (not found, no claim)", async () => {
+    // A genuinely matchable tenant-A entry: it moves account 1000 by the
+    // same -25 as bankTxnA, so the ONLY thing between tenant B and a
+    // cross-tenant claim is the tenant scope. Prove that's enough.
+    const target = await postJournalEntry(prisma, {
+      tenantId: tenantA.id,
+      entityCode: "ACME",
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-05-20"),
+      memo: "cross-tenant match target",
+      source: "MANUAL",
+      lines: [
+        { accountCode: "1000", credit: "25" }, // -25 on the bank account
+        { accountCode: "6000", debit: "25" },
+      ],
+    });
+    signInAs(tenantB);
+    const fd = new FormData();
+    fd.set("id", bankTxnA);
+    fd.set("entryId", target.id);
+    const r = await matchBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/not found/i);
+    // Tenant A's line is untouched — not MATCHED, not claimed.
+    const txn = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: bankTxnA } });
+    expect(txn.status).toBe("FOR_REVIEW");
+    expect(txn.postedEntryId).toBeNull();
+  });
+});
+
+describe("bank-feed — entity pin, atomic claim, posted-entry uniqueness (Codex #3/#4/#5)", () => {
+  const bookId = async () =>
+    (await prisma.book.findUniqueOrThrow({ where: { code: "US_GAAP" }, select: { id: true } })).id;
+  const cashAId = async () =>
+    (
+      await prisma.account.findFirstOrThrow({
+        where: { tenantId: tenantA.id, code: "1000", entityId: entityIdA },
+        select: { id: true },
+      })
+    ).id;
+  const mkLine = async (opts: {
+    entityId: string;
+    bankAccountId: string;
+    tag: string;
+    amount?: string;
+  }) =>
+    (
+      await prisma.bankTransaction.create({
+        data: {
+          tenantId: tenantA.id,
+          entityId: opts.entityId,
+          bookId: await bookId(),
+          bankAccountId: opts.bankAccountId,
+          postedDate: new Date("2026-05-21"),
+          description: `PEN ${opts.tag}`,
+          amount: opts.amount ?? "-15.0000",
+          dedupeHash: `pen-${opts.tag}-${SUFFIX}`,
+          status: "FOR_REVIEW",
+        },
+        select: { id: true },
+      })
+    ).id;
+
+  it("#3 refuses a sibling-entity line in the same tenant (pins entityId, not just tenantId)", async () => {
+    // A line imported under a DIFFERENT entity in the SAME tenant must not be
+    // categorizable while the session is scoped to ACME. Before the fix the
+    // load matched on {id, tenantId} only, so this line would load and its JE
+    // would post into the caller's (ACME) scope — cross-entity contamination.
+    const acme2 = await prisma.legalEntity.create({
+      data: { tenantId: tenantA.id, code: `ACME2-${SUFFIX}`, name: "ACME2 (A)", functionalCurrencyId: "USD" },
+    });
+    await prisma.account.create({
+      data: { tenantId: tenantA.id, entityId: acme2.id, code: "1000", name: "Cash2", type: "ASSET", normalBalance: "DEBIT", isBank: true },
+    });
+    const cash2 = await prisma.account.findFirstOrThrow({
+      where: { tenantId: tenantA.id, entityId: acme2.id, code: "1000" },
+      select: { id: true },
+    });
+    const foreign = await mkLine({ entityId: acme2.id, bankAccountId: cash2.id, tag: "acme2" });
+
+    signInAs(tenantA); // scoped to ACME (entityIdA), NOT ACME2
+    const fd = new FormData();
+    fd.set("id", foreign);
+    fd.set("categoryAccountCode", "6000");
+    const r = await categorizeBankTransactionAction({}, fd);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.error).toMatch(/not found/i);
+    const still = await prisma.bankTransaction.findUniqueOrThrow({ where: { id: foreign } });
+    expect(still.status).toBe("FOR_REVIEW"); // untouched
+  });
+
+  it("#4 categorizes once and refuses a re-submit (atomic FOR_REVIEW claim)", async () => {
+    const line = await mkLine({ entityId: entityIdA, bankAccountId: await cashAId(), tag: "happy" });
+    signInAs(tenantA);
+    const before = await prisma.journalEntry.count({ where: { tenantId: tenantA.id } });
+
+    const fd = new FormData();
+    fd.set("id", line);
+    fd.set("categoryAccountCode", "6000");
+    const first = await categorizeBankTransactionAction({}, fd);
+    expect(first.ok).toBe(true);
+    const mid = await prisma.journalEntry.count({ where: { tenantId: tenantA.id } });
+    expect(mid).toBe(before + 1); // exactly one JE posted
+    const posted = await prisma.bankTransaction.findUniqueOrThrow({
+      where: { id: line },
+      select: { status: true, postedEntryId: true },
+    });
+    expect(posted.status).toBe("CATEGORIZED");
+    expect(posted.postedEntryId).not.toBeNull();
+
+    // Re-submit (double-click / retry): the row is no longer FOR_REVIEW, so
+    // the conditional claim matches 0 rows and no second JE posts.
+    const second = await categorizeBankTransactionAction({}, fd);
+    expect(second.ok).toBe(false);
+    if (second.ok === false) expect(second.error).toMatch(/already/i);
+    expect(await prisma.journalEntry.count({ where: { tenantId: tenantA.id } })).toBe(mid);
+  });
+
+  it("#5 rejects a second bank line pointing at the same posted entry (unique index)", async () => {
+    // The DB backstop for the match race: two feed lines cannot both claim
+    // one entry. Nullable-unique → unclaimed lines (postedEntryId NULL) are
+    // unconstrained; a second NON-null link to the same entry fails P2002.
+    const cash = await cashAId();
+    const je = await postJournalEntry(prisma, {
+      tenantId: tenantA.id,
+      entityCode: "ACME",
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-05-22"),
+      memo: "unique-index target",
+      source: "MANUAL",
+      lines: [
+        { accountCode: "1000", credit: "5" },
+        { accountCode: "6000", debit: "5" },
+      ],
+    });
+    const l1 = await mkLine({ entityId: entityIdA, bankAccountId: cash, tag: "uniq1", amount: "-5.0000" });
+    const l2 = await mkLine({ entityId: entityIdA, bankAccountId: cash, tag: "uniq2", amount: "-5.0000" });
+    await prisma.bankTransaction.update({ where: { id: l1 }, data: { postedEntryId: je.id } });
+    await expect(
+      prisma.bankTransaction.update({ where: { id: l2 }, data: { postedEntryId: je.id } })
+    ).rejects.toMatchObject({ code: "P2002" });
   });
 });
 

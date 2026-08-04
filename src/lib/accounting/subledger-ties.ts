@@ -22,6 +22,7 @@
 // account" — each book-attribute carries its own asset / contra codes.
 
 import type { PrismaClient } from "@prisma/client";
+import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { Decimal } from "decimal.js";
 import { openArBalance } from "./sub-ledgers/ar";
 import { openApBalance } from "./sub-ledgers/ap";
@@ -66,6 +67,13 @@ export interface CheckSubledgerTiesInput {
   bookCode: string;
   /** As-of date for the control-account balance computation. */
   asOf: Date;
+  /**
+   * Tenant the entity belongs to. UI/API callers MUST pass this: entity
+   * codes are unique only per tenant, so without it a colliding code in
+   * another tenant could resolve the wrong entity's control account and
+   * sub-ledger balance. Optional for substrate scripts / tests.
+   */
+  tenantId?: string;
 }
 
 export async function checkSubledgerTies(
@@ -83,10 +91,11 @@ export async function checkSubledgerTies(
 
 async function checkArTie(
   prisma: PrismaClient,
-  { entityCode, bookCode, asOf }: CheckSubledgerTiesInput
+  { entityCode, bookCode, asOf, tenantId }: CheckSubledgerTiesInput
 ): Promise<SubledgerTie> {
   const controlAccount = await findControlAccount(prisma, {
     entityCode,
+    tenantId,
     type: "ASSET",
     subtype: "AR_TRADE",
   });
@@ -104,10 +113,11 @@ async function checkArTie(
       entityCode,
       bookCode,
       asOf,
+      tenantId,
       // ASSET → debit-normal → balance = debit - credit
       sign: 1,
     }),
-    openArBalance(prisma, entityCode, bookCode),
+    openArBalance(prisma, entityCode, bookCode, tenantId),
   ]);
 
   return finalize({
@@ -123,10 +133,11 @@ async function checkArTie(
 
 async function checkApTie(
   prisma: PrismaClient,
-  { entityCode, bookCode, asOf }: CheckSubledgerTiesInput
+  { entityCode, bookCode, asOf, tenantId }: CheckSubledgerTiesInput
 ): Promise<SubledgerTie> {
   const controlAccount = await findControlAccount(prisma, {
     entityCode,
+    tenantId,
     type: "LIABILITY",
     subtype: "AP_TRADE",
   });
@@ -144,10 +155,11 @@ async function checkApTie(
       entityCode,
       bookCode,
       asOf,
+      tenantId,
       // LIABILITY → credit-normal → balance = credit - debit
       sign: -1,
     }),
-    openApBalance(prisma, entityCode, bookCode),
+    openApBalance(prisma, entityCode, bookCode, tenantId),
   ]);
 
   return finalize({
@@ -163,14 +175,24 @@ async function checkApTie(
 
 async function findControlAccount(
   prisma: PrismaClient,
-  args: { entityCode: string; type: "ASSET" | "LIABILITY"; subtype: string }
+  args: {
+    entityCode: string;
+    tenantId?: string;
+    type: "ASSET" | "LIABILITY";
+    subtype: string;
+  }
 ): Promise<{ id: string; code: string; name: string } | null> {
   // First resolve the entity's tenant so we can scope BOTH the entity-
   // specific and shared fallback queries to that tenant. Without the
   // tenant filter, a tenant lacking its own AR control account would
-  // inherit one from ANOTHER tenant — a real cross-tenant leak.
+  // inherit one from ANOTHER tenant — a real cross-tenant leak. The
+  // entity lookup itself is tenant-pinned when the caller supplies a
+  // tenantId, so a colliding entity code resolves to the caller's tenant,
+  // not whichever row the DB returns first.
   const entity = await prisma.legalEntity.findFirst({
-    where: { code: args.entityCode },
+    where: args.tenantId
+      ? { tenantId: args.tenantId, code: args.entityCode }
+      : { code: args.entityCode },
     select: { id: true, tenantId: true },
   });
   if (!entity) return null;
@@ -210,19 +232,23 @@ async function sumControlAccountBalance(
     entityCode: string;
     bookCode: string;
     asOf: Date;
+    tenantId?: string;
     /** +1 for asset (debit-normal), -1 for liability/equity (credit-normal). */
     sign: 1 | -1;
   }
 ): Promise<Decimal> {
   // Aggregate via Prisma's groupBy / aggregate. Filtering by accountId
-  // is the narrow path; ensure the journal entry is in scope.
+  // is the narrow path (the account is already tenant-bound), and we
+  // pin the entry to the tenant too as defense-in-depth.
   const agg = await prisma.journalLine.aggregate({
     where: {
       accountId: args.accountId,
       entry: {
+        ...(args.tenantId ? { tenantId: args.tenantId } : {}),
         entity: { code: args.entityCode },
         book: { code: args.bookCode },
         documentDate: { lte: args.asOf },
+        status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
       },
     },
     _sum: { debit: true, credit: true },

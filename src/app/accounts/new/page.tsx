@@ -2,26 +2,25 @@
 // list; the form is the adjacent client component.
 
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentScope } from "@/lib/scope";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canEditAccounts } from "@/lib/auth/policy";
 import { EmptyState } from "@/components/ui/empty-state";
 import NewAccountForm from "./new-account-form";
 
 export default async function NewAccountPage() {
-  const tenant = await getCurrentTenant();
-  const user = await getCurrentUser();
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  const viewerRole = await getViewerRole();
 
-  if (!tenant) {
+  if (!scope) {
     return (
       <EmptyState
         title="No active tenant"
-        description="Sign in and select a tenant before creating an account."
+        description="Sign in and select a tenant with at least one entity before creating an account."
       />
     );
   }
-  if (!isAdmin(user)) {
+  if (!canEditAccounts(viewerRole)) {
     return (
       <EmptyState
         title="Admin required"
@@ -35,7 +34,7 @@ export default async function NewAccountPage() {
   // the user picks a type.
   const candidates = await prisma.account.findMany({
     where: {
-      tenantId: tenant.id,
+      tenantId: scope.tenantId,
       active: true,
       OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
     },

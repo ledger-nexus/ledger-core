@@ -20,6 +20,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
+import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
 
@@ -117,13 +118,18 @@ afterAll(async () => {
   await prisma.journalEntry.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.account.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.legalEntity.deleteMany({ where: { tenantId: { in: tenantIds } } });
-  await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  await withAuditLogMutable(prisma, async () => {
+    await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+  });
   // RecordEvent.tenantId is RESTRICT; clean before tenant delete.
   await prisma.recordEvent.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenantMembership.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
+  // Delete by id, not by email prefix: `email` is encrypted at rest with
+  // a random IV, so `contains` matches nothing. Every seeded owner id is
+  // already on the SeededTenant record.
   await prisma.user.deleteMany({
-    where: { email: { contains: SUFFIX } },
+    where: { id: { in: [tenantA.ownerUserId, tenantB.ownerUserId] } },
   }).catch(() => {});
   await prisma.$disconnect();
 });
@@ -209,6 +215,33 @@ describe("tenant isolation: consolidation hierarchy walk", () => {
       asOf: new Date("2026-12-31"),
     });
     // Includes only tenant A's root (no children, no leakage).
+    expect(report.entitiesIncluded.map((e) => e.code)).toEqual([
+      tenantA.entityCode,
+    ]);
+  });
+
+  it("with tenantId pinned, naming another tenant's entity code finds nothing", async () => {
+    // The UI passes ?root= straight from the client. With the session
+    // tenant pinned, tenant A asking for tenant B's entity code must
+    // fail closed (not consolidate B's books).
+    await expect(
+      getConsolidatedTrialBalance(prisma, {
+        rootEntityCode: tenantB.entityCode,
+        bookCode: "US_GAAP",
+        asOf: new Date("2026-12-31"),
+        tenantId: tenantA.tenantId,
+      })
+    ).rejects.toThrow(/not found/);
+  });
+
+  it("with tenantId pinned, the caller's own entity still resolves", async () => {
+    const report = await getConsolidatedTrialBalance(prisma, {
+      rootEntityCode: tenantA.entityCode,
+      bookCode: "US_GAAP",
+      asOf: new Date("2026-12-31"),
+      tenantId: tenantA.tenantId,
+    });
+    expect(report.rootEntityCode).toBe(tenantA.entityCode);
     expect(report.entitiesIncluded.map((e) => e.code)).toEqual([
       tenantA.entityCode,
     ]);

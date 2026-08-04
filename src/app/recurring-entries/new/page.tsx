@@ -2,26 +2,25 @@
 // the form lives in the adjacent client component.
 
 import { prisma } from "@/lib/db";
-import { getScope } from "@/lib/scope";
-import { getCurrentTenant } from "@/lib/auth/tenant";
-import { getCurrentUser, isAdmin } from "@/lib/auth/current-user";
+import { getCurrentScope } from "@/lib/scope";
+import { getViewerRole } from "@/lib/auth/authorize";
+import { canManageRecurringEntries } from "@/lib/auth/policy";
 import { EmptyState } from "@/components/ui/empty-state";
 import NewRecurringForm from "./new-recurring-form";
 
 export default async function NewRecurringPage() {
-  const tenant = await getCurrentTenant();
-  const user = await getCurrentUser();
-  const scope = getScope();
+  const scope = await getCurrentScope();
+  const viewerRole = await getViewerRole();
 
-  if (!tenant) {
+  if (!scope) {
     return (
       <EmptyState
         title="No active tenant"
-        description="Sign in and select a tenant before creating a template."
+        description="Sign in and select a tenant with at least one entity before creating a template."
       />
     );
   }
-  if (!isAdmin(user)) {
+  if (!canManageRecurringEntries(viewerRole)) {
     return (
       <EmptyState
         title="Admin required"
@@ -34,7 +33,7 @@ export default async function NewRecurringPage() {
     prisma.account.findMany({
       where: {
         active: true,
-        tenantId: tenant.id,
+        tenantId: scope.tenantId,
         OR: [{ entityId: null }, { entity: { code: scope.entityCode } }],
       },
       orderBy: { code: "asc" },
@@ -46,7 +45,7 @@ export default async function NewRecurringPage() {
       select: { code: true, name: true },
     }),
     prisma.legalEntity.findMany({
-      where: { tenantId: tenant.id },
+      where: { tenantId: scope.tenantId },
       orderBy: { code: "asc" },
       select: { code: true, name: true },
     }),
@@ -57,10 +56,9 @@ export default async function NewRecurringPage() {
       <div>
         <h2 className="text-xl font-semibold text-ink-900">New recurring template</h2>
         <p className="text-sm text-ink-500 max-w-prose">
-          Define a balanced JE shape + a cadence. Every cadence step will produce a
-          fresh entry via <code className="font-mono">postJournalEntry</code> when
-          the runner fires. The first entry is dated the start date; subsequent
-          entries step forward by cadence.
+          Define a balanced entry and how often it repeats. Each time it comes
+          due, a fresh entry posts automatically. The first is dated the start
+          date; each one after steps forward by the cadence.
         </p>
       </div>
       <NewRecurringForm

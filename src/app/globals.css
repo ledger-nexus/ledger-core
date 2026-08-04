@@ -15,6 +15,34 @@ body {
   @apply bg-ink-50 text-ink-900 antialiased;
 }
 
+/* Headings default to tight tracking + balanced wrapping. Element-level
+   selectors, so any Tailwind utility on a specific heading still wins
+   (utilities are class selectors and outrank these). */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* Interactive elements get a uniform, snap-eased response. Scoped to
+   motion-safe — prefers-reduced-motion environments see instant state
+   changes instead. Elements that declare their own transition utilities
+   (Button, Input) override this via class specificity. */
+@media (prefers-reduced-motion: no-preference) {
+  a,
+  button,
+  select,
+  summary,
+  [role="button"] {
+    transition:
+      background-color 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+      color 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
 /* Mono for monetary cells — vertical alignment matters when scanning columns. */
 .amount-cell {
   @apply font-mono tabular-nums tracking-tight;
