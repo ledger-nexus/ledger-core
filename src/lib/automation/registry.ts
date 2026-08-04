@@ -45,8 +45,11 @@ export const AUTOMATIONS: AutomationDef[] = [
     name: "Recurring entries",
     category: "recurring",
     description:
-      "Posts a saved entry on a schedule — rent, a subscription, monthly depreciation — without asking each time.",
+      "Posts a saved entry on a schedule — rent, a subscription, monthly depreciation — without asking each time. Allocation templates compute their lines each run: a source account's month is split across targets by fixed percentages.",
     governanceLevel: "AUTO",
+    // Allocations stay AUTO because the derivation is deterministic
+    // (fixed percents, penny-exact remainder) — the constitutional
+    // line only bars AI-driven posting.
     provenance: "Stamped SYSTEM; visible in the register as a scheduled post.",
     href: "/recurring-entries",
   },
