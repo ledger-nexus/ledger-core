@@ -47,6 +47,7 @@ import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant, isTenantAdmin } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getReconTransactionMatch } from "@/lib/recon/transaction-match";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import type { ReconStatus } from "@prisma/client";
@@ -178,6 +179,18 @@ export default async function ReconciliationDetailPage({
       })
     : null;
 
+  // Transaction matching. Available for accounts whose supporting
+  // detail the system holds (bank accounts, via the feeds arc); the
+  // card hides itself otherwise rather than rendering an empty table.
+  const match = await getReconTransactionMatch(prisma, {
+    tenantId: tenant.id,
+    entityId: recon.entityId,
+    bookId: recon.bookId,
+    accountId: recon.accountId,
+    periodStart: recon.period.startsOn,
+    periodEnd: recon.period.endsOn,
+  });
+
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-col gap-2">
@@ -278,6 +291,89 @@ export default async function ReconciliationDetailPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* Transaction matching — what the difference is MADE OF. A
+          reconciliation that reports only a number tells the operator
+          the size of the problem and nothing about its shape. */}
+      {match.available && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Transaction matching</CardTitle>
+            <div className="text-sm text-ink-500">
+              {match.matched.length} matched · {match.unmatchedGl.length} in books
+              only · {match.unmatchedSupport.length} on statement only ·{" "}
+              {match.supportLabel}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {match.unmatchedGl.length === 0 && match.unmatchedSupport.length === 0 ? (
+              <p className="text-sm text-positive">
+                Every transaction matched — nothing outstanding.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-4">
+                <div className="text-sm">
+                  <span className="text-ink-500">Unmatched, net </span>
+                  <span className="font-mono">{formatMoney(match.netUnmatched)}</span>
+                  <span className="text-ink-400">
+                    {" "}
+                    — the books less the statement, itemized below
+                  </span>
+                </div>
+                {match.unmatchedGl.length > 0 && (
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-ink-500 mb-1">
+                      In the books, not on the statement
+                    </div>
+                    <div className="text-xs text-ink-400 mb-2">
+                      Outstanding cheques and deposits in transit.
+                    </div>
+                    <ul className="flex flex-col gap-1">
+                      {match.unmatchedGl.map((i) => (
+                        <li key={i.id} className="text-sm flex justify-between gap-4">
+                          <span>
+                            <span className="font-mono text-xs text-ink-400">
+                              {formatDate(i.date)}
+                            </span>{" "}
+                            {i.description}
+                            {i.reference ? (
+                              <span className="text-ink-400"> · {i.reference}</span>
+                            ) : null}
+                          </span>
+                          <span className="font-mono">{formatMoney(i.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {match.unmatchedSupport.length > 0 && (
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-ink-500 mb-1">
+                      On the statement, not in the books
+                    </div>
+                    <div className="text-xs text-ink-400 mb-2">
+                      Bank fees, interest, anything not yet recorded.
+                    </div>
+                    <ul className="flex flex-col gap-1">
+                      {match.unmatchedSupport.map((i) => (
+                        <li key={i.id} className="text-sm flex justify-between gap-4">
+                          <span>
+                            <span className="font-mono text-xs text-ink-400">
+                              {formatDate(i.date)}
+                            </span>{" "}
+                            {i.description}
+                          </span>
+                          <span className="font-mono">{formatMoney(i.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Sign-off panel. Branches on status + role. */}
       {showPreparerForm && (
