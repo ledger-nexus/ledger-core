@@ -24,6 +24,8 @@ interface DraftLine {
   accountCode: string;
   side: "DEBIT" | "CREDIT";
   amount: string;
+  /** ALLOCATION mode: this target's share, 0–100. */
+  percent: string;
   description: string;
 }
 
@@ -33,6 +35,7 @@ function newLine(side: "DEBIT" | "CREDIT"): DraftLine {
     accountCode: "",
     side,
     amount: "",
+    percent: "",
     description: "",
   };
 }
@@ -62,6 +65,8 @@ export default function NewRecurringForm({
     d.setUTCMonth(d.getUTCMonth() + 1);
     return d.toISOString().slice(0, 10);
   }, []);
+  const [kind, setKind] = useState<"STANDARD" | "ALLOCATION">("STANDARD");
+  const [sourceAccountCode, setSourceAccountCode] = useState("");
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([
@@ -105,14 +110,26 @@ export default function NewRecurringForm({
         cadence,
         startDate,
         endDate: endDate || undefined,
-        lines: lines
-          .filter((l) => l.accountCode && l.amount)
-          .map((l) => ({
-            accountCode: l.accountCode,
-            debit: l.side === "DEBIT" ? l.amount : "0",
-            credit: l.side === "CREDIT" ? l.amount : "0",
-            description: l.description || undefined,
-          })),
+        kind,
+        allocationSourceAccountCode:
+          kind === "ALLOCATION" ? sourceAccountCode : undefined,
+        lines:
+          kind === "ALLOCATION"
+            ? lines
+                .filter((l) => l.accountCode && l.percent)
+                .map((l) => ({
+                  accountCode: l.accountCode,
+                  allocationPercent: l.percent,
+                  description: l.description || undefined,
+                }))
+            : lines
+                .filter((l) => l.accountCode && l.amount)
+                .map((l) => ({
+                  accountCode: l.accountCode,
+                  debit: l.side === "DEBIT" ? l.amount : "0",
+                  credit: l.side === "CREDIT" ? l.amount : "0",
+                  description: l.description || undefined,
+                })),
       };
       const r = await createRecurringEntryAction(payload);
       if (!r.ok) {
@@ -201,6 +218,39 @@ export default function NewRecurringForm({
               </Select>
             </div>
             <div>
+              <Label htmlFor="kind">Template kind</Label>
+              <Select
+                id="kind"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as "STANDARD" | "ALLOCATION")}
+              >
+                <option value="STANDARD">Standard — post these lines verbatim</option>
+                <option value="ALLOCATION">Allocation — split a source account by %</option>
+              </Select>
+            </div>
+            {kind === "ALLOCATION" && (
+              <div>
+                <Label htmlFor="sourceAccount">Source account (allocated FROM)</Label>
+                <Select
+                  id="sourceAccount"
+                  value={sourceAccountCode}
+                  onChange={(e) => setSourceAccountCode(e.target.value)}
+                  required
+                >
+                  <option value="">— select —</option>
+                  {accounts.map((a) => (
+                    <option key={a.code} value={a.code}>
+                      {a.code} — {a.name}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-ink-500 mt-1">
+                  Each run clears this account's month-to-date activity into the
+                  target lines below. Anchor the start date to month-end.
+                </p>
+              </div>
+            )}
+            <div>
               <Label htmlFor="startDate">Start date</Label>
               <Input
                 id="startDate"
@@ -233,21 +283,23 @@ export default function NewRecurringForm({
           <Table>
             <THead>
               <TR>
-                <TH>Side</TH>
-                <TH>Account</TH>
+                {kind === "STANDARD" && <TH>Side</TH>}
+                <TH>{kind === "ALLOCATION" ? "Target account" : "Account"}</TH>
                 <TH>Description</TH>
-                <TH className="text-right">Amount</TH>
+                <TH className="text-right">{kind === "ALLOCATION" ? "Percent" : "Amount"}</TH>
                 <TH></TH>
               </TR>
             </THead>
             <TBody>
               {lines.map((l) => (
                 <TR key={l.uid}>
-                  <TD>
-                    <Badge tone={l.side === "DEBIT" ? "info" : "neutral"}>
-                      {l.side}
-                    </Badge>
-                  </TD>
+                  {kind === "STANDARD" && (
+                    <TD>
+                      <Badge tone={l.side === "DEBIT" ? "info" : "neutral"}>
+                        {l.side}
+                      </Badge>
+                    </TD>
+                  )}
                   <TD>
                     <Select
                       value={l.accountCode}
@@ -270,18 +322,32 @@ export default function NewRecurringForm({
                     />
                   </TD>
                   <TD>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={l.amount}
-                      onChange={(e) => updateLine(l.uid, { amount: e.target.value })}
-                      className="text-right tabular-nums"
-                      required
-                    />
+                    {kind === "ALLOCATION" ? (
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        max="100"
+                        value={l.percent}
+                        onChange={(e) => updateLine(l.uid, { percent: e.target.value })}
+                        className="text-right tabular-nums"
+                        placeholder="%"
+                        required
+                      />
+                    ) : (
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={l.amount}
+                        onChange={(e) => updateLine(l.uid, { amount: e.target.value })}
+                        className="text-right tabular-nums"
+                        required
+                      />
+                    )}
                   </TD>
                   <TD>
-                    {lines.length > 2 && (
+                    {lines.length > (kind === "ALLOCATION" ? 1 : 2) && (
                       <Button
                         type="button"
                         variant="ghost"

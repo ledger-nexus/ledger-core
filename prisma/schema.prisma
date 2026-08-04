@@ -1239,6 +1239,15 @@ model RecurringEntry {
   code String
   memo String
 
+  // ALLOCATION templates (NetSuite dynamic-allocation parity) clear the
+  // source account's month-to-docDate activity into target lines by
+  // percentage each run. STANDARD posts the lines verbatim — the
+  // original behavior and the default.
+  kind RecurringEntryKind @default(STANDARD)
+  // ALLOCATION only: the account whose activity is allocated. Stored by
+  // code (like line accountCodes) — resolved per run.
+  allocationSourceAccountCode String?
+
   // Header currency for the produced entries. Lines are signed-quantity;
   // the JE picks up fxRate from the rate table at posting time.
   currencyId String
@@ -1288,12 +1297,25 @@ model RecurringEntryLine {
   debit  Decimal @default(0) @db.Decimal(18, 4)
   credit Decimal @default(0) @db.Decimal(18, 4)
 
+  // ALLOCATION templates: this line's share of the source activity,
+  // 0–100. A template's percents must sum to exactly 100 (validated at
+  // creation AND re-checked at run time); debit/credit stay 0 — the
+  // amounts are computed per run.
+  allocationPercent Decimal? @db.Decimal(7, 4)
+
   description String?
   partyCode   String?
   itemCode    String?
 
   @@unique([templateId, lineNo])
   @@map("recurring_entry_line")
+}
+
+// STANDARD posts template lines verbatim; ALLOCATION computes them from
+// the source account's activity each run.
+enum RecurringEntryKind {
+  STANDARD
+  ALLOCATION
 }
 
 enum Cadence {

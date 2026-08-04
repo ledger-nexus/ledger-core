@@ -33,7 +33,9 @@
 // whole-year offsets.
 
 import type { PrismaClient, Cadence } from "@prisma/client";
+import { Decimal } from "decimal.js";
 import { postJournalEntry } from "./post-journal";
+import { computeAllocationLines, resolveSourceActivity } from "./allocation";
 import { withTenantContext } from "../tenant-context";
 
 export interface RunRecurringInput {
@@ -194,8 +196,54 @@ export async function runRecurringEntries(
         // the runner — "all-or-NONE within a template's batch, but
         // per-period atomicity across the batch." Per-template
         // lastPostedDate advances to the highest SUCCEEDED docDate.
-        await withTenantContext(prisma, template.tenantId, async (tx) =>
-          postJournalEntry(tx, {
+        const didPost = await withTenantContext(prisma, template.tenantId, async (tx) => {
+          // ALLOCATION templates compute their lines per run from the
+          // source account's window activity; zero activity is a
+          // completed no-op (advance the bookmark, post nothing) — NOT
+          // an error, or a quiet month would wedge the template forever.
+          let lines: {
+            accountCode: string;
+            debit: string;
+            credit: string;
+            description?: string;
+            partyCode?: string;
+            itemCode?: string;
+          }[];
+          if (template.kind === "ALLOCATION") {
+            const activity = await resolveSourceActivity(tx, {
+              tenantId: template.tenantId,
+              entityId: template.entityId,
+              bookId: template.bookId,
+              sourceAccountCode: template.allocationSourceAccountCode!,
+              docDate,
+            });
+            const computed = computeAllocationLines({
+              sourceAccountCode: template.allocationSourceAccountCode!,
+              sourceActivity: activity,
+              targets: template.lines.map((l) => ({
+                accountCode: l.accountCode,
+                percent: new Decimal(l.allocationPercent?.toString() ?? "0"),
+                description: l.description,
+              })),
+            });
+            if (computed.length === 0) return false; // nothing to allocate
+            lines = computed.map((l) => ({
+              accountCode: l.accountCode,
+              debit: l.debit.toString(),
+              credit: l.credit.toString(),
+              description: l.description,
+            }));
+          } else {
+            lines = template.lines.map((l) => ({
+              accountCode: l.accountCode,
+              debit: l.debit.toString(),
+              credit: l.credit.toString(),
+              description: l.description ?? undefined,
+              partyCode: l.partyCode ?? undefined,
+              itemCode: l.itemCode ?? undefined,
+            }));
+          }
+          await postJournalEntry(tx, {
             tenantId: template.tenantId,
             entityCode: template.entity.code,
             bookCode: template.book.code,
@@ -210,18 +258,17 @@ export async function runRecurringEntries(
             sourceSystem: "SUBSTRATE",
             sourceRecordType: "RecurringEntry",
             sourceRecordId: `${template.id}:${isoDate(docDate)}`,
-            lines: template.lines.map((l) => ({
-              accountCode: l.accountCode,
-              debit: l.debit.toString(),
-              credit: l.credit.toString(),
-              description: l.description ?? undefined,
-              partyCode: l.partyCode ?? undefined,
-              itemCode: l.itemCode ?? undefined,
-            })),
-          })
-        );
-        summary.posted += 1;
-        result.entriesPosted += 1;
+            lines,
+          });
+          return true;
+        });
+        if (didPost) {
+          summary.posted += 1;
+          result.entriesPosted += 1;
+        }
+        // A zero-activity allocation run still completes its docDate —
+        // the bookmark advances so a quiet month never wedges the
+        // template.
         lastSuccessfulDocDate = docDate;
       } catch (e) {
         // Don't abort the whole template on one bad period — record it,

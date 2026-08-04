@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session allocation-schedules · 2026-08-04
+- **Scope**: ALLOCATION recurring templates — migration 0040, `accounting/allocation.ts` (percent-sum-100 or refuse; last-target remainder penny invariant), runner branch (zero activity advances without posting), create action + form (kind selector, source picker, percent column), registry AUTO note.
+- **Verification**: 3 new tests + tsc 0 + build clean; browser-verified the form's ALLOCATION mode. Dev DB migrated via `db execute`; fingerprint updated.
+- **Branch**: feat/allocation-schedules (worktree ~/Code/ledger-core-je-approvals).
+
 ### Session translation-phase-bc · 2026-08-04
 - **Scope**: Translation Phases B/C — `reports/translation.ts` (functional-balance translation at #149/#150 category rates; HISTORICAL per-line walk; CTA = credit-positive balancing plug, sign re-derived), consolidation `periodStart` + synthetic CTA equity row + rate map, page/CSV with #152's default derivation, two-mode banner, FxRateNotFoundError → graceful naïve fallback.
 - **Verification**: 23 tests green (new suite pins #151's 1950-not-2463.50 double-application refutation + reval-invisibility + HISTORICAL freeze + CTA balance); tsc 0; build clean; browser regression on all-USD Acme (translation inert, new control renders).
