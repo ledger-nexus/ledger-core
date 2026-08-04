@@ -50,6 +50,16 @@ export interface JournalLineInput {
   // transactionAmount/reportingAmount = (debit - credit) and the line's
   // currency = the header currency.
   transactionAmount?: Decimal | string | number;
+  // Functional-currency measurement override (signed). Omit and the
+  // posting function derives it: transaction amount when the entry's
+  // currency IS the entity's functional currency; reporting amount when
+  // functional == the book's reporting currency; otherwise resolved via
+  // the FX table at documentDate (throws when no rate exists — never a
+  // silent guess). Pass 0 explicitly for entries with no functional-
+  // currency substance: the FX revaluation true-up is the canonical
+  // case (see #151's postmortem — translating reporting balances
+  // double-applies rates; this field is what translation consumes).
+  functionalAmount?: Decimal | string | number;
   reportingAmount?: Decimal | string | number;
 
   extensions?: Record<string, unknown>;

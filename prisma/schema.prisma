@@ -523,6 +523,7 @@ model Currency {
   journalEntries     JournalEntry[]    @relation("JeCurrency")
   linesTxn           JournalLine[]     @relation("LineTxnCcy")
   linesReporting     JournalLine[]     @relation("LineReportingCcy")
+  linesFunctional    JournalLine[]     @relation("LineFuncCcy")
   fixedAssets        FixedAsset[]      @relation("FixedAssetAcqCcy")
   leases             Lease[]           @relation("LeaseCcy")
   revenueContracts   RevenueContract[] @relation("RevContractCcy")
@@ -1141,6 +1142,19 @@ model JournalLine {
   reportingAmount     Decimal   @default(0) @db.Decimal(18, 4)
   reportingCurrencyId String?
   reportingCurrency   Currency? @relation("LineReportingCcy", fields: [reportingCurrencyId], references: [code])
+
+  // Functional-currency view (signed) — the ENTITY's functional currency,
+  // the measurement basis ASC 830 current-rate translation starts from.
+  // The #151 postmortem: translating stored reporting-currency balances
+  // double-applies rates (posted at the transaction-date rate, then
+  // multiplied by the period-end rate again). Translation must consume
+  // THIS amount. FX revaluation lines carry 0 here by construction — a
+  // true-up of the reporting view has no functional-currency substance.
+  // Populated by postJournalEntry for every new line; migration 0039
+  // backfills history.
+  functionalAmount     Decimal   @default(0) @db.Decimal(18, 4)
+  functionalCurrencyId String?
+  functionalCurrency   Currency? @relation("LineFuncCcy", fields: [functionalCurrencyId], references: [code])
 
   description String?
   extensions  Json?

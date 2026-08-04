@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session translation-phase-a · 2026-08-04
+- **Scope**: Translation arc Phase A — per-line `functionalAmount`/`functionalCurrencyId` (migration 0039 + backfill), postJournalEntry derivation (txn==functional → txn amount; functional==reporting → reporting amount; three-way → resolveFxRate or throw; explicit override), revaluation poster stamps functional 0 ONLY when functional ≠ reporting (real remeasurement income keeps its amount when functional==reporting).
+- **Verification**: 38 tests green across functional-amount (6, incl. the #151 1000-GBP/1200-USD trap pinned) + invariants + fx-reval ×2; tsc 0; build clean. Dev DB migrated via `db execute`. Schema fingerprint updated.
+- **Branch**: feat/consolidation-translation (worktree ~/Code/ledger-core-je-approvals).
+
 ### Session ic-pairing · 2026-08-04
 - **Scope**: Intercompany auto-pairing shipped — `src/lib/accounting/intercompany.ts` (pure deriveMirrorPlan + prepareIntercompanyMirror via postJournalEntry; lineage triple INTERCOMPANY/gl_entry_mirror/<source-id> is link + idempotency lock, NO schema change), `prepareMirrorAction`, JE-detail Intercompany card + mirror banner, automation-registry REVIEW entry with live count.
 - **Verification**: tsc 0; 8/8 new tests + je-approvals + consolidation green; `next build` clean; browser-driven ACME_US→ACME_UK mirror (posted, flipped 2400/5900 lines, audit row, registry count). Demo data note: ACME_US-US_GAAP-00007 + its mirror ACME_UK-US_GAAP-00007 now exist in the default tenant — intentional, they demo the feature.
