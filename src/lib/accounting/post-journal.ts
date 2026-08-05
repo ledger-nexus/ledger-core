@@ -67,6 +67,53 @@ Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
 const DEFAULT_BOOK = "US_GAAP";
 
+/**
+ * Attempts for a lost entry-number race. Each retry re-reads the count,
+ * so N concurrent posters need at most N-1 retries between them; the
+ * ceiling bounds a pathological stampede rather than a normal one.
+ */
+const ENTRY_NUMBER_ATTEMPTS = 25;
+
+/**
+ * Retrying immediately is worse than not retrying: the losers of a
+ * collision re-read the count in the same instant and collide again, in
+ * lockstep, until they exhaust their attempts. Twelve concurrent posts
+ * reproduce that reliably. The jitter is what actually breaks the tie —
+ * the backoff just keeps a large herd from spinning.
+ */
+function collisionBackoffMs(attempt: number): number {
+  const ceiling = Math.min(20 * 2 ** (attempt - 1), 250);
+  return Math.random() * ceiling;
+}
+
+/** True for a unique violation on the (tenantId, entryNumber) index. */
+function isEntryNumberCollision(e: unknown): boolean {
+  if (
+    !(e instanceof Prisma.PrismaClientKnownRequestError) ||
+    e.code !== "P2002"
+  ) {
+    return false;
+  }
+  const target = e.meta?.target;
+  const asText = Array.isArray(target) ? target.join(",") : String(target ?? "");
+  return asText.includes("entryNumber");
+}
+
+async function withEntryNumberRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (e) {
+      if (attempt >= ENTRY_NUMBER_ATTEMPTS || !isEntryNumberCollision(e)) {
+        throw e;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, collisionBackoffMs(attempt))
+      );
+    }
+  }
+}
+
 
 export async function postJournalEntry(
   prisma: DbClient,
@@ -383,7 +430,18 @@ export async function postJournalEntry(
   // client, so the subsequent code is identical.
   const runWrite = async (tx: Prisma.TransactionClient) => {
     // entryNumber is sequential per (entity, book). Format: ENTITY-BOOK-NNNNN.
-    // count() at portfolio scale is fine; production would use a sequence.
+    //
+    // count() + 1 is not atomic: two posts to the same (entity, book)
+    // that read the count before either has committed both compute the
+    // same next number, and the second one loses to the
+    // @@unique([tenantId, entryNumber]) index. That used to surface as a
+    // failed post. It is no longer hypothetical — the nightly recurring
+    // runner, the UI, and intercompany mirrors all post to the same
+    // (entity, book), and a mirror posts while its source is still in
+    // flight. The retry below turns the collision into a recomputation.
+    // A Postgres sequence per (entity, book) is the allocation-free
+    // answer and needs a table + migration; this keeps the numbering
+    // contract (gap-free, sequential) without one.
     const existingCount = await tx.journalEntry.count({
       where: { entityId: entity.id, bookId: book.id },
     });
@@ -465,8 +523,20 @@ export async function postJournalEntry(
     return { id: entry.id, entryNumber: entry.entryNumber, bookCode: book.code };
   };
 
+  // Retry ONLY the entry-number collision, and only when we own the
+  // transaction. A lost race means "someone else took that number" —
+  // recomputing and re-running is correct. Everything else propagates:
+  // a lineage-triple violation is a genuine duplicate source event that
+  // the recurring runner and the importers rely on seeing, and an
+  // unbalanced entry is not going to balance on a second attempt.
+  //
+  // When a caller passes its own transaction, the failed statement has
+  // already poisoned it — Postgres refuses further work in an aborted
+  // transaction — so retrying here would fail differently and hide the
+  // cause. The collision propagates and the owner of the transaction
+  // retries it whole.
   const result = hasTransaction(prisma)
-    ? await prisma.$transaction(runWrite)
+    ? await withEntryNumberRetry(() => prisma.$transaction(runWrite))
     : await runWrite(prisma);
 
   // Fire ON_INSERT rules AFTER the transaction commits. The JE write is
