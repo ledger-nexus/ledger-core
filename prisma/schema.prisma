@@ -179,6 +179,7 @@ model Tenant {
 
   @@index([ownerUserId])
   @@map("tenant")
+  reconciliationManualMatches ReconciliationManualMatch[]
 }
 
 model TenantMembership {
@@ -1165,6 +1166,7 @@ model JournalLine {
   @@index([partyId])
   @@index([tenantId])
   @@map("gl_entry_line")
+  reconManualMatches ReconciliationManualMatch[]
 }
 
 // =========================================================================
@@ -2048,6 +2050,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   @@map("app_user")
+  reconManualMatchDecisions ReconciliationManualMatch[] @relation("ReconMatchDecider")
 }
 
 model Queue {
@@ -2760,6 +2763,7 @@ model Reconciliation {
   // .recordId = this id. No Prisma relation — RecordEvent is the
   // tenant-wide event journal used by ownership, JE notes, etc.
   attachments ReconciliationAttachment[]
+  manualMatches ReconciliationManualMatch[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2769,6 +2773,48 @@ model Reconciliation {
   @@index([tenantId, periodId, status])
   @@index([periodId, status])
   @@map("reconciliation")
+}
+
+/// An operator's decision that one GL line and one statement line are
+/// the same transaction. Auto-matching pairs on exact amount inside a
+/// date window; everything it cannot pair — a cheque split across two
+/// deposits, a fee posted net, a transposition — needs a human to say
+/// so, and saying so is a judgement that belongs in the audit trail
+/// with a name against it.
+///
+/// The two uniques are the point: a GL line and a statement line can
+/// each be claimed once per reconciliation. Without them the same
+/// payment could be matched twice and the difference would still look
+/// explained.
+model ReconciliationManualMatch {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  reconciliationId String         @db.Uuid
+  reconciliation   Reconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  journalLineId String      @db.Uuid
+  journalLine   JournalLine @relation(fields: [journalLineId], references: [id], onDelete: Cascade)
+
+  bankTransactionId String          @db.Uuid
+  bankTransaction   BankTransaction @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)
+
+  /// Who decided. Not nullable — an unattributed manual match is the
+  /// thing this table exists to prevent.
+  decidedById String @db.Uuid
+  decidedBy   User   @relation("ReconMatchDecider", fields: [decidedById], references: [id])
+  decidedAt   DateTime @default(now())
+
+  /// Why, when the pairing isn't self-evident. Free text, shown in the
+  /// card next to the pair.
+  note String?
+
+  @@unique([reconciliationId, journalLineId])
+  @@unique([reconciliationId, bankTransactionId])
+  @@index([tenantId, reconciliationId])
+  @@map("reconciliation_manual_match")
 }
 
 model ReconciliationAttachment {
@@ -3103,6 +3149,7 @@ model BankTransaction {
   @@unique([tenantId, dedupeHash])
   @@index([tenantId, entityId, bookId, bankAccountId, status])
   @@map("bank_transaction")
+  reconManualMatches ReconciliationManualMatch[]
 }
 
 enum BankTxnStatus {
