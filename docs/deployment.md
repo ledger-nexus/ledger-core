@@ -9,6 +9,34 @@ This guide takes you from a fresh repo to a live URL in ~10 minutes. The stack i
 - A GitHub account with the `ledger-core` repo (fork or clone)
 - A free Vercel account ([vercel.com](https://vercel.com))
 - A free Neon account ([neon.tech](https://neon.tech)) — generous Postgres free tier with `gen_random_uuid()` support enabled out of the box
+- A Clerk account ([clerk.com](https://clerk.com)) if this deployment will have real users — see the ordering note below
+
+### Generate the secrets before you start
+
+Four values are easier to make now than to retrofit. Run these once and
+keep the output somewhere safe — they go into Vercel in Step 3:
+
+```bash
+node -e "console.log('AUTH_STUB_SECRET=' + require('crypto').randomBytes(24).toString('hex'))"
+node -e "console.log('CRON_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('FIELD_ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('FIELD_DETERMINISTIC_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Two ordering hazards
+
+**Set the Clerk pair with the FIRST deploy, not after it.** Middleware
+fails closed in production: without `CLERK_SECRET_KEY` and
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, every non-public route returns 503,
+so the deploy "succeeds" and the app is unreachable. Set both or
+neither — half-configured is an error, not a degraded mode.
+
+**Set `FIELD_ENCRYPTION_KEY` before ANY customer data is entered.**
+Without it the encrypted-columns extension writes plaintext and warns
+once per serverless instance, which in practice nobody sees. Setting
+the key later does **not** retroactively encrypt what was already
+written — that needs a backfill. Confirm both key flags read true at
+`GET /api/health` before onboarding anyone.
 
 ---
 
@@ -81,8 +109,14 @@ The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS
    | `AUTH_STUB_SECRET` | **required** | Boot throws (min 16 chars). |
    | `CLERK_SECRET_KEY` + `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | strongly advised | Middleware fails **closed**: every non-public route returns 503. Set both or neither — half-configured is an error. |
    | `CRON_SECRET` | advised | All 5 scheduled jobs 401 silently. Includes the retention purge, which the control matrix carries as a Privacy TSC control. Min 16 chars. |
+   | `FIELD_ENCRYPTION_KEY` | **required in production** | **Every column in `ENCRYPTED_COLUMNS` writes PLAINTEXT.** The extension warns once per instance and passes the value through — the rollout safety net that lets dev run without a key. In serverless that single warning is per-lambda and effectively invisible, so the Confidentiality TSC control is silently inert while `/api/health` is the only thing that would tell you. 64-char hex: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+   | `FIELD_DETERMINISTIC_KEY` | **required in production** | Search-hash columns stop being populated, so equality lookups over encrypted fields silently return nothing. Same 64-char hex generation. |
    | `APP_BASE_URL` | advised | See the build-time note below. |
-   | `STRIPE_*`, `RESEND_API_KEY` | optional | Billing and email stay dark by design. |
+   | `STRIPE_*`, `RESEND_API_KEY` | optional | Billing and email stay dark by design. Exact names in `docs/billing-setup.md`. |
+   | `NEXT_PUBLIC_APP_URL` | advised once notifications are on | Slack close-alerts fall back to `http://localhost:3000`, so every link in an alert points at the recipient's own machine instead of the app. Silent — the alert still sends. |
+   | `EMAIL_FROM_ADDRESS` | required **if** `RESEND_API_KEY` is set | Every send fails: there is deliberately no fallback sender, and the failure is recorded on the `EmailDelivery` row rather than substituting an address. Must be a verified sender on the Resend domain. |
+   | `ANTHROPIC_API_KEY` | optional | "Ask your ledger" returns an error instead of an answer. Read-only feature; see `docs/multi-repo-deploy.md`. |
+   | `SENTRY_DSN` | advised | No error reporting reaches Sentry — the app runs, but production failures are invisible. `SENTRY_TRACES_SAMPLE_RATE` tunes sampling. |
 
    > **`APP_BASE_URL` must be set as a BUILD-time variable, not just at
    > runtime.** `/sitemap.xml` and `/robots.txt` are statically prerendered
@@ -91,6 +125,13 @@ The seed produces ~150 journal entries across three books (US_GAAP, US_TAX, IFRS
    > `<urlset>` and robots omits its `Sitemap:` line — `/how-it-works`
    > ends up public, indexable, and undiscoverable. Changing the value
    > later requires a **redeploy**, not just an env update.
+
+   > **Verify the encryption keys took effect after the first deploy.**
+   > `GET /api/health` reports whether each key is set and well-formed
+   > without revealing it. Both flags must read true in production
+   > before any customer data is entered — data written while a key was
+   > missing stays plaintext, and setting the key later does NOT
+   > retroactively encrypt it.
 
 4. Build settings (defaults are correct):
    - Build command: `prisma generate && next build`
