@@ -49,7 +49,11 @@ const MODE = z.enum(["IMMEDIATE", "DIGEST_DAILY"]);
 
 const CreateInput = z.object({
   name: z.string().min(1).max(120),
+  type: z.enum(["SLACK", "WEBHOOK_GENERIC"]).default("SLACK"),
   webhookUrl: z.string().url().max(500),
+  // WEBHOOK_GENERIC only. Long enough that an HMAC over it is worth
+  // something; a 12-character "secret" is decoration.
+  signingSecret: z.string().min(16).max(200).optional(),
   severityFilter: z.array(SEVERITY).max(3),
   mode: MODE.default("IMMEDIATE"),
   enabled: z.boolean().default(true),
@@ -114,9 +118,15 @@ export async function createChannel(
   const ch = await prisma.notificationChannel.create({
     data: {
       tenantId: ctx.tenantId,
-      type: "SLACK",
+      type: parsed.data.type,
       name: parsed.data.name.trim(),
       webhookUrl: encryptWebhookUrl(parsed.data.webhookUrl),
+      // Same AES-256-GCM path as the URL — the secret is a credential
+      // and never sits in the column in plaintext.
+      signingSecret:
+        parsed.data.type === "WEBHOOK_GENERIC" && parsed.data.signingSecret
+          ? encryptWebhookUrl(parsed.data.signingSecret)
+          : null,
       severityFilter: parsed.data.severityFilter,
       mode: parsed.data.mode,
       enabled: parsed.data.enabled,
@@ -133,6 +143,13 @@ export async function createChannel(
     tenantId: ctx.tenantId,
     metadata: {
       name: parsed.data.name.trim(),
+      type: parsed.data.type,
+      // Whether a generic endpoint is signed is an audit-relevant
+      // fact; the secret itself never appears.
+      signed:
+        parsed.data.type === "WEBHOOK_GENERIC"
+          ? Boolean(parsed.data.signingSecret)
+          : null,
       severityFilter: parsed.data.severityFilter,
       mode: parsed.data.mode,
       maskedUrl: maskWebhookUrl(parsed.data.webhookUrl),

@@ -2821,8 +2821,11 @@ model ReconciliationConfig {
 
 enum NotificationChannelType {
   SLACK
-  // Future: EMAIL, MICROSOFT_TEAMS, WEBHOOK_GENERIC. The schema is
-  // typed so multiple per tenant can fan out the same alert.
+  // A plain HTTPS endpoint that receives a stable JSON envelope,
+  // signed so the receiver can prove the request came from us.
+  WEBHOOK_GENERIC
+  // Future: EMAIL, MICROSOFT_TEAMS. The schema is typed so multiple
+  // per tenant can fan out the same alert.
 }
 
 // Dispatch cadence. The IMMEDIATE cron (every 15m business hours) and
@@ -2850,6 +2853,12 @@ model NotificationChannel {
   // on the read path — only the cron dispatcher decrypts at send time.
   webhookUrl String
 
+  // WEBHOOK_GENERIC only: the HMAC key the receiver verifies against.
+  // Encrypted at rest by the same AES-256-GCM path as webhookUrl and
+  // decrypted only at send time. Null means the receiver gets an
+  // unsigned request — allowed (some endpoints sit behind their own
+  // network controls) but the admin UI says what that costs.
+  signingSecret String?
   // Which severities push to this channel. JSON array of values from
   // `AlertSeverity` (high / medium / low). Empty → all severities.
   severityFilter String[]

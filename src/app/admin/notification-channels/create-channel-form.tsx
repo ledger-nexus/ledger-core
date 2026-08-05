@@ -5,7 +5,7 @@
 
 import { useState, useTransition } from "react";
 import { createChannel } from "@/app/actions/notification-channels";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 type Severity = "high" | "medium" | "low";
@@ -17,6 +17,8 @@ export default function CreateChannelForm() {
   const [severities, setSeverities] = useState<Severity[]>([]);
   const [mode, setMode] = useState<Mode>("IMMEDIATE");
   const [showUrl, setShowUrl] = useState(false);
+  const [type, setType] = useState<"SLACK" | "WEBHOOK_GENERIC">("SLACK");
+  const [signingSecret, setSigningSecret] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -38,10 +40,17 @@ export default function CreateChannelForm() {
       setError("Webhook URL is required");
       return;
     }
+    const secret = String(form.get("signingSecret") ?? "").trim();
+    if (type === "WEBHOOK_GENERIC" && secret && secret.length < 16) {
+      setError("Signing secret must be at least 16 characters");
+      return;
+    }
     startTransition(async () => {
       const r = await createChannel({
         name: trimmedName,
+        type,
         webhookUrl: url,
+        signingSecret: type === "WEBHOOK_GENERIC" && secret ? secret : undefined,
         severityFilter: severities,
         mode,
         enabled: true,
@@ -75,8 +84,24 @@ export default function CreateChannelForm() {
           />
         </div>
         <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-ink-600" htmlFor="channelType">
+            Destination
+          </label>
+          <Select
+            id="channelType"
+            value={type}
+            onChange={(e) =>
+              setType(e.target.value as "SLACK" | "WEBHOOK_GENERIC")
+            }
+            disabled={pending}
+          >
+            <option value="SLACK">Slack incoming webhook</option>
+            <option value="WEBHOOK_GENERIC">HTTPS endpoint (signed JSON)</option>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-ink-600">
-            Slack webhook URL
+            {type === "SLACK" ? "Slack webhook URL" : "Endpoint URL"}
             <span className="ml-1 text-ink-400 font-normal">(encrypted at rest)</span>
           </label>
           <div className="flex gap-2">
@@ -85,7 +110,11 @@ export default function CreateChannelForm() {
               type={showUrl ? "text" : "password"}
               value={webhookUrl}
               onChange={(e) => setWebhookUrl(e.target.value)}
-              placeholder="https://hooks.slack.com/services/T.../B.../..."
+              placeholder={
+                type === "SLACK"
+                  ? "https://hooks.slack.com/services/T.../B.../..."
+                  : "https://example.com/hooks/ledger-core"
+              }
               maxLength={500}
               disabled={pending}
               required
@@ -101,6 +130,35 @@ export default function CreateChannelForm() {
             </button>
           </div>
         </div>
+        {type === "WEBHOOK_GENERIC" && (
+          <div className="flex flex-col gap-1 md:col-span-2">
+            <label className="text-xs font-medium text-ink-600">
+              Signing secret
+              <span className="ml-1 font-normal text-ink-400">
+                (optional, encrypted at rest — 16+ chars)
+              </span>
+            </label>
+            <Input
+              name="signingSecret"
+              type="password"
+              value={signingSecret}
+              onChange={(e) => setSigningSecret(e.target.value)}
+              placeholder="Shared with the receiving endpoint"
+              maxLength={200}
+              disabled={pending}
+            />
+            <p className="text-xs text-ink-500">
+              We sign each delivery with{" "}
+              <code className="font-mono">
+                X-LedgerCore-Signature: sha256=HMAC(timestamp.body)
+              </code>{" "}
+              so your endpoint can prove the request came from us, and reject
+              replays using the timestamp. Leave blank only if the endpoint is
+              protected some other way — an unsigned webhook will accept
+              anything that can reach the URL.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
