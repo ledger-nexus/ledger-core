@@ -3,7 +3,7 @@
 // We use Decimal.js for all monetary math. NEVER use JavaScript numbers
 // for money — 0.1 + 0.2 !== 0.3 will eventually cost you a balance sheet.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
 export type NormalBalance = "DEBIT" | "CREDIT";

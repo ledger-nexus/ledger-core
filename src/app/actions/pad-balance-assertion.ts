@@ -26,7 +26,7 @@
 // same assertion fails with P2002. One assertion, at most one pad.
 
 import { revalidatePath } from "next/cache";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { Prisma } from "@prisma/client";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { getTrialBalance } from "@/lib/accounting/reports";

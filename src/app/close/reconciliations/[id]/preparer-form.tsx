@@ -14,7 +14,7 @@
 // authoritative answer. We just submit and show errors inline.
 
 import { useState, useTransition } from "react";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { markPrepared } from "@/app/actions/reconciliations";

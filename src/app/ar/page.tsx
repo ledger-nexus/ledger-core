@@ -1,6 +1,6 @@
 // Open AR list with per-item apply-payment inline forms.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { openArBalance } from "@/lib/accounting/sub-ledgers/ar";

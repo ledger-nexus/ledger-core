@@ -10,7 +10,7 @@
 import { notFound } from "next/navigation";
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import Link from "next/link";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { getViewerRole } from "@/lib/auth/authorize";

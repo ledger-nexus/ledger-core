@@ -14,7 +14,7 @@
 // Every download writes a DATA_EXPORT audit row.
 
 import { NextRequest, NextResponse } from "next/server";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { resolveCurrentScope } from "@/lib/scope";
 import { getCurrentUser } from "@/lib/auth/current-user";

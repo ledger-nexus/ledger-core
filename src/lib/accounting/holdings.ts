@@ -12,7 +12,7 @@
 // is on file — an unpriced holding is reported at cost rather than guessed at.
 
 import type { DbClient } from "../db";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { getCommodityPrice } from "./commodity-price";
 
 const DEFAULT_BOOK = "US_GAAP";

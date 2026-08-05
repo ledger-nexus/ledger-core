@@ -19,7 +19,7 @@
 // makes accounting sense (an expense goes up when you spend, income up when
 // you're paid).
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export interface CategorizationLine {
   accountCode: string;

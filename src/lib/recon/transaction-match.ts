@@ -41,7 +41,7 @@
 // never claims a pairing a human disagreed with, because it has no way
 // to record that they did.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import { lineMovementOnNormalSide } from "@/lib/banking/match";
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";

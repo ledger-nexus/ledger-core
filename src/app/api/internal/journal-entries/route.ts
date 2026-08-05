@@ -41,7 +41,7 @@
 //     UNAUTHORIZED, BAD_REQUEST, INTERNAL_ERROR.
 
 import { NextRequest, NextResponse } from "next/server";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";

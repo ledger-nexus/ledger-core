@@ -28,7 +28,7 @@
 
 import { FxRateType } from "@prisma/client";
 import type { DbClient } from "@/lib/db";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 
 export class FxRateNotFoundError extends Error {

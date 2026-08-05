@@ -22,7 +22,7 @@
 // absoluteThreshold gate only; if the $ delta breaches, they're
 // material (NEEDS_COMMENT); otherwise IMMATERIAL.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { FluxLineStatus, AccountType, PrismaClient } from "@prisma/client";
 import type { DbClient } from "@/lib/db";
 

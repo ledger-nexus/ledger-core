@@ -43,7 +43,7 @@
 // separate query plan and probably a covering index — and ships in a
 // later PR if customer demand surfaces it.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { DbClient } from "@/lib/db";
 import { ON_BOOK_ASSET_STATUSES } from "@/lib/accounting/sub-ledgers/fixed-asset-register";
 

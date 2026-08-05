@@ -37,7 +37,7 @@
 //     view follows back to the original
 
 import { revalidatePath } from "next/cache";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import {
   requireCurrentUser,

@@ -7,7 +7,7 @@
 // tuple already existing in lineage columns.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../../accounting/post-journal";
 import { openArItem, applyArPayment } from "../../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../../accounting/sub-ledgers/ap";

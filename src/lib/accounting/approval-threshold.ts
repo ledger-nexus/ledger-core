@@ -7,7 +7,7 @@
 // isolation. Server Actions resolve the inputs from prisma + currentUser
 // and call this — keeps the policy in one place.
 
-import Decimal from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export interface ResolveApprovalRouteInput {
   /** Tenant.requireJeApproval — false short-circuits to POSTED. */

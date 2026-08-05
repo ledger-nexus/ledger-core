@@ -7,7 +7,7 @@
 // header shapes real banks emit without configuration.
 
 import { createHash } from "node:crypto";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export interface ParsedBankRow {
   postedDate: Date;

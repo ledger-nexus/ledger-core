@@ -36,7 +36,7 @@
 // money values are normalized via decimal.js so downstream invariants
 // (sum-of-debits = sum-of-credits) are exact.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export interface ParsedLine {
   /** 1-indexed row number in the user's paste (excludes header if detected). */

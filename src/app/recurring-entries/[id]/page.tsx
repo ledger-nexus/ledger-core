@@ -12,7 +12,7 @@ import { canManageRecurringEntries } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { enumerateDueDates } from "@/lib/accounting/recurring";
 

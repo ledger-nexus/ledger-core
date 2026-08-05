@@ -13,7 +13,7 @@
 //   indented to depth so the file is readable as-is in Excel.
 
 import { NextRequest, NextResponse } from "next/server";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getBalanceSheet, type FinancialStatementRow } from "@/lib/accounting/reports";
 import {

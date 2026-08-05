@@ -62,7 +62,7 @@
 //     UNKNOWN_ENTITY, PERIOD_CLOSED, ACCOUNT_BOOK_SCOPE, INTERNAL_ERROR.
 
 import { NextRequest, NextResponse } from "next/server";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import {

@@ -10,7 +10,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { CrossBookApplicationError } from "../types";
 import { fireInsertRules, type FireRulesResult } from "../../rules/integration";
 import { toDecimal } from "../../utils/decimal";

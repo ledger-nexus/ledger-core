@@ -27,7 +27,7 @@
 // most common operator case.
 
 import type { AccountType } from "@prisma/client";
-import type { Decimal } from "decimal.js";
+import type { Decimal } from "@/lib/utils/decimal";
 
 /** Most common NS accttype per ledger-core enum value (fallback). */
 const ACCT_TYPE_BY_LEDGER_TYPE: Record<AccountType, string> = {

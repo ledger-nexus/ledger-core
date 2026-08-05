@@ -23,7 +23,7 @@
 // silently answers a different question than the reader expects.)
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { getTrialBalance } from "./reports";
 
 const DEFAULT_BOOK = "US_GAAP";

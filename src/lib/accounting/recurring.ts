@@ -41,7 +41,7 @@
 // whole-year offsets.
 
 import type { PrismaClient, Cadence } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "./post-journal";
 import {
   computeAllocationLines,

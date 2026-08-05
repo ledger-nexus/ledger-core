@@ -8,7 +8,7 @@
 // verified scope, not a raw cookie. Every query below filters by
 // `scope.tenantId` (+ `scope.entityId` where the model carries it).
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthorizedLedgerScope } from "@/lib/scope";
 import { getBalanceSheet, getIncomeStatement } from "@/lib/accounting/reports";

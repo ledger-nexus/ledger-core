@@ -13,7 +13,7 @@
 
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { CurrentScope } from "@/lib/scope";
 import { withTenantContext } from "@/lib/tenant-context";
 import { postJournalEntry } from "@/lib/accounting/post-journal";

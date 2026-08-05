@@ -8,7 +8,7 @@
 // Dedupes balance fetches: if two columns share the same (entity,
 // book, asOf or period) tuple, the underlying balance query runs once.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { getAccountBalances, filterBalances, type AccountBalances } from "./balances";

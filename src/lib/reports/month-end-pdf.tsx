@@ -22,7 +22,7 @@ import {
   View,
   StyleSheet,
 } from "@react-pdf/renderer";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 // ─── Types — mirror the report functions' return shapes ────────────────
 

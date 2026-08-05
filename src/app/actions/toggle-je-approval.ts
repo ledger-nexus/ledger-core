@@ -10,7 +10,7 @@
 // from MEMBERS. Null/zero threshold = original binary behavior.
 
 import { revalidatePath } from "next/cache";
-import Decimal from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import {
   requireCurrentUser,

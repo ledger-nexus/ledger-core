@@ -5,7 +5,7 @@
 // one-row-per-account view for callers that want raw account data.
 
 import { NextRequest, NextResponse } from "next/server";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getTrialBalance } from "@/lib/accounting/reports";
 import {

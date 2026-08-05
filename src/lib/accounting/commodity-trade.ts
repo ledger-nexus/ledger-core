@@ -24,7 +24,7 @@
 // hardening follow-up.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "./post-journal";
 import { bookReduction, type BookingMethod, type Consumption } from "./inventory";
 import { augmentLot, getOpenLots, consumeLots } from "./lots";

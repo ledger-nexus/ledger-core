@@ -12,7 +12,7 @@ import {
 import { requireCurrentScope, NoScopeError } from "@/lib/scope";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
-import Decimal from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { canApproveJournalEntries } from "@/lib/auth/policy";
 import { resolveApprovalRoute } from "@/lib/accounting/approval-threshold";
 

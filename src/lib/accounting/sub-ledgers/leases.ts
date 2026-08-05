@@ -28,7 +28,7 @@
 // IFRS ROU+liability (identical to GAAP in this simplified model), TAX cash.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../post-journal";
 
 function toDecimal(v: Decimal | string | number | null | undefined): Decimal {

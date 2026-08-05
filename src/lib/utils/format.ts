@@ -2,7 +2,7 @@
 // consistent across the UI: 2 decimals, comma thousands, parens for
 // negatives (accountant convention).
 
-import type { Decimal } from "decimal.js";
+import type { Decimal } from "@/lib/utils/decimal";
 
 export function formatMoney(value: Decimal | string | number | null | undefined): string {
   if (value === null || value === undefined) return "—";

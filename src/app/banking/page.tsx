@@ -10,7 +10,7 @@ import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { bestRuleFor, type RuleForMatching } from "@/lib/banking/rules";
 import { findMatchCandidates } from "@/lib/banking/match";
 import ImportForm from "./import-form";

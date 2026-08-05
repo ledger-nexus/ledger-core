@@ -16,7 +16,7 @@
 // a signed-in human invoked this action. Nothing auto-trades.
 
 import { revalidatePath } from "next/cache";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import {
   recordCommodityPurchase,
   recordCommoditySale,
