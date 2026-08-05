@@ -583,7 +583,7 @@ CREATE POLICY tenant_invite_tenant_isolation ON tenant_invite
 --     AND rowsecurity = true
 --   ORDER BY tablename;
 --
--- Expected: 54 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
+-- Expected: 55 rows, all with rowsecurity=t + forcerowsecurity=f (Phase 1
 -- defines but does not FORCE).
 --
 -- Policy listing:
@@ -591,6 +591,17 @@ CREATE POLICY tenant_invite_tenant_isolation ON tenant_invite
 --   WHERE schemaname = 'public'
 --   ORDER BY tablename, policyname;
 --
--- Expected: 54 rows, all named <table>_tenant_isolation.
+-- Expected: 55 rows, all named <table>_tenant_isolation.
+
+-- 55. reconciliation_manual_match (added with migration 0042)
+--     CI applies schema with `prisma db push`, which creates the TABLE
+--     but not this policy — so a new tenant-scoped table has to be
+--     listed here too, or it is the one gap when Phase 3 FORCEs.
+ALTER TABLE reconciliation_manual_match ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS reconciliation_manual_match_tenant_isolation ON reconciliation_manual_match;
+CREATE POLICY reconciliation_manual_match_tenant_isolation ON reconciliation_manual_match
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
 
 -- End of Phase 1 migration.

@@ -345,3 +345,57 @@ describe("getReconTransactionMatch (DB)", () => {
     expect(view.matched).toHaveLength(0);
   });
 });
+
+describe("manual matches", () => {
+  const decided = { decidedBy: "Carla Controller", decidedAt: new Date("2026-06-01"), note: null };
+
+  it("pairs lines the automatic pass never would, including unequal amounts", () => {
+    // A cheque that cleared as part of a larger deposit. Nothing about
+    // amount or date lets the matcher infer this; a person knows it.
+    const r = matchTransactions({
+      glItems: [item("g1", "2026-05-02", "-875")],
+      supportItems: [item("s1", "2026-05-27", "-910")],
+      manualPairs: [
+        { journalLineId: "g1", bankTransactionId: "s1", ...decided },
+      ],
+    });
+    expect(r.matched).toHaveLength(1);
+    expect(r.matched[0].manual?.decidedBy).toBe("Carla Controller");
+    expect(r.unmatchedGl).toHaveLength(0);
+    expect(r.unmatchedSupport).toHaveLength(0);
+    // Both sides leave the difference; what remains is genuinely zero.
+    expect(r.netUnmatched.toString()).toBe("0");
+  });
+
+  it("wins over the automatic pass — a human decision is never overridden", () => {
+    // g1 and s1 are an exact same-day pair the matcher would seize on.
+    // The operator has said g1 belongs with s2 instead; the automatic
+    // pass must not contradict that, and s1 must be left showing.
+    const r = matchTransactions({
+      glItems: [item("g1", "2026-05-10", "-500")],
+      supportItems: [item("s1", "2026-05-10", "-500"), item("s2", "2026-05-11", "-500")],
+      manualPairs: [
+        { journalLineId: "g1", bankTransactionId: "s2", ...decided },
+      ],
+    });
+    expect(r.matched).toHaveLength(1);
+    expect(r.matched[0].support.id).toBe("s2");
+    expect(r.unmatchedSupport.map((i) => i.id)).toEqual(["s1"]);
+  });
+
+  it("ignores a decision whose rows are out of the window, without forgetting it", () => {
+    // The row isn't deleted — it simply doesn't apply to this view. If
+    // the period is re-run and the line returns, the decision applies
+    // again, which is why the action doesn't clean these up.
+    const r = matchTransactions({
+      glItems: [item("g1", "2026-05-02", "-100")],
+      supportItems: [item("s1", "2026-05-02", "-100")],
+      manualPairs: [
+        { journalLineId: "gone", bankTransactionId: "also-gone", ...decided },
+      ],
+    });
+    // Falls through to the automatic pair.
+    expect(r.matched).toHaveLength(1);
+    expect(r.matched[0].manual).toBeUndefined();
+  });
+});

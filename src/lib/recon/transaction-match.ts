@@ -34,12 +34,13 @@
 // explain. When it equals the recon's own difference, the itemization
 // is complete: every dollar of disagreement has a name.
 //
-// v1 is AUTOMATIC matching only — the pairing is derived on read and
-// nothing is persisted. A manual "these two are the same transaction"
-// override needs a join table and an audit trail of who decided it;
-// that is the natural next slice, and until it exists this module
-// never claims a pairing a human disagreed with, because it has no way
-// to record that they did.
+// MANUAL pairs win. Auto-matching handles the exact-amount,
+// close-in-time cases; everything it cannot pair — a cheque split
+// across two deposits, a fee posted net, a transposition — needs a
+// person to say so. Those decisions live in `reconciliation_manual_match`
+// with the deciding user against them, are applied here BEFORE the
+// automatic pass, and remove both sides from consideration so the
+// automatic pass can never contradict a human.
 
 import { Decimal } from "@/lib/utils/decimal";
 
@@ -66,6 +67,17 @@ export interface MatchedPair {
   /** Whole days between the two dates — surfaced so a 9-day-old match
    *  can be eyeballed rather than trusted blindly. */
   dayGap: number;
+  /** A person decided this pairing; the card shows who and why. */
+  manual?: { decidedBy: string; decidedAt: Date; note: string | null };
+}
+
+/** A persisted decision, keyed by the two ids it pairs. */
+export interface ManualPair {
+  journalLineId: string;
+  bankTransactionId: string;
+  decidedBy: string;
+  decidedAt: Date;
+  note: string | null;
 }
 
 export interface TransactionMatchResult {
@@ -97,6 +109,8 @@ export function matchTransactions(input: {
   glItems: MatchableItem[];
   supportItems: MatchableItem[];
   windowDays?: number;
+  /** Applied first; both sides then sit out the automatic pass. */
+  manualPairs?: ManualPair[];
 }): TransactionMatchResult {
   const window = input.windowDays ?? RECON_MATCH_WINDOW_DAYS;
   const byDateThenId = (a: MatchableItem, b: MatchableItem) =>
@@ -108,7 +122,31 @@ export function matchTransactions(input: {
   const claimed = new Set<string>();
   const matched: MatchedPair[] = [];
 
+  // Human decisions first. Amounts are NOT required to agree — that is
+  // the entire point of a manual match, and it is why the difference
+  // the reconciliation reports still comes out right: an unequal pair
+  // simply nets whatever it nets, and netUnmatched excludes both sides.
+  const glById = new Map(gl.map((g) => [g.id, g]));
+  const supportById = new Map(support.map((s) => [s.id, s]));
+  const manuallyPairedSupport = new Set<string>();
+  for (const m of input.manualPairs ?? []) {
+    const g = glById.get(m.journalLineId);
+    const sup = supportById.get(m.bankTransactionId);
+    // A decision whose rows have left the window is not applied — but
+    // it is not deleted either; it applies again if they return.
+    if (!g || !sup) continue;
+    claimed.add(g.id);
+    manuallyPairedSupport.add(sup.id);
+    matched.push({
+      gl: g,
+      support: sup,
+      dayGap: dayGap(g.date, sup.date),
+      manual: { decidedBy: m.decidedBy, decidedAt: m.decidedAt, note: m.note },
+    });
+  }
+
   for (const s of support) {
+    if (manuallyPairedSupport.has(s.id)) continue;
     let best: MatchableItem | undefined;
     let bestGap = Number.POSITIVE_INFINITY;
     for (const g of gl) {
@@ -166,6 +204,8 @@ export async function getReconTransactionMatch(
     accountId: string;
     periodStart: Date;
     periodEnd: Date;
+    /** Supplied to load this recon's manual decisions. */
+    reconciliationId?: string;
   }
 ): Promise<ReconMatchView> {
   const account = await prisma.account.findFirst({
@@ -245,9 +285,33 @@ export async function getReconTransactionMatch(
     reference: s.externalRef,
   }));
 
+  const manualRows = input.reconciliationId
+    ? await prisma.reconciliationManualMatch.findMany({
+        where: {
+          tenantId: input.tenantId,
+          reconciliationId: input.reconciliationId,
+        },
+        select: {
+          journalLineId: true,
+          bankTransactionId: true,
+          decidedAt: true,
+          note: true,
+          decidedBy: { select: { displayName: true, email: true } },
+        },
+      })
+    : [];
+
+  const manualPairs: ManualPair[] = manualRows.map((m) => ({
+    journalLineId: m.journalLineId,
+    bankTransactionId: m.bankTransactionId,
+    decidedBy: m.decidedBy.displayName ?? m.decidedBy.email,
+    decidedAt: m.decidedAt,
+    note: m.note,
+  }));
+
   return {
     available: true,
     supportLabel: `Bank statement lines (${statement.length})`,
-    ...matchTransactions({ glItems, supportItems }),
+    ...matchTransactions({ glItems, supportItems, manualPairs }),
   };
 }

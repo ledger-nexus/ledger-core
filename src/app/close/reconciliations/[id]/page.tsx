@@ -48,6 +48,10 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant, isTenantAdmin } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getReconTransactionMatch } from "@/lib/recon/transaction-match";
+import {
+  ManualMatchForm,
+  UnlinkMatchButton,
+} from "./manual-match-controls";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import type { ReconStatus } from "@prisma/client";
@@ -189,6 +193,7 @@ export default async function ReconciliationDetailPage({
     accountId: recon.accountId,
     periodStart: recon.period.startsOn,
     periodEnd: recon.period.endsOn,
+    reconciliationId: recon.id,
   });
 
   return (
@@ -306,6 +311,39 @@ export default async function ReconciliationDetailPage({
             </div>
           </CardHeader>
           <CardContent>
+            {match.matched.some((m) => m.manual) && (
+              <div className="mb-4">
+                <div className="text-xs uppercase tracking-wide text-ink-500 mb-1">
+                  Matched by hand
+                </div>
+                <ul className="flex flex-col gap-1">
+                  {match.matched
+                    .filter((m) => m.manual)
+                    .map((m) => (
+                      <li
+                        key={m.gl.id}
+                        className="text-sm flex items-center justify-between gap-4"
+                      >
+                        <span>
+                          {m.gl.description}
+                          <span className="text-ink-400">
+                            {" "}
+                            ↔ {m.support.description} · {m.manual!.decidedBy}
+                            {m.manual!.note ? ` — ${m.manual!.note}` : ""}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-mono">{formatMoney(m.gl.amount)}</span>
+                          <UnlinkMatchButton
+                            reconciliationId={recon.id}
+                            journalLineId={m.gl.id}
+                          />
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
             {match.unmatchedGl.length === 0 && match.unmatchedSupport.length === 0 ? (
               <p className="text-sm text-positive">
                 Every transaction matched — nothing outstanding.
@@ -371,6 +409,17 @@ export default async function ReconciliationDetailPage({
                 )}
               </div>
             )}
+            <ManualMatchForm
+              reconciliationId={recon.id}
+              glOptions={match.unmatchedGl.map((i) => ({
+                id: i.id,
+                label: `${formatDate(i.date)} · ${i.description} · ${formatMoney(i.amount)}`,
+              }))}
+              supportOptions={match.unmatchedSupport.map((i) => ({
+                id: i.id,
+                label: `${formatDate(i.date)} · ${i.description} · ${formatMoney(i.amount)}`,
+              }))}
+            />
           </CardContent>
         </Card>
       )}
