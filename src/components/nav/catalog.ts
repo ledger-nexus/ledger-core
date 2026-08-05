@@ -60,6 +60,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/ar", label: "Open AR", hint: "receivables" },
       { href: "/ap", label: "Open AP", hint: "payables" },
       { href: "/holdings", label: "Holdings", hint: "investments" },
+      { href: "/fixed-assets", label: "Fixed assets", hint: "register" },
     ],
   },
   {

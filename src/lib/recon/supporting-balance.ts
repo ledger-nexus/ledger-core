@@ -45,6 +45,7 @@
 
 import { Decimal } from "decimal.js";
 import type { DbClient } from "@/lib/db";
+import { ON_BOOK_ASSET_STATUSES } from "@/lib/accounting/sub-ledgers/fixed-asset-register";
 
 
 export type SupportingSource =
@@ -155,9 +156,10 @@ export async function resolveSupportingBalance(
         tenantId: opts.tenantId,
         entityId: opts.entityId,
         assetAccountCode: account.code,
-        // Exclude disposed — gross cost rolls off the BS at disposal.
-        // HELD_FOR_SALE remains on the BS until sold so we include it.
-        status: { in: ["IN_SERVICE", "IDLE", "HELD_FOR_SALE"] },
+        // Shared with the register page so the two can't drift: a
+        // reconciliation that disagreed with the register pulling from
+        // the same rows would be worse than no register at all.
+        status: { in: [...ON_BOOK_ASSET_STATUSES] },
       },
       select: {
         acquisitionCost: true,
