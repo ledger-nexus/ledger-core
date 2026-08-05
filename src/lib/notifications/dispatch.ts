@@ -1,3 +1,4 @@
+import type { NotificationChannelType } from "@prisma/client";
 // Close-alerts dispatcher.
 //
 // The body of `POST /api/cron/close-alerts-dispatch`, extracted so
@@ -43,6 +44,10 @@
 
 import { decryptWebhookUrl } from "@/lib/notifications/crypto";
 import { formatSlackBlocks, sendSlackMessage } from "@/lib/notifications/slack";
+import {
+  formatGenericPayload,
+  sendGenericWebhook,
+} from "@/lib/notifications/generic-webhook";
 import type { CloseAlert } from "@/lib/close/alerts";
 import {
   collectOpenPeriodAlerts,
@@ -97,17 +102,21 @@ export async function dispatchCloseAlerts(
   const maxPeriodsPerTenant =
     opts.maxPeriodsPerTenant ?? DEFAULT_MAX_PERIODS_PER_TENANT;
 
-  // Pull all enabled SLACK channels in IMMEDIATE mode; group by
-  // tenant. DIGEST_DAILY channels are handled by a separate cron
-  // route (close-alerts-digest) so the two cadences don't fight
-  // over the same dedupe rows mid-tick.
+  // Every enabled IMMEDIATE channel, whatever its type — the send
+  // branches per channel below. This used to filter `type: "SLACK"`,
+  // which is the kind of clause that silently strips a new channel
+  // type of any effect. DIGEST_DAILY channels are handled by a
+  // separate cron route (close-alerts-digest) so the two cadences
+  // don't fight over the same dedupe rows mid-tick.
   const channels = await prisma.notificationChannel.findMany({
-    where: { type: "SLACK", enabled: true, mode: "IMMEDIATE" },
+    where: { enabled: true, mode: "IMMEDIATE" },
     select: {
       id: true,
       tenantId: true,
       name: true,
+      type: true,
       webhookUrl: true,
+      signingSecret: true,
       severityFilter: true,
     },
   });
@@ -156,7 +165,9 @@ interface TenantDispatchArgs {
     id: string;
     tenantId: string;
     name: string;
+    type: NotificationChannelType;
     webhookUrl: string;
+    signingSecret: string | null;
     severityFilter: string[];
   }[];
   appBaseUrl: string;
@@ -200,7 +211,9 @@ async function dispatchForTenant(
       const sendOutcome = await sendOne(prisma, {
         tenantId: args.tenantId,
         channelId: channel.id,
+        channelType: channel.type,
         webhookUrl: channel.webhookUrl,
+        signingSecret: channel.signingSecret,
         alert,
         scope,
         appBaseUrl: args.appBaseUrl,
@@ -223,7 +236,9 @@ type SendOutcome = "SENT" | "DEDUPED" | "ERROR";
 interface SendOneArgs {
   tenantId: string;
   channelId: string;
+  channelType: NotificationChannelType;
   webhookUrl: string;
+  signingSecret: string | null;
   alert: CloseAlert;
   scope: ScopeKey;
   appBaseUrl: string;
@@ -267,13 +282,32 @@ async function sendOne(
     return "ERROR";
   }
 
-  const payload = formatSlackBlocks(args.alert, {
-    appBaseUrl: args.appBaseUrl,
-    entity: args.scope.entity,
-    book: args.scope.book,
-    period: args.scope.period,
-  });
-  const result = await sendSlackMessage(plaintextUrl, payload);
+  // Slack gets Block Kit; a generic receiver gets our own envelope,
+  // signed so it can prove the request came from us.
+  let result: { ok: boolean; status: number | null; error?: string };
+  if (args.channelType === "WEBHOOK_GENERIC") {
+    const payload = formatGenericPayload([args.alert], {
+      event: "close.alert",
+      sentAt: new Date(),
+      appBaseUrl: args.appBaseUrl,
+      entity: args.scope.entity,
+      book: args.scope.book,
+      period: args.scope.period,
+    });
+    result = await sendGenericWebhook(plaintextUrl, payload, {
+      signingSecret: args.signingSecret
+        ? decryptWebhookUrl(args.signingSecret)
+        : null,
+    });
+  } else {
+    const payload = formatSlackBlocks(args.alert, {
+      appBaseUrl: args.appBaseUrl,
+      entity: args.scope.entity,
+      book: args.scope.book,
+      period: args.scope.period,
+    });
+    result = await sendSlackMessage(plaintextUrl, payload);
+  }
 
   await prisma.notificationDispatch.create({
     data: {
@@ -284,7 +318,9 @@ async function sendOne(
       severity: args.alert.severity,
       sendStatus: result.ok ? result.status : (result.status ?? null),
       // Never persist webhook URLs, even on failure — shared scrub.
-      sendError: result.ok ? null : scrubSlackUrls(result.error, plaintextUrl),
+      sendError: result.ok
+        ? null
+        : scrubSlackUrls(result.error ?? "send failed", plaintextUrl),
     },
   });
 
