@@ -24,6 +24,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { Decimal } from "decimal.js";
+import { z } from "zod";
 import type { Cadence } from "@prisma/client";
 import { withTenantContext } from "@/lib/tenant-context";
 import { NotAuthenticatedError } from "@/lib/auth/current-user";
@@ -83,6 +84,164 @@ export interface CreateRecurringEntryState {
 
 const CODE_RE = /^[A-Z0-9](?:[A-Z0-9]|[_-](?![_-]))*[A-Z0-9]$/;
 
+/**
+ * Runtime shape of the create payload.
+ *
+ * A Server Action's TypeScript signature is erased at the boundary — the
+ * client sends whatever it likes. `cadence` in particular was typed as
+ * the Prisma `Cadence` enum and never checked, so an unrecognized value
+ * travelled all the way to `prisma.recurringEntry.create` and came back
+ * as a raw Prisma error in the user-facing `message`. Enum membership is
+ * exactly what a schema is for (CC6.8).
+ *
+ * Field shape and enums live here; the accounting rules live in the
+ * superRefine below, where their wording is worth preserving.
+ */
+const AmountLike = z.union([z.string(), z.number()]).optional();
+
+const LineSchema = z.object({
+  accountCode: z.string(),
+  debit: AmountLike,
+  credit: AmountLike,
+  allocationPercent: AmountLike,
+  description: z.string().max(200).optional(),
+  partyCode: z.string().max(40).optional(),
+  itemCode: z.string().max(40).optional(),
+});
+
+/** Decimal, or null when the value isn't a number at all. */
+function toDecimalOrNull(v: string | number | undefined): Decimal | null {
+  try {
+    const d = new Decimal(v ?? 0);
+    return d.isFinite() ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+const CreateRecurringEntrySchema = z
+  .object({
+    code: z
+      .string()
+      .transform((v) => v.trim().toUpperCase())
+      .refine((c) => c.length >= 2 && c.length <= 40 && CODE_RE.test(c), {
+        message:
+          "Code must be 2–40 chars: uppercase letters, digits, single _ or -. No double separators.",
+      }),
+    memo: z
+      .string()
+      .transform((v) => v.trim())
+      .refine((m) => m.length >= 1 && m.length <= 200, {
+        message: "Memo must be 1–200 chars.",
+      }),
+    entityCode: z.string().min(1).max(30),
+    bookCode: z.string().min(1).max(30),
+    // The FK enforces existence; this catches shape before it gets there.
+    currencyCode: z.string().regex(/^[A-Z]{3}$/, "Currency must be a 3-letter code.").optional(),
+    cadence: z.enum(["MONTHLY", "QUARTERLY", "ANNUALLY"], {
+      errorMap: () => ({ message: "Cadence must be MONTHLY, QUARTERLY, or ANNUALLY." }),
+    }),
+    kind: z.enum(["STANDARD", "ALLOCATION"]).optional(),
+    allocationSourceAccountCode: z.string().max(40).optional(),
+    startDate: z
+      .string()
+      .refine((v) => !isNaN(new Date(v).getTime()), {
+        message: "startDate must be a valid date (YYYY-MM-DD).",
+      }),
+    endDate: z
+      .string()
+      .refine((v) => v === "" || !isNaN(new Date(v).getTime()), {
+        message: "endDate must be a valid date (YYYY-MM-DD).",
+      })
+      .optional(),
+    lines: z.array(LineSchema),
+  })
+  .superRefine((v, ctx) => {
+    const fail = (message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    const kind = v.kind ?? "STANDARD";
+
+    if (kind === "ALLOCATION") {
+      // Allocation lines are TARGETS (percent, no amounts); the clearing
+      // line against the source is generated per run.
+      const source = v.allocationSourceAccountCode?.trim();
+      if (!source) return fail("Allocation templates need a source account.");
+      if (v.lines.length < 1) {
+        return fail("Allocation template needs at least 1 target line.");
+      }
+      let percentSum = new Decimal(0);
+      for (const [i, l] of v.lines.entries()) {
+        if (!l.accountCode) return fail(`Line ${i + 1}: accountCode required.`);
+        if (l.accountCode === source) {
+          return fail(`Line ${i + 1}: a target cannot be the source account.`);
+        }
+        const pct = toDecimalOrNull(l.allocationPercent);
+        if (pct === null) return fail(`Line ${i + 1}: invalid percent.`);
+        if (pct.lessThanOrEqualTo(0) || pct.greaterThan(100)) {
+          return fail(`Line ${i + 1}: percent must be in (0, 100].`);
+        }
+        const d = toDecimalOrNull(l.debit);
+        const c = toDecimalOrNull(l.credit);
+        if (d === null || c === null) return fail(`Line ${i + 1}: invalid amount.`);
+        if (d.greaterThan(0) || c.greaterThan(0)) {
+          return fail(`Line ${i + 1}: allocation lines carry percents, not amounts.`);
+        }
+        percentSum = percentSum.plus(pct);
+      }
+      if (!percentSum.equals(100)) {
+        return fail(
+          `Allocation percents must sum to exactly 100 (got ${percentSum.toString()}).`
+        );
+      }
+      // The window runs [first of month, run date], so anything but a
+      // month-end MONTHLY anchor leaves part of every month unallocated
+      // with nothing to show for it.
+      if (v.cadence !== "MONTHLY") {
+        return fail(
+          "Allocation templates run monthly — a quarterly or annual cadence would skip the months in between."
+        );
+      }
+      if (!isMonthEnd(new Date(v.startDate))) {
+        return fail(
+          "Allocation templates must start on a month-end date — the schedule allocates a full month at a time."
+        );
+      }
+    } else {
+      if (v.lines.length < 2) return fail("Template needs at least 2 lines.");
+      let debitTotal = new Decimal(0);
+      let creditTotal = new Decimal(0);
+      for (const [i, l] of v.lines.entries()) {
+        const debit = toDecimalOrNull(l.debit);
+        const credit = toDecimalOrNull(l.credit);
+        if (debit === null || credit === null) {
+          return fail(`Line ${i + 1}: invalid amount.`);
+        }
+        if (debit.isNegative() || credit.isNegative()) {
+          return fail(`Line ${i + 1}: amounts must be non-negative.`);
+        }
+        if (debit.greaterThan(0) && credit.greaterThan(0)) {
+          return fail(`Line ${i + 1}: cannot have both debit and credit non-zero.`);
+        }
+        if (debit.isZero() && credit.isZero()) {
+          return fail(`Line ${i + 1}: must have a debit or credit > 0.`);
+        }
+        if (!l.accountCode) return fail(`Line ${i + 1}: accountCode required.`);
+        debitTotal = debitTotal.plus(debit);
+        creditTotal = creditTotal.plus(credit);
+      }
+      if (!debitTotal.equals(creditTotal)) {
+        return fail(
+          `Template unbalanced: debits ${debitTotal.toFixed(2)} ≠ credits ${creditTotal.toFixed(2)}.`
+        );
+      }
+    }
+
+    if (v.endDate && new Date(v.endDate) < new Date(v.startDate)) {
+      return fail("endDate must be on or after startDate.");
+    }
+  });
+
+
 export async function createRecurringEntryAction(
   input: CreateRecurringEntryInput
 ): Promise<CreateRecurringEntryState> {
@@ -92,142 +251,17 @@ export async function createRecurringEntryAction(
       canManageRecurringEntries
     );
 
-    // ── Validate code ────────────────────────────────────────────────────
-    const code = input.code?.trim().toUpperCase() ?? "";
-    if (code.length < 2 || code.length > 40 || !CODE_RE.test(code)) {
-      return {
-        ok: false,
-        message:
-          "Code must be 2–40 chars: uppercase letters, digits, single _ or -. No double separators.",
-      };
+    const parsed = CreateRecurringEntrySchema.safeParse(input);
+    if (!parsed.success) {
+      return { ok: false, message: parsed.error.errors[0]?.message ?? "Invalid input." };
     }
-    const memo = input.memo?.trim() ?? "";
-    if (memo.length < 1 || memo.length > 200) {
-      return { ok: false, message: "Memo must be 1–200 chars." };
-    }
-    const kind = input.kind ?? "STANDARD";
-    if (kind === "ALLOCATION") {
-      // Allocation templates: lines are TARGETS (percent, no amounts);
-      // the clearing line against the source is generated per run.
-      const source = input.allocationSourceAccountCode?.trim();
-      if (!source) {
-        return { ok: false, message: "Allocation templates need a source account." };
-      }
-      if (!input.lines || input.lines.length < 1) {
-        return { ok: false, message: "Allocation template needs at least 1 target line." };
-      }
-      let percentSum = new Decimal(0);
-      for (const [i, l] of input.lines.entries()) {
-        if (!l.accountCode) {
-          return { ok: false, message: `Line ${i + 1}: accountCode required.` };
-        }
-        if (l.accountCode === source) {
-          return { ok: false, message: `Line ${i + 1}: a target cannot be the source account.` };
-        }
-        let pct: Decimal;
-        try {
-          pct = new Decimal(l.allocationPercent ?? 0);
-        } catch {
-          return { ok: false, message: `Line ${i + 1}: invalid percent.` };
-        }
-        if (!pct.isFinite() || pct.lessThanOrEqualTo(0) || pct.greaterThan(100)) {
-          return { ok: false, message: `Line ${i + 1}: percent must be in (0, 100].` };
-        }
-        if (new Decimal(l.debit ?? 0).greaterThan(0) || new Decimal(l.credit ?? 0).greaterThan(0)) {
-          return { ok: false, message: `Line ${i + 1}: allocation lines carry percents, not amounts.` };
-        }
-        percentSum = percentSum.plus(pct);
-      }
-      if (!percentSum.equals(100)) {
-        return {
-          ok: false,
-          message: `Allocation percents must sum to exactly 100 (got ${percentSum.toString()}).`,
-        };
-      }
-    } else if (!input.lines || input.lines.length < 2) {
-      return { ok: false, message: "Template needs at least 2 lines." };
-    }
-
-    // ── Resolve entity + book + currency in tenant scope ─────────────────
-    // RLS Phase 2b shape T2: full resolver chain + create runs inside
-    // withTenantContext using the action's requireCurrentTenant() result.
-    // (Unlike shape E in period-close, here the tenant comes from the
-    // auth layer, not from the entity lookup — so the wrap can include
-    // the entity lookup too, and the tenant-scoped predicate is now
-    // defense in depth alongside the GUC.)
-    const currencyCode = input.currencyCode ?? "USD";
-
-    // ── Validate lines: balanced + non-negative + non-empty ─────────────
-    // (STANDARD only — allocation lines were validated above and carry
-    // no amounts.)
-    if (kind === "STANDARD") {
-    let debitTotal = new Decimal(0);
-    let creditTotal = new Decimal(0);
-    for (const [i, l] of input.lines.entries()) {
-      const debit = new Decimal(l.debit ?? 0);
-      const credit = new Decimal(l.credit ?? 0);
-      if (debit.isNegative() || credit.isNegative()) {
-        return { ok: false, message: `Line ${i + 1}: amounts must be non-negative.` };
-      }
-      if (debit.greaterThan(0) && credit.greaterThan(0)) {
-        return {
-          ok: false,
-          message: `Line ${i + 1}: cannot have both debit and credit non-zero.`,
-        };
-      }
-      if (debit.isZero() && credit.isZero()) {
-        return {
-          ok: false,
-          message: `Line ${i + 1}: must have a debit or credit > 0.`,
-        };
-      }
-      if (!l.accountCode) {
-        return { ok: false, message: `Line ${i + 1}: accountCode required.` };
-      }
-      debitTotal = debitTotal.plus(debit);
-      creditTotal = creditTotal.plus(credit);
-    }
-    if (!debitTotal.equals(creditTotal)) {
-      return {
-        ok: false,
-        message: `Template unbalanced: debits ${debitTotal.toFixed(2)} ≠ credits ${creditTotal.toFixed(2)}.`,
-      };
-    }
-    }
-
-    // ── Validate dates ───────────────────────────────────────────────────
-    const startDate = new Date(input.startDate);
-    if (isNaN(startDate.getTime())) {
-      return { ok: false, message: "startDate must be a valid date (YYYY-MM-DD)." };
-    }
-    const endDate = input.endDate ? new Date(input.endDate) : null;
-    if (endDate && isNaN(endDate.getTime())) {
-      return { ok: false, message: "endDate must be a valid date (YYYY-MM-DD)." };
-    }
-    if (endDate && endDate < startDate) {
-      return { ok: false, message: "endDate must be on or after startDate." };
-    }
-    // Allocation windows run [first of month, run date], so anything but
-    // a month-end MONTHLY anchor leaves part of every month unallocated
-    // with nothing to show for it. Refuse at creation — the runner
-    // refuses too, but a user should never get a template that can only
-    // fail. (v1 bound; a period-derived window would lift it.)
-    if (kind === "ALLOCATION") {
-      if (input.cadence !== "MONTHLY") {
-        return {
-          ok: false,
-          message:
-            "Allocation templates run monthly — a quarterly or annual cadence would skip the months in between.",
-        };
-      }
-      if (!isMonthEnd(startDate)) {
-        return {
-          ok: false,
-          message:
-            "Allocation templates must start on a month-end date — the schedule allocates a full month at a time.",
-        };
-      }
-    }
+    const data = parsed.data;
+    const code = data.code;
+    const memo = data.memo;
+    const kind = data.kind ?? "STANDARD";
+    const currencyCode = data.currencyCode ?? "USD";
+    const startDate = new Date(data.startDate);
+    const endDate = data.endDate ? new Date(data.endDate) : null;
 
     // ── Create ───────────────────────────────────────────────────────────
     type CreateOutcome =
@@ -237,13 +271,13 @@ export async function createRecurringEntryAction(
 
     const outcome = await withTenantContext(prisma, tenant.id, async (tx): Promise<CreateOutcome> => {
       const entity = await tx.legalEntity.findFirst({
-        where: { tenantId: tenant.id, code: input.entityCode },
+        where: { tenantId: tenant.id, code: data.entityCode },
         select: { id: true },
       });
       if (!entity) return { kind: "unknownEntity" };
 
       const book = await tx.book.findUnique({
-        where: { code: input.bookCode },
+        where: { code: data.bookCode },
         select: { id: true },
       });
       if (!book) return { kind: "unknownBook" };
@@ -256,15 +290,15 @@ export async function createRecurringEntryAction(
           code,
           memo,
           currencyId: currencyCode,
-          cadence: input.cadence,
+          cadence: data.cadence,
           startDate,
           endDate,
           createdBy: admin.email,
           kind,
           allocationSourceAccountCode:
-            kind === "ALLOCATION" ? input.allocationSourceAccountCode!.trim() : null,
+            kind === "ALLOCATION" ? data.allocationSourceAccountCode!.trim() : null,
           lines: {
-            create: input.lines.map((l, idx) => ({
+            create: data.lines.map((l, idx) => ({
               lineNo: idx + 1,
               accountCode: l.accountCode,
               debit: new Decimal(l.debit ?? 0).toFixed(4),
@@ -283,10 +317,10 @@ export async function createRecurringEntryAction(
     });
 
     if (outcome.kind === "unknownEntity") {
-      return { ok: false, message: `Unknown entity: ${input.entityCode}` };
+      return { ok: false, message: `Unknown entity: ${data.entityCode}` };
     }
     if (outcome.kind === "unknownBook") {
-      return { ok: false, message: `Unknown book: ${input.bookCode}` };
+      return { ok: false, message: `Unknown book: ${data.bookCode}` };
     }
     const created = { id: outcome.id };
 
@@ -298,10 +332,10 @@ export async function createRecurringEntryAction(
       tenantId: tenant.id,
       metadata: {
         code,
-        cadence: input.cadence,
-        entityCode: input.entityCode,
-        bookCode: input.bookCode,
-        lineCount: input.lines.length,
+        cadence: data.cadence,
+        entityCode: data.entityCode,
+        bookCode: data.bookCode,
+        lineCount: data.lines.length,
       },
     });
 
@@ -311,6 +345,26 @@ export async function createRecurringEntryAction(
     return handleAuthError(e, "create-recurring-entry");
   }
 }
+
+// The other three actions take ids and dates straight from the client
+// too. A malformed uuid or a non-boolean reaching Prisma surfaces as a
+// raw driver error in the user-facing message — same gap as `cadence`,
+// smaller blast radius.
+const RunRecurringSchema = z.object({
+  throughDate: z.string().refine((v) => !isNaN(new Date(v).getTime()), {
+    message: "throughDate must be a valid date (YYYY-MM-DD).",
+  }),
+  templateId: z.string().uuid("templateId must be a valid id.").optional(),
+});
+
+const SetActiveSchema = z.object({
+  id: z.string().uuid("Template id must be a valid id."),
+  isActive: z.boolean(),
+});
+
+const DeleteRecurringSchema = z.object({
+  id: z.string().uuid("Template id must be a valid id."),
+});
 
 // ─── Run ───────────────────────────────────────────────────────────────────
 
@@ -337,15 +391,16 @@ export async function runRecurringEntriesAction(
       canManageRecurringEntries
     );
 
-    const throughDate = new Date(input.throughDate);
-    if (isNaN(throughDate.getTime())) {
-      return { ok: false, message: "throughDate must be a valid date (YYYY-MM-DD)." };
+    const parsed = RunRecurringSchema.safeParse(input);
+    if (!parsed.success) {
+      return { ok: false, message: parsed.error.errors[0]?.message ?? "Invalid input." };
     }
+    const throughDate = new Date(parsed.data.throughDate);
 
     const result = await runRecurringEntries(prisma, {
       throughDate,
       tenantId: tenant.id,
-      templateId: input.templateId,
+      templateId: parsed.data.templateId,
       triggeredBy: admin.email,
     });
 
@@ -361,10 +416,10 @@ export async function runRecurringEntriesAction(
       actor: admin,
       action: "run-recurring-entries",
       resource: "RecurringEntry",
-      resourceId: input.templateId ?? "ALL",
+      resourceId: parsed.data.templateId ?? "ALL",
       tenantId: tenant.id,
       metadata: {
-        throughDate: input.throughDate,
+        throughDate: parsed.data.throughDate,
         entriesPosted: result.entriesPosted,
         templatesIdle: result.templatesIdle,
         errorCount: errors.length,
@@ -410,10 +465,14 @@ export async function setRecurringActiveAction(
     // RLS Phase 2b shape W2 (no helper involved): wrap the single
     // updateMany in withTenantContext. Tenant-scoped predicate retained
     // as defense in depth.
+    const parsed = SetActiveSchema.safeParse(input);
+    if (!parsed.success) {
+      return { ok: false, message: parsed.error.errors[0]?.message ?? "Invalid input." };
+    }
     const updated = await withTenantContext(prisma, tenant.id, async (tx) =>
       tx.recurringEntry.updateMany({
-        where: { id: input.id, tenantId: tenant.id },
-        data: { isActive: input.isActive },
+        where: { id: parsed.data.id, tenantId: tenant.id },
+        data: { isActive: parsed.data.isActive },
       })
     );
     if (updated.count === 0) {
@@ -421,7 +480,7 @@ export async function setRecurringActiveAction(
     }
     await auditPrivilegedAction({
       actor: admin,
-      action: input.isActive ? "activate-recurring-entry" : "pause-recurring-entry",
+      action: parsed.data.isActive ? "activate-recurring-entry" : "pause-recurring-entry",
       resource: "RecurringEntry",
       resourceId: input.id,
       tenantId: tenant.id,
@@ -460,9 +519,13 @@ export async function deleteRecurringEntryAction(
     // Cascade deletes lines (FK ON DELETE CASCADE). JEs already posted
     // stay in place — they carry their own lineage triple recording
     // which template produced them.
+    const parsed = DeleteRecurringSchema.safeParse(input);
+    if (!parsed.success) {
+      return { ok: false, message: parsed.error.errors[0]?.message ?? "Invalid input." };
+    }
     const target = await withTenantContext(prisma, tenant.id, async (tx) => {
       const t = await tx.recurringEntry.findFirst({
-        where: { id: input.id, tenantId: tenant.id },
+        where: { id: parsed.data.id, tenantId: tenant.id },
         select: { id: true, code: true },
       });
       if (!t) return null;
