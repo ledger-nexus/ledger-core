@@ -10,7 +10,7 @@
 // is to reflect the ledger as it stands, and the checker shares one trial
 // balance per distinct date, so N assertions on a date cost one scan.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { checkBalanceAssertions } from "@/lib/accounting/balance-assertions";

@@ -20,7 +20,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import { prisma } from "@/lib/db";
 import { NotAuthenticatedError } from "@/lib/auth/current-user";

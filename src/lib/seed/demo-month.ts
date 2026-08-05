@@ -40,7 +40,7 @@
 // Idempotent: wipes DEMO_CO's per-entity rows at the top and re-creates.
 
 import { PrismaClient, Prisma } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../accounting/post-journal";
 import { getDefaultTenantId } from "./default-tenant";
 import { openArItem, applyArPayment } from "../accounting/sub-ledgers/ar";

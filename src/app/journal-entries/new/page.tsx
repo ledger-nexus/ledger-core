@@ -9,7 +9,7 @@
 // reversals.
 
 import { notFound } from "next/navigation";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { EmptyState } from "@/components/ui/empty-state";

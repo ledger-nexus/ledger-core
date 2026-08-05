@@ -11,7 +11,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../post-journal";
 import { toDecimal } from "../../utils/decimal";
 import { isUuid } from "../../utils/uuid";

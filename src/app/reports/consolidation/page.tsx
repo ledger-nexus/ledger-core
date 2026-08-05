@@ -6,7 +6,7 @@
 // balances explicitly.
 
 import Link from "next/link";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { getCurrentTenant } from "@/lib/auth/tenant";

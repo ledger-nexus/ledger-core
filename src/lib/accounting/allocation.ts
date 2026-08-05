@@ -23,7 +23,7 @@
 //     creation AND re-checked here, because a drifted template must
 //     refuse rather than silently allocate a fraction.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { LEDGER_EFFECTIVE_STATUSES } from "./types";

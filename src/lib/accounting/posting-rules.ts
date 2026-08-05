@@ -40,7 +40,7 @@
 // computation.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "./post-journal";
 
 // ---- Template types ---------------------------------------------------

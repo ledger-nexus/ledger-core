@@ -41,7 +41,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import { resolveFxRate } from "@/lib/accounting/fx";
 

@@ -19,7 +19,7 @@
 // sourceRecordId) before creating. Re-runs produce zero new rows.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../../accounting/post-journal";
 import { resolveFxRate } from "../../accounting/fx";
 import { getDefaultTenantId } from "../../seed/default-tenant";

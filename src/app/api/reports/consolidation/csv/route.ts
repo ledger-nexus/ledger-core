@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
 import { FxRateNotFoundError } from "@/lib/accounting/fx";

@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import {
   createJournalEntryAction,
   type CreateJournalEntryState,

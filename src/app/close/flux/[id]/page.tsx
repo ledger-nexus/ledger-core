@@ -26,7 +26,7 @@
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentTenant, isTenantAdmin } from "@/lib/auth/tenant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

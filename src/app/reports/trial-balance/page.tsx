@@ -5,7 +5,7 @@
 // override toggles back to the flat-code-sorted view for users who want
 // the spreadsheet feel.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";

@@ -24,7 +24,7 @@
 //     existent or out-of-scope account becomes a root. Better than
 //     silently dropping it from the tree.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export interface FlatAccountRow {
   /** Account.code, e.g. "1000". Used as the dedup + identity key. */

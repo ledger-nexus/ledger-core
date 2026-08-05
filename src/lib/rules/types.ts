@@ -9,7 +9,7 @@
 //   - Field paths support one level of parent join (record.parent.field)
 //   - Versioned; new version = new row, old set to isActive=false
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Operators

@@ -10,7 +10,7 @@
 // etc.) and explicitly marks ambiguous ones as UNCLASSIFIED.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { getIncomeStatement, getBalanceSheet } from "../reports";
 
 export type BtdClassification = "PERMANENT" | "TEMPORARY" | "UNCLASSIFIED";

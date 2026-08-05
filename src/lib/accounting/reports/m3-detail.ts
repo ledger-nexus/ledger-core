@@ -12,7 +12,7 @@
 // taxonomy; production engagements add lines as needed.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import {
   getBookTaxDifference,
   type BtdRow,

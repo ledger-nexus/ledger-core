@@ -22,7 +22,7 @@
 // in-flight or signed-off recons. Documented in
 // docs/blackline-arc-design.md § "Sign-off resolution".
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { DbClient } from "@/lib/db";
 
 

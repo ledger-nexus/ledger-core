@@ -20,7 +20,7 @@
 //     (then true). Matches Salesforce semantics — null is not equal to
 //     anything except via IS_NULL / IS_NOT_NULL.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import {
   type Clause,
   type LeafClause,

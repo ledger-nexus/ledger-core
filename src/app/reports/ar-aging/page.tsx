@@ -3,7 +3,7 @@
 // to /ar where the apply-payment forms live.
 
 import Link from "next/link";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { arAging, openArBalance } from "@/lib/accounting/sub-ledgers/ar";

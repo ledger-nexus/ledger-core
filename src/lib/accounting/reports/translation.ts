@@ -40,7 +40,7 @@
 // = 1250 CR; Σ signed = +50 → CTA +50 credit. Rising rate on positive
 // net assets → positive CTA. Falling rate flips the sign symmetrically.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { PrismaClient, Prisma, AccountType } from "@prisma/client";
 
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";

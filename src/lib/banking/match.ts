@@ -13,7 +13,7 @@
 // and the signed comparison uses the account's normal side, the same
 // convention as the feed amount and the register.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import type { PrismaClient } from "@prisma/client";
 

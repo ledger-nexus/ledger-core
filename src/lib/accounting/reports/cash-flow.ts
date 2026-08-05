@@ -22,7 +22,7 @@
 // the GAAP presentation polish is v1.0.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { getBalanceSheet, getIncomeStatement } from "../reports";
 
 export type CashFlowCategory =

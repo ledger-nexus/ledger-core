@@ -4,7 +4,7 @@
 // deterministic data transformations. The orchestrator (import.ts) handles
 // the DB writes and the dimension-set lookups.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type {
   NsAccount,
   NsAccountType,

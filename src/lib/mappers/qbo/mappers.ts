@@ -5,7 +5,7 @@
 // Pure functions are easy to test (no fixtures, no DB setup) and easy to
 // reverse for the roundtrip exporter.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type {
   QboAccount,
   QboAccountType,

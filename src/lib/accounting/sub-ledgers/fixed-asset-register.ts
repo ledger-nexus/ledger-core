@@ -16,7 +16,7 @@
 // re-derived, because a register that disagreed with the reconciliation
 // pulling from the same rows would be worse than no register at all.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { DbClient } from "@/lib/db";
 
 /**

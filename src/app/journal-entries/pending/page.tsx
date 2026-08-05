@@ -6,7 +6,7 @@
 // requires ADMIN+ and the Server Actions re-check.
 
 import Link from "next/link";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import {
   getCurrentUser,

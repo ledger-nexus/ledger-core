@@ -11,7 +11,7 @@
 // (master data, like Item / Party), so every lookup pins tenantId.
 
 import type { DbClient } from "../db";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export interface ResolvedCommodityPrice {
   price: Decimal;

@@ -7,7 +7,7 @@
 // Recording trades goes through recordCommodityTradeAction (gated + audited);
 // the data-entry form is a separate follow-up.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { getHoldings } from "@/lib/accounting/holdings";

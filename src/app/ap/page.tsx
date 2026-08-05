@@ -1,6 +1,6 @@
 // Open AP list with per-item pay-bill inline forms.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { openApBalance } from "@/lib/accounting/sub-ledgers/ap";

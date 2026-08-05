@@ -35,7 +35,7 @@
 //   one cross-template reference in BS_TEMPLATE v1). When more refs
 //   land, the shim needs a `resolveCrossTemplateRefs`-equivalent.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { getAccountBalances } from "./balances";

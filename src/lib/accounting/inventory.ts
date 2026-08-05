@@ -25,7 +25,7 @@
 //   - Capital gain is driven by COST BASIS, not sale price: proceeds minus the
 //     cost relieved. The sale price supplies proceeds; the lots supply basis.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 export type BookingMethod = "STRICT" | "FIFO" | "LIFO";
 

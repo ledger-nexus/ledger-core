@@ -33,7 +33,7 @@
 // audit row per post + the JE rows themselves are the granular trail.
 
 import { PrismaClient, Prisma } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { logAuditEvent } from "@/lib/audit/log";

@@ -24,7 +24,6 @@
 // stop. The feature is wrong.
 
 import { PrismaClient, Prisma } from "@prisma/client";
-import { Decimal } from "decimal.js";
 import {
   JournalEntryInput,
   UnbalancedEntryError,
@@ -42,7 +41,7 @@ import {
 import { fireInsertRules, type FireRulesResult } from "../rules/integration";
 import { resolveFxRate } from "./fx";
 import { indexEntityScopedByCode } from "./entity-scope";
-import { toDecimal } from "../utils/decimal";
+import { Decimal, toDecimal } from "@/lib/utils/decimal";
 
 // Accepts either a full PrismaClient or an active TransactionClient so
 // callers can nest postJournalEntry inside a larger transaction (e.g.
@@ -60,10 +59,10 @@ function hasTransaction(db: DbClient): db is PrismaClient {
   return typeof (db as PrismaClient).$transaction === "function";
 }
 
-// Configure Decimal.js for accounting:
-//   - 28 digits of precision (way more than we'll ever need)
-//   - ROUND_HALF_EVEN (banker's rounding — the GAAP-friendly default)
-Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
+// Precision and rounding are configured once, in @/lib/utils/decimal,
+// and come with the constructor imported above. They used to be set
+// here — which configured only the copy of decimal.js this module
+// held, leaving every other importer on the library defaults.
 
 const DEFAULT_BOOK = "US_GAAP";
 

@@ -17,7 +17,7 @@
 // stays with the caller, matching how the posting path already resolves codes.
 
 import type { DbClient } from "../db";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { Lot as EngineLot, Consumption } from "./inventory";
 
 export interface AugmentLotInput {

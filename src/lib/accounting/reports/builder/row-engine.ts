@@ -23,7 +23,7 @@
 //   values in. The row engine just looks them up. This avoids the row
 //   engine recursing into other templates.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import type { RowDef, RenderedCell, ColumnScope } from "./types";
 import { filterBalances, type AccountBalances } from "./balances";

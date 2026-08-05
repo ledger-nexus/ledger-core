@@ -19,7 +19,7 @@
 // PR 4+ may generalize to a DAG resolver — for now, IS is the only
 // upstream dependency in the system templates.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { runColumnEngine, type ColumnEngineOptions } from "./column-engine";

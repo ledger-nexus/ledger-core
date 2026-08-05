@@ -5,7 +5,7 @@
 // old per-account-only view.
 
 import { NextRequest, NextResponse } from "next/server";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getIncomeStatement, type FinancialStatementRow } from "@/lib/accounting/reports";
 import {

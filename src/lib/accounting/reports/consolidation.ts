@@ -17,7 +17,7 @@
 // and FX-driven IC imbalances are real-world refinements not modeled here.
 
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { getTrialBalance } from "../reports";
 import { getTranslatedTrialBalance } from "./translation";
 import { signFor } from "../types";

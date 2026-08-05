@@ -17,7 +17,7 @@
 // documented in balance-assertions.ts.
 
 import { revalidatePath } from "next/cache";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { Prisma } from "@prisma/client";
 import {
   requireCurrentUser,

@@ -23,7 +23,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { z } from "zod";
 import type { Cadence } from "@prisma/client";
 import { withTenantContext } from "@/lib/tenant-context";

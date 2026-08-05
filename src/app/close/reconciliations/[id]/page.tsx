@@ -42,7 +42,7 @@
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant, isTenantAdmin } from "@/lib/auth/tenant";

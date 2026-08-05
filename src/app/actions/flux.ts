@@ -27,7 +27,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";

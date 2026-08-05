@@ -3,7 +3,7 @@
 // Phase 7: hierarchical rendering with sub-totals (parent accounts roll
 // up their children). ?flat=1 swaps to the old code-sorted view.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";

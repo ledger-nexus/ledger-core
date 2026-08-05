@@ -6,7 +6,7 @@
 // On a flat chart of accounts the two views look identical — the helper
 // treats every row as a root.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";

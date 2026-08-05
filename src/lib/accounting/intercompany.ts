@@ -29,7 +29,7 @@
 // The partial unique index on (tenantId, bookId, triple) makes a second
 // preparation a structural impossibility, not a best-effort check.
 
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { postJournalEntry } from "./post-journal";
