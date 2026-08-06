@@ -5,7 +5,7 @@
 // realized gain.
 
 import { describe, it, expect } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import {
   bookReduction,
   totalUnits,

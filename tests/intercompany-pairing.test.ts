@@ -9,7 +9,7 @@
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import Decimal from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 

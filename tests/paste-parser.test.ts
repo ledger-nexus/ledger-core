@@ -1,7 +1,7 @@
 // Unit tests for the paste-from-Excel parser. No DB; runs anywhere.
 
 import { describe, it, expect } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { parsePastedLines } from "@/lib/accounting/paste-parser";
 
 describe("parsePastedLines — no-header tab-separated (Excel default paste)", () => {

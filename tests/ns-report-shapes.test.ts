@@ -13,7 +13,7 @@
 //   - Totals wrapper field renaming per report
 
 import { describe, expect, it } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import {
   toNsTrialBalance,

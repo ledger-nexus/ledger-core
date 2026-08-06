@@ -17,7 +17,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 const mockCookieStore = new Map<string, { value: string }>();
 vi.mock("next/headers", () => ({

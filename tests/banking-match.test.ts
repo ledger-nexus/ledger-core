@@ -4,7 +4,7 @@
 // sides and both directions.
 
 import { describe, it, expect } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { lineMovementOnNormalSide } from "../src/lib/banking/match";
 
 describe("lineMovementOnNormalSide", () => {

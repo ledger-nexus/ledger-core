@@ -3,7 +3,7 @@
 // no-op.
 
 import { describe, it, expect } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { parseBankCsv, computeDedupeHash, BankCsvError } from "../src/lib/banking/import";
 
 describe("parseBankCsv", () => {

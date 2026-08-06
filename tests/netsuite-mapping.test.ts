@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {

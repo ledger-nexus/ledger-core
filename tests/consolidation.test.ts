@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getConsolidatedTrialBalance } from "../src/lib/accounting/reports/consolidation";
 import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "../src/lib/db/chart-of-accounts";

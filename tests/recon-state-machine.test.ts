@@ -29,7 +29,7 @@
 // (period-close gate). That's where Clerk is in scope.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { PrismaClient } from "@prisma/client";
 
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";

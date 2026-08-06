@@ -14,7 +14,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import Decimal from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import { getFixedAssetRegister } from "@/lib/accounting/sub-ledgers/fixed-asset-register";
 import { resolveSupportingBalance } from "@/lib/recon/supporting-balance";
