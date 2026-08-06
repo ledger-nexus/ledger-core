@@ -13,9 +13,11 @@
 //   - the pairing is deterministic — an operator who signs off must be
 //     able to reopen the recon and see what they signed.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import Decimal from "decimal.js";
+// The CONFIGURED constructor. Importing decimal.js directly here would
+// give a differently-configured object — see @/lib/utils/decimal.
+import { Decimal } from "@/lib/utils/decimal";
 
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import {
@@ -397,5 +399,140 @@ describe("manual matches", () => {
     // Falls through to the automatic pair.
     expect(r.matched).toHaveLength(1);
     expect(r.matched[0].manual).toBeUndefined();
+  });
+});
+
+// ── Amount indexing (the quadratic scan, replaced) ──────────────────────
+//
+// Matching used to scan every unclaimed GL line for every statement
+// line. Amount equality is exact, so the candidates worth inspecting are
+// exactly those sharing an amount — an index gives the same pairing
+// without the scan. "Same pairing" is the whole claim, so it is checked
+// against a full scan rather than asserted.
+
+/** The pre-index algorithm, kept here as the reference to match. */
+function fullScanMatch(
+  glItems: MatchableItem[],
+  supportItems: MatchableItem[],
+  windowDays: number
+): Array<[string, string]> {
+  const byDateThenId = (a: MatchableItem, b: MatchableItem) =>
+    a.date.getTime() - b.date.getTime() || a.id.localeCompare(b.id);
+  const gl = [...glItems].sort(byDateThenId);
+  const support = [...supportItems].sort(byDateThenId);
+  const claimed = new Set<string>();
+  const pairs: Array<[string, string]> = [];
+  for (const s of support) {
+    let best: MatchableItem | undefined;
+    let bestGap = Number.POSITIVE_INFINITY;
+    for (const g of gl) {
+      if (claimed.has(g.id)) continue;
+      if (!g.amount.equals(s.amount)) continue;
+      const gap = Math.round(
+        Math.abs(g.date.getTime() - s.date.getTime()) / 86_400_000
+      );
+      if (gap > windowDays) continue;
+      if (gap < bestGap) {
+        best = g;
+        bestGap = gap;
+      }
+    }
+    if (best) {
+      claimed.add(best.id);
+      pairs.push([best.id, s.id]);
+    }
+  }
+  return pairs;
+}
+
+/** Deterministic pseudo-random — a fixed seed keeps failures reproducible. */
+function lcg(seed: number) {
+  let x = seed;
+  return () => (x = (x * 1103515245 + 12345) % 2147483648) / 2147483648;
+}
+
+function denseDataset(n: number) {
+  const rnd = lcg(20260805);
+  // Few distinct amounts and a tight date span on purpose: collisions
+  // are where "nearest date wins" and one-to-one actually bite.
+  // 100.0001 / 100.0002 are distinct at Decimal(18,4) and would be
+  // MERGED by a lossy key like toFixed(2); 1.50 / 1.5 are the same
+  // value and must not be split. The pair of hazards, in one list.
+  const amounts = [
+    "100.00", "1.50", "1.5", "250.75", "-40.25", "0",
+    "100.0001", "100.0002", "1250.00",
+  ];
+  const mk = (prefix: string): MatchableItem[] =>
+    Array.from({ length: n }, (_, i) => {
+      const day = 1 + Math.floor(rnd() * 26);
+      return item(
+        `${prefix}${i}`,
+        `2026-05-${String(day).padStart(2, "0")}`,
+        amounts[Math.floor(rnd() * amounts.length)]
+      );
+    });
+  return { glItems: mk("G"), supportItems: mk("S") };
+}
+
+describe("amount indexing", () => {
+  it("pairs identically to a full scan over a dense, collision-heavy dataset", () => {
+    const { glItems, supportItems } = denseDataset(120);
+    const indexed = matchTransactions({ glItems, supportItems }).matched.map(
+      (m) => [m.gl.id, m.support.id] as [string, string]
+    );
+    const scanned = fullScanMatch(glItems, supportItems, 10);
+    expect(indexed).toEqual(scanned);
+    // Guard the guard: a dataset that matched nothing would prove nothing.
+    expect(indexed.length).toBeGreaterThan(50);
+  });
+
+  it("never merges two amounts that are not equal", () => {
+    // The hazard a bucket index introduces that a scan did not have.
+    // 100.0001 and 100.0002 are distinct at Decimal(18,4) — a lossy key
+    // pairs the wrong payments and the reconciliation still "balances".
+    const r = matchTransactions({
+      glItems: [item("g1", "2026-05-02", "100.0001")],
+      supportItems: [item("s1", "2026-05-02", "100.0002")],
+    });
+    expect(r.matched).toHaveLength(0);
+    expect(r.unmatchedGl.map((i) => i.id)).toEqual(["g1"]);
+    expect(r.unmatchedSupport.map((i) => i.id)).toEqual(["s1"]);
+  });
+
+  it("never splits two amounts that are equal", () => {
+    // decimal.js normalises at construction, so 1.50 and 1.5 are one
+    // value — but a key derived from raw scale would split them, and
+    // the line would sit unreconciled with nothing to explain it.
+    const r = matchTransactions({
+      glItems: [item("g1", "2026-05-02", "1.50"), item("g2", "2026-05-02", "0")],
+      supportItems: [
+        item("s1", "2026-05-02", "1.5"),
+        { ...item("s2", "2026-05-02", "0"), amount: new Decimal(0).negated() },
+      ],
+    });
+    expect(r.matched).toHaveLength(2);
+    expect(r.unmatchedGl).toHaveLength(0);
+    expect(r.unmatchedSupport).toHaveLength(0);
+  });
+
+  it("stops comparing amounts pairwise", () => {
+    // An operation count, not a timing — reproducible on any machine.
+    // 150 GL x 150 statement lines, all distinct amounts: the old scan
+    // compared every pair (~22,500); the index compares none, because
+    // the bucket lookup already answered the question.
+    const glItems = Array.from({ length: 150 }, (_, i) =>
+      item(`G${i}`, "2026-05-02", `${1000 + i}.00`)
+    );
+    const supportItems = Array.from({ length: 150 }, (_, i) =>
+      item(`S${i}`, "2026-05-03", `${1000 + i}.00`)
+    );
+    const spy = vi.spyOn(Decimal.prototype, "equals");
+    try {
+      const r = matchTransactions({ glItems, supportItems });
+      expect(r.matched).toHaveLength(150);
+      expect(spy.mock.calls.length).toBeLessThan(150);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
