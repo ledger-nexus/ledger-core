@@ -78,10 +78,8 @@ export async function getTranslatedTrialBalance(
     asOf: Date;
   }
 ): Promise<TranslatedEntityTb> {
-  // Per-account functional balances, with per-line dates kept for the
-  // HISTORICAL walk. Same scoping discipline as every other report:
-  // tenant-pinned accounts, entity-scoped-or-shared, ledger-effective
-  // entries only.
+  // Same scoping discipline as every other report: tenant-pinned
+  // accounts, entity-scoped-or-shared, ledger-effective entries only.
   const accounts = await prisma.account.findMany({
     where: {
       tenantId: input.tenantId,
@@ -89,31 +87,34 @@ export async function getTranslatedTrialBalance(
       OR: [{ entityId: null }, { entityId: input.entityId }],
     },
     select: {
+      id: true,
       code: true,
       name: true,
       type: true,
       entityId: true,
       translationCategory: true,
-      lines: {
-        where: {
-          entry: {
-            entityId: input.entityId,
-            bookId: input.bookId,
-            documentDate: { lte: input.asOf },
-            status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
-          },
-        },
-        select: {
-          functionalAmount: true,
-          entry: { select: { documentDate: true } },
-        },
-      },
     },
     orderBy: { code: "asc" },
   });
 
   // Entity-specific shadows shared (same dedup rule as getTrialBalance).
   const byCode = indexEntityScopedByCode(accounts, input.entityId);
+  const winning = [...byCode.values()];
+
+  // ONE predicate, written once and reused by both passes below. If the
+  // aggregate pass and the HISTORICAL detail pass ever disagreed about
+  // which lines are in scope, the two halves of the same trial balance
+  // would be drawn from different ledgers.
+  const lineScope = {
+    tenantId: input.tenantId,
+    accountId: { in: winning.map((a) => a.id) },
+    entry: {
+      entityId: input.entityId,
+      bookId: input.bookId,
+      documentDate: { lte: input.asOf },
+      status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
+    },
+  };
 
   const ctx = {
     fromCurrencyId: input.functionalCurrencyId,
@@ -152,32 +153,90 @@ export async function getTranslatedTrialBalance(
     return historicalRateCache.get(key)!;
   }
 
+  // Pass 1 — the functional balance per account, summed in Postgres.
+  // Every category except HISTORICAL needs nothing else: one rate times
+  // one balance. Loading the underlying lines to add them up in JS was
+  // the whole cost of this report on a real ledger.
+  const sums =
+    winning.length === 0
+      ? []
+      : await prisma.journalLine.groupBy({
+          by: ["accountId"],
+          where: lineScope,
+          _sum: { functionalAmount: true },
+        });
+  const balanceByAccount = new Map<string, Decimal>();
+  for (const s of sums) {
+    balanceByAccount.set(
+      s.accountId,
+      new Decimal((s._sum.functionalAmount ?? 0).toString())
+    );
+  }
+
+  // Pass 2 — resolve each account's rate, in code order and ONLY for
+  // accounts that actually have activity. That restriction is load-
+  // bearing, not an optimization: a chart may classify an account
+  // WEIGHTED_AVG that nobody has posted to, and resolving its rate
+  // would raise FxRateNotFoundError over a period-start rate the
+  // statement does not depend on.
+  const rateByAccount = new Map<string, Decimal | null>();
+  for (const acct of winning) {
+    if (!balanceByAccount.has(acct.id)) continue;
+    // The documented Phase 4a default: null → CURRENT_RATE.
+    rateByAccount.set(
+      acct.id,
+      await rateForCategory(acct.translationCategory ?? "CURRENT_RATE")
+    );
+  }
+
+  // Pass 3 — lines, for the HISTORICAL accounts alone. A null rate is
+  // the signal that no single per-account rate is meaningful, so each
+  // contribution has to be frozen at its own date's rate. Note this is
+  // empty for a same-currency entity: getTranslationRate short-circuits
+  // every category to 1, HISTORICAL included.
+  const historicalIds = [...rateByAccount]
+    .filter(([, rate]) => rate === null)
+    .map(([id]) => id);
+  const historicalLines = new Map<string, { amount: Decimal; date: Date }[]>();
+  if (historicalIds.length > 0) {
+    const lines = await prisma.journalLine.findMany({
+      // Zero-functional lines contribute nothing by construction — this
+      // is where the FX revaluation true-ups drop out (#151).
+      where: { ...lineScope, accountId: { in: historicalIds }, functionalAmount: { not: 0 } },
+      select: {
+        accountId: true,
+        functionalAmount: true,
+        entry: { select: { documentDate: true } },
+      },
+      orderBy: { id: "asc" },
+    });
+    for (const l of lines) {
+      const bucket = historicalLines.get(l.accountId) ?? [];
+      bucket.push({
+        amount: new Decimal(l.functionalAmount.toString()),
+        date: l.entry.documentDate,
+      });
+      historicalLines.set(l.accountId, bucket);
+    }
+  }
+
   const rows: TranslatedRow[] = [];
   let signedTotal = new Decimal(0);
 
-  for (const acct of byCode.values()) {
-    if (acct.lines.length === 0) continue;
-
-    // The documented Phase 4a default: null → CURRENT_RATE.
-    const category = acct.translationCategory ?? "CURRENT_RATE";
-    const rate = await rateForCategory(category);
+  for (const acct of winning) {
+    const functionalBalance = balanceByAccount.get(acct.id);
+    if (functionalBalance === undefined) continue;
+    const rate = rateByAccount.get(acct.id)!;
 
     let translatedSigned: Decimal;
     if (rate === null) {
-      // HISTORICAL: each contribution frozen at its own date's rate.
       translatedSigned = new Decimal(0);
-      for (const line of acct.lines) {
-        const fn = new Decimal(line.functionalAmount.toString());
-        if (fn.isZero()) continue;
+      for (const line of historicalLines.get(acct.id) ?? []) {
         translatedSigned = translatedSigned.plus(
-          fn.times(await historicalRate(line.entry.documentDate))
+          line.amount.times(await historicalRate(line.date))
         );
       }
     } else {
-      const functionalBalance = acct.lines.reduce(
-        (a, l) => a.plus(new Decimal(l.functionalAmount.toString())),
-        new Decimal(0)
-      );
       translatedSigned = functionalBalance.times(rate);
     }
 
