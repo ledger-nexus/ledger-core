@@ -15,6 +15,7 @@ import Decimal from "decimal.js";
 
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { getConsolidatedTrialBalance } from "@/lib/accounting/reports/consolidation";
+import { getTranslatedTrialBalance } from "@/lib/accounting/reports/translation";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const prisma = new PrismaClient();
@@ -28,6 +29,8 @@ const E_G = `CTRXG${SUFFIX}`.toUpperCase().slice(0, 14); // sub, GBP functional
 const E_U = `CTRXU${SUFFIX}`.toUpperCase().slice(0, 14); // sub, USD
 
 let tenantId: string;
+let gbpEntityId: string;
+let bookId: string;
 
 const A = {
   cash: `CG1${SUFFIX}`.slice(0, 12), // GBP sub: null category → CURRENT_RATE default
@@ -108,6 +111,7 @@ beforeAll(async () => {
       select: { id: true },
     });
     entities[code] = ent.id;
+    if (code === E_G) gbpEntityId = ent.id;
     const cal = await prisma.fiscalCalendar.create({
       data: {
         tenantId,
@@ -250,6 +254,10 @@ beforeAll(async () => {
       { accountCode: A.urev, credit: 700 },
     ],
   });
+
+  bookId = (
+    await prisma.book.findUniqueOrThrow({ where: { code: BOOK }, select: { id: true } })
+  ).id;
 });
 
 afterAll(async () => {
@@ -325,4 +333,65 @@ describe("consolidation translation (Phase B)", () => {
     expect(row(report, A.ucash)!.totalDebit.toNumber()).toBeCloseTo(700, 4);
   });
 
+  it("reads lines only for HISTORICAL accounts — every other category sums in the database", async () => {
+    // The GBP sub has six ledger-effective lines in scope: the equity
+    // contribution's pair, June revenue's pair, and the FX_REVAL
+    // true-up's pair. Exactly ONE of them sits on a HISTORICAL account
+    // with a non-zero functional amount, and only that one carries
+    // information a per-account rate cannot express. Reading the other
+    // five to add them up in JS is what this pins against — on a real
+    // ledger that is every line of every account, streamed out of
+    // Postgres to compute a number Postgres could have returned.
+    let lineRowsRead = 0;
+    const counted = prisma.$extends({
+      query: {
+        journalLine: {
+          async findMany({ args, query }) {
+            const rows = await query(args);
+            lineRowsRead += (rows as unknown[]).length;
+            return rows;
+          },
+        },
+        account: {
+          // Counts the nested-`lines` shape too. Without this the
+          // assertion would pass trivially against the implementation
+          // it exists to refute — that one loaded its lines through the
+          // account query, not through journalLine at all.
+          async findMany({ args, query }) {
+            const rows = await query(args);
+            for (const r of rows as { lines?: unknown[] }[]) {
+              lineRowsRead += r.lines?.length ?? 0;
+            }
+            return rows;
+          },
+        },
+      },
+    });
+
+    const tb = await getTranslatedTrialBalance(
+      // Structurally a PrismaClient for every model call this function
+      // makes; the extended client's type differs only by branding.
+      counted as unknown as PrismaClient,
+      {
+        tenantId,
+        entityId: gbpEntityId,
+        functionalCurrencyId: "GBP",
+        bookId,
+        reportingCurrencyId: "USD",
+        periodStart: PERIOD_START,
+        asOf: AS_OF,
+      }
+    );
+
+    // Same statement as the four-category test above, reached without
+    // the bulk read — the saving is not allowed to cost accuracy.
+    const at = (code: string) => tb.rows.find((r) => r.accountCode === code);
+    expect(at(A.cash)!.debit.toNumber()).toBeCloseTo(1950, 4);
+    expect(at(A.rev)!.credit.toNumber()).toBeCloseTo(1250, 4);
+    expect(at(A.equity)!.credit.toNumber()).toBeCloseTo(550, 4);
+    expect(at(A.fxgain)).toBeUndefined();
+    expect(tb.ctaCreditPositive.toNumber()).toBeCloseTo(150, 4);
+
+    expect(lineRowsRead).toBe(1);
+  });
 });
