@@ -36,7 +36,6 @@
 //   land, the shim needs a `resolveCrossTemplateRefs`-equivalent.
 
 import { Decimal } from "@/lib/utils/decimal";
-import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { getAccountBalances } from "./balances";
 import { runRowEngine } from "./row-engine";
@@ -49,8 +48,8 @@ import type {
   BalanceSheet,
   FinancialStatementRow,
 } from "../../reports";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 const DEFAULT_BOOK = "US_GAAP";
 

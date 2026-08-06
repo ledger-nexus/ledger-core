@@ -20,13 +20,12 @@
 // upstream dependency in the system templates.
 
 import { Decimal } from "@/lib/utils/decimal";
-import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { runColumnEngine, type ColumnEngineOptions } from "./column-engine";
 import { INCOME_STATEMENT_TEMPLATE } from "./templates/income-statement";
 import type { ReportTemplate, RenderedMatrix } from "./types";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface RenderOptions {
   asOfDate: Date;

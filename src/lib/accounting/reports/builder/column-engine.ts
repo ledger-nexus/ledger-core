@@ -9,7 +9,6 @@
 // book, asOf or period) tuple, the underlying balance query runs once.
 
 import { Decimal } from "@/lib/utils/decimal";
-import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { getAccountBalances, filterBalances, type AccountBalances } from "./balances";
 import { runRowEngine, formatCell, type FormatOptions, DEFAULT_FORMAT } from "./row-engine";
@@ -22,8 +21,8 @@ import type {
   RenderedRow,
   RenderedCell,
 } from "./types";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface ColumnEngineOptions {
   /** Reference date for resolving PeriodOffset shapes. */

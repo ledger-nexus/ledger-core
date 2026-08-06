@@ -30,7 +30,6 @@
 // preparation a structural impossibility, not a best-effort check.
 
 import { Decimal } from "@/lib/utils/decimal";
-import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { postJournalEntry } from "./post-journal";
 import { entityScopedPool } from "./entity-scope";
@@ -40,8 +39,8 @@ import {
   IC_MIRROR_SOURCE_SYSTEM,
   IC_MIRROR_RECORD_TYPE,
 } from "./source-lineage";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 // Re-exported: the JE detail page and the automation registry read
 // these, and the canonical definition now lives with the other triples.

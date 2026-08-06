@@ -24,12 +24,11 @@
 //     refuse rather than silently allocate a fraction.
 
 import { Decimal } from "@/lib/utils/decimal";
-import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { LEDGER_EFFECTIVE_STATUSES } from "./types";
 import { pickEntityScoped } from "./entity-scope";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export class AllocationTemplateError extends Error {
   constructor(message: string) {

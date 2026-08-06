@@ -41,13 +41,13 @@
 // net assets → positive CTA. Falling rate flips the sign symmetrically.
 
 import { Decimal } from "@/lib/utils/decimal";
-import type { PrismaClient, Prisma, AccountType } from "@prisma/client";
+import type { AccountType } from "@prisma/client";
 
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { getTranslationRate, resolveFxRate } from "@/lib/accounting/fx";
 import { indexEntityScopedByCode } from "@/lib/accounting/entity-scope";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface TranslatedRow {
   accountCode: string;
