@@ -97,6 +97,28 @@ function dayGap(a: Date, b: Date): number {
 }
 
 /**
+ * Index key for exact-amount matching. It has to agree with
+ * `Decimal.equals` on every pair, in both directions — a key that
+ * SPLITS equal amounts hides a legitimate match, and a key that MERGES
+ * unequal ones invents a match out of two different payments. Both are
+ * worse than the scan this replaced.
+ *
+ * The agreement comes from decimal.js normalising at construction:
+ * `new Decimal("1.50")` and `new Decimal("1.5")` are the same value
+ * with the same `decimalPlaces()`, so equal amounts cannot render
+ * differently and `toFixed()` is a faithful identity for them.
+ *
+ * The live hazard is therefore the other direction — anything LOSSY.
+ * `toFixed(2)` would merge 100.0001 and 100.0002, which the schema
+ * permits at Decimal(18,4); `Number(...)` would collapse values wider
+ * than a double. The dataset in the equivalence test carries 4-decimal
+ * amounts specifically so either mistake fails it.
+ */
+function amountKey(amount: Decimal): string {
+  return amount.toFixed();
+}
+
+/**
  * Pure matcher. Exact amounts, one-to-one, nearest date wins.
  *
  * Deterministic by construction: statement lines are walked oldest
@@ -145,13 +167,29 @@ export function matchTransactions(input: {
     });
   }
 
+  // Amount equality is EXACT here, which is what makes the index sound:
+  // two items can only pair if their amounts render to the same decimal
+  // string, so candidates that could never match are never inspected.
+  // Scanning every GL line for every statement line was quadratic —
+  // fine for a demo month, not for a busy operating account where both
+  // sides run to thousands.
+  //
+  // Buckets are filled in `gl` order, so each one stays date-sorted and
+  // "earliest of equally-close candidates" is preserved exactly.
+  const glByAmount = new Map<string, MatchableItem[]>();
+  for (const g of gl) {
+    const key = amountKey(g.amount);
+    const bucket = glByAmount.get(key);
+    if (bucket) bucket.push(g);
+    else glByAmount.set(key, [g]);
+  }
+
   for (const s of support) {
     if (manuallyPairedSupport.has(s.id)) continue;
     let best: MatchableItem | undefined;
     let bestGap = Number.POSITIVE_INFINITY;
-    for (const g of gl) {
+    for (const g of glByAmount.get(amountKey(s.amount)) ?? []) {
       if (claimed.has(g.id)) continue;
-      if (!g.amount.equals(s.amount)) continue;
       const gap = dayGap(g.date, s.date);
       if (gap > window) continue;
       // Strictly-less keeps the earliest of equally-close candidates,
