@@ -47,6 +47,7 @@ import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { auditPrivilegedAction, auditAccessDenied } from "@/lib/audit/log";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface ReclassifyJournalEntryInput {
   /** Source JE id. The reclassification references THIS entry. */
@@ -251,7 +252,7 @@ export async function reclassifyJournalEntryAction(
     }
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "Unknown error during reclassification.",
+      message: sanitizeActionError(e, "Unknown error during reclassification."),
     };
   }
 

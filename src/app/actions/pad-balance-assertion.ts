@@ -39,6 +39,7 @@ import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { auditPrivilegedAction, auditAccessDenied } from "@/lib/audit/log";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface PadBalanceAssertionInput {
   /** The assertion to satisfy. */
@@ -205,7 +206,7 @@ export async function padBalanceAssertionAction(
     }
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "Unknown error posting the padding entry.",
+      message: sanitizeActionError(e, "Unknown error posting the padding entry."),
     };
   }
 

@@ -39,6 +39,7 @@ import {
   enumerateDueDates,
 } from "@/lib/accounting/recurring";
 import { isMonthEnd } from "@/lib/accounting/allocation";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
@@ -562,7 +563,7 @@ function handleAuthError(
     // requirePermitted already wrote the ACCESS_DENIED audit row.
     return { ok: false, message: "Recurring entries require admin permission." };
   }
-  return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+  return { ok: false, message: sanitizeActionError(e, "Unknown error") };
 }
 
 // Re-export the pure helper so the list page can show "next due" without

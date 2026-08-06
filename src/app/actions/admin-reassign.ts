@@ -24,6 +24,7 @@ import {
   PermissionDeniedError,
 } from "@/lib/auth/policy";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface AdminReassignState {
   ok: boolean;
@@ -90,6 +91,6 @@ export async function adminReassignAction(input: {
     if (e instanceof ReassignError) {
       return { ok: false, message: `${e.code}: ${e.message}` };
     }
-    return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+    return { ok: false, message: sanitizeActionError(e, "Unknown error") };
   }
 }

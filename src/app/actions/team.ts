@@ -47,6 +47,7 @@ import {
 } from "@/lib/billing/limits";
 import { sendInviteEmail } from "@/lib/email/templates/invite";
 import type { TenantRole } from "@prisma/client";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 // 14-day default invite TTL. Long enough that vacation doesn't lose
 // the invite; short enough that a forgotten link doesn't linger.
@@ -416,6 +417,6 @@ function mapError(e: unknown): { ok: false; message: string } {
     return { ok: false, message: e.message };
   return {
     ok: false,
-    message: e instanceof Error ? e.message : "Unknown error",
+    message: sanitizeActionError(e, "Unknown error"),
   };
 }

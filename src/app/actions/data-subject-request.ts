@@ -41,6 +41,7 @@ import {
   type ErasureSummary,
 } from "@/lib/privacy/user-data";
 import { logAuditEvent } from "@/lib/audit/log";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface DataSubjectActionState<TPayload = unknown> {
   ok: boolean;
@@ -212,6 +213,6 @@ function mapError<T>(e: unknown): DataSubjectActionState<T> {
     return { ok: false, message: e.message };
   return {
     ok: false,
-    message: e instanceof Error ? e.message : "Unknown error",
+    message: sanitizeActionError(e, "Unknown error"),
   };
 }

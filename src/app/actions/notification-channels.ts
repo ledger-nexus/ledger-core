@@ -41,6 +41,7 @@ import {
 } from "@/lib/notifications/crypto";
 import { sendSlackMessage } from "@/lib/notifications/slack";
 import { scrubSlackUrls } from "@/lib/notifications/shared";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 const uuid = z.string().uuid();
 
@@ -287,7 +288,7 @@ export async function testChannel(
       tenantId: ctx.tenantId,
       metadata: {
         outcome: "decrypt_failed",
-        error: err instanceof Error ? err.message : "unknown",
+        error: sanitizeActionError(err, "unknown"),
       },
     });
     return fail(
