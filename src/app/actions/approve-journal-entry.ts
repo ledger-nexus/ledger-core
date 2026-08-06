@@ -19,11 +19,7 @@ import {
   requireCurrentTenant,
   NoTenantSelectedError,
 } from "@/lib/auth/tenant";
-import {
-  canApproveJournalEntries,
-  PermissionDeniedError,
-  requirePermission,
-} from "@/lib/auth/policy";
+import { canApproveJournalEntries, PermissionDeniedError } from "@/lib/auth/policy";
 import {
   approveJournalEntry,
   rejectJournalEntry,
@@ -38,6 +34,7 @@ import { auditPrivilegedAction } from "@/lib/audit/log";
 import { sendJeApprovedEmail } from "@/lib/email/templates/je-approved";
 import { sendJeRejectedEmail } from "@/lib/email/templates/je-rejected";
 import { sanitizeActionError } from "@/lib/actions/action-error";
+import { requirePermitted } from "@/lib/auth/authorize";
 
 export interface ApprovalActionState {
   ok: boolean;
@@ -54,11 +51,8 @@ export async function approveJournalEntryAction(
   input: ApproveInput
 ): Promise<ApprovalActionState> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
-    requirePermission(
+    const { user, tenant } = await requirePermitted(
       "approve_journal_entries",
-      tenant.role,
       canApproveJournalEntries
     );
 
@@ -111,11 +105,8 @@ export async function rejectJournalEntryAction(
   input: RejectInput
 ): Promise<ApprovalActionState> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
-    requirePermission(
+    const { user, tenant } = await requirePermitted(
       "approve_journal_entries",
-      tenant.role,
       canApproveJournalEntries
     );
 

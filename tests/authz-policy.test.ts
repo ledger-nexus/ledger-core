@@ -58,6 +58,8 @@ import {
   PermissionDeniedError,
 } from "@/lib/auth/policy";
 import { closePeriodAction } from "@/app/actions/period-close";
+import { toggleRequireJeApprovalAction } from "@/app/actions/toggle-je-approval";
+import { markNotificationsReadAction } from "@/app/actions/mark-notifications-read";
 import {
   deactivateUserAction,
   reactivateUserAction,
@@ -317,6 +319,54 @@ describe("requirePermitted through real Server Actions", () => {
     // import THIS one, so the check was silently false for anything the
     // tenant resolver raised: handled branch skipped, no audit row.
     expect(TenantNotAuthenticatedError).toBe(NotAuthenticatedError);
+  });
+
+  it("audits a role denial in an action that gated OUTSIDE requirePermitted", async () => {
+    // toggle-je-approval used to resolve user+tenant by hand and call
+    // requirePermission, which THROWS but never audits. The gate was
+    // right; the record of refusing was missing. Same predicate now,
+    // reached through requirePermitted, so the denial lands in the log.
+    signInAs(memberA.id, tenantA.slug);
+    const since = new Date(Date.now() - 1000);
+
+    const res = await toggleRequireJeApprovalAction(true);
+    expect(res.ok).toBe(false);
+
+    const denial = await prisma.auditLog.findFirst({
+      where: {
+        eventType: "ACCESS_DENIED",
+        action: "toggle_je_approval",
+        actorUserId: memberA.id,
+        occurredAt: { gte: since },
+      },
+      orderBy: { occurredAt: "desc" },
+    });
+    expect(denial).not.toBeNull();
+    expect((denial!.metadata as { reason?: string })?.reason).toMatch(/below the required floor/);
+  });
+
+  it("audits an unauthenticated attempt at a member-open action too", async () => {
+    // markNotificationsRead has no role floor — every member may do it —
+    // so there is no permission to name and requirePermitted would be
+    // the wrong tool. requireActor resolves the caller and audits the
+    // refusal without inventing a gate.
+    mockCookieStore.clear();
+    const since = new Date(Date.now() - 1000);
+
+    const res = await markNotificationsReadAction();
+    expect(res.ok).toBe(false);
+
+    const denial = await prisma.auditLog.findFirst({
+      where: {
+        eventType: "ACCESS_DENIED",
+        action: "notifications.mark-read",
+        actorUserId: null,
+        occurredAt: { gte: since },
+      },
+      orderBy: { occurredAt: "desc" },
+    });
+    expect(denial).not.toBeNull();
+    expect((denial!.metadata as { reason?: string })?.reason).toBe("Not authenticated");
   });
 
   it("admits an ADMIN past the gate (fails later on unknown entity, not permission)", async () => {

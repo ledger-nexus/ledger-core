@@ -17,12 +17,10 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
 import { markRead } from "@/lib/notifications";
-import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
-import {
-  requireCurrentTenant,
-  NoTenantSelectedError,
-} from "@/lib/auth/tenant";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { NoTenantSelectedError } from "@/lib/auth/tenant";
 import { sanitizeActionError } from "@/lib/actions/action-error";
+import { requireActor } from "@/lib/auth/authorize";
 
 export interface MarkNotificationsReadState {
   ok: boolean;
@@ -34,12 +32,10 @@ export async function markNotificationsReadAction(
   input?: { notificationIds?: string[] }
 ): Promise<MarkNotificationsReadState> {
   try {
-    const user = await requireCurrentUser();
-    // 2026-06-05 RLS migration: requireCurrentTenant added so the
-    // withTenantContext wrapper has a tenantId. Today (Phase 2b)
-    // this just sets the GUC; once Phase 3 FORCES RLS, this is the
-    // load-bearing tenant assertion.
-    const tenant = await requireCurrentTenant();
+    // requireActor resolves BOTH: the tenant is not decoration — the
+    // withTenantContext wrapper below needs a tenantId, and once RLS
+    // Phase 3 FORCES policies it becomes the load-bearing assertion.
+    const { user, tenant } = await requireActor("notifications.mark-read");
 
     const { markedCount } = await withTenantContext(prisma, tenant.id, async (tx) => {
       return markRead(tx, user.id, input?.notificationIds ?? null);

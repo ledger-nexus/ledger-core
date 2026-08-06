@@ -10,10 +10,11 @@ import {
   emitReassignmentNotification,
   ReassignError,
 } from "@/lib/ownership/reassign";
-import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
-import { requireCurrentTenant } from "@/lib/auth/tenant";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+
 import { withTenantContext } from "@/lib/tenant-context";
 import { sanitizeActionError } from "@/lib/actions/action-error";
+import { requireActor } from "@/lib/auth/authorize";
 
 export interface ReassignApItemState {
   ok: boolean;
@@ -27,8 +28,7 @@ export async function reassignApItemAction(input: {
   reason?: string;
 }): Promise<ReassignApItemState> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
+    const { user, tenant } = await requireActor("ap.item.reassign");
 
     if (!input.openItemId) return { ok: false, message: "openItemId required" };
     if (!input.newOwnerId) return { ok: false, message: "newOwnerId required" };

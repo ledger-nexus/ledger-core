@@ -32,6 +32,13 @@ _No active claims._
 
 ## Recent completions
 
+### Session authz-remaining-eleven · 2026-08-06
+- **Scope**: the 11 files #352 deferred. My "this needs an authorization decision" framing was wrong — **3 of them already gate on the policy catalog** via `requirePermission(name, role, check)`, and **`requirePermission` throws WITHOUT auditing**, so `approve-journal-entry` / `data-subject-request` / `toggle-je-approval` logged neither unauthenticated refusals nor role denials. Converted to `requirePermitted`: identical predicate and floor, both rows gained, no decision needed. The other 8 have no named permission because several are deliberately member-open → new `requireActor(attemptedAction)` = `requirePermitted` minus the permission check; resolves + audits, changes no gate. 6 of 8 converted.
+- **⚠️ Two exclusions, both deliberate**: `bank-feed` resolves via `requireCurrentScope` (different path); **`setup-first-entity` runs BEFORE a tenant exists**, so auditing "no tenant membership" there would log the normal first-run state as an access denial.
+- **⚠️ My first survey was a false negative** — I grepped `canManage|canPost|canClose|canView|canRemove` and reported "0 admin checks" for `approve-journal-entry`, which gates on `canApproveJournalEntries`. Caught before publishing; widen the pattern or grep `requirePermission(` directly.
+- **Verification**: both new tests fail pre-fix with `expected null not to be null`; 39 + 12 green across authz / je-approvals / period-close / owner-transfer / rls-apply-ar-payment / rls-reassign / rls-mark-notifications-read; tsc 0; build clean.
+- **Branch**: fix/authz-remaining-actions (worktree ~/Code/ledger-core-je-approvals).
+
 ### Session decimal-guard-that-guards · 2026-08-05
 - **Scope**: #347's codemod stopped at the `src/` boundary — **44 test files still imported `decimal.js` directly** (ROUND_HALF_UP / precision 20) while prod runs half-even/28, and `tests/decimal-config.test.ts` only ever pinned that the HELPER is configured, never that nothing bypasses it. All 43 remaining files converted; the guard now walks src/tests/prisma/scripts and FAILS naming any offender, with the configuring module the single exception.
 - **Verification**: guard proven by dropping a probe file in `src/lib/` → `expected [ 'src/lib/_bypass_probe.ts' ] to deeply equal []`. **69 tests across the 10 rounding-sensitive suites passed with no expectation moved** — the bypass was latent, not an active wrong expectation. tsc 0; build clean.
