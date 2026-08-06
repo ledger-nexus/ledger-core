@@ -16,8 +16,8 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { SYSTEM_TEMPLATES } from "./templates";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface SeedSystemTemplatesResult {
   inserted: number;

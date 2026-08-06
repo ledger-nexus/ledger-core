@@ -41,6 +41,7 @@ import { requireCurrentUser } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { signFor } from "@/lib/accounting/types";
+import { indexEntityScopedByCode } from "@/lib/accounting/entity-scope";
 
 const Input = z.object({
   entityId: z.string().uuid(),
@@ -146,14 +147,9 @@ export async function openPeriodReconciliations(
   });
 
   // Dedup by code — entity-override wins over shared.
-  const byCode = new Map<string, (typeof rawAccounts)[number]>();
-  for (const a of rawAccounts) {
-    const existing = byCode.get(a.code);
-    if (!existing || (a.entityId !== null && existing.entityId === null)) {
-      byCode.set(a.code, a);
-    }
-  }
-  const accounts = Array.from(byCode.values());
+  const accounts = Array.from(
+    indexEntityScopedByCode(rawAccounts, entity.id).values()
+  );
 
   // One ReconciliationConfig lookup → applied to every account that
   // doesn't have its own Account-level override. Mirrors the per-recon

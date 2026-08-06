@@ -15,6 +15,7 @@ import { PrismaClient } from "@prisma/client";
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import { Decimal } from "@/lib/utils/decimal";
 import { AccountType, signFor } from "./types";
+import { indexEntityScopedByCode } from "./entity-scope";
 
 const DEFAULT_BOOK = "US_GAAP";
 
@@ -122,16 +123,12 @@ export async function getTrialBalance(
 
   // Dedup: entity-specific account overrides shared (entityId=null) at
   // the same code. See getBalanceSheet for the full rationale.
-  const byCode = new Map<string, (typeof rawAccounts)[number]>();
-  for (const a of rawAccounts) {
-    const existing = byCode.get(a.code);
-    if (!existing || (a.entityId !== null && existing.entityId === null)) {
-      byCode.set(a.code, a);
-    }
-  }
-  const accounts = Array.from(byCode.values()).sort((a, b) =>
-    a.code.localeCompare(b.code)
-  );
+  // The sort is kept rather than relying on the query's ORDER BY:
+  // Postgres's collation and localeCompare can disagree on mixed-case
+  // or punctuated codes, and this is not the change to find that out in.
+  const accounts = Array.from(
+    indexEntityScopedByCode(rawAccounts, entityId).values()
+  ).sort((a, b) => a.code.localeCompare(b.code));
 
   let totalDebit = new Decimal(0);
   let totalCredit = new Decimal(0);
@@ -244,16 +241,12 @@ export async function getIncomeStatement(
   // entity-specific one. Otherwise the IS would show two rows per
   // code (one with the entity's activity, one zero from the shared
   // chart), which is just visual noise.
-  const byCode = new Map<string, (typeof rawAccounts)[number]>();
-  for (const a of rawAccounts) {
-    const existing = byCode.get(a.code);
-    if (!existing || (a.entityId !== null && existing.entityId === null)) {
-      byCode.set(a.code, a);
-    }
-  }
-  const accounts = Array.from(byCode.values()).sort((a, b) =>
-    a.code.localeCompare(b.code)
-  );
+  // The sort is kept rather than relying on the query's ORDER BY:
+  // Postgres's collation and localeCompare can disagree on mixed-case
+  // or punctuated codes, and this is not the change to find that out in.
+  const accounts = Array.from(
+    indexEntityScopedByCode(rawAccounts, entityId).values()
+  ).sort((a, b) => a.code.localeCompare(b.code));
 
   const revenue: IncomeStatement["revenue"] = [];
   const expenses: IncomeStatement["expenses"] = [];
@@ -346,16 +339,12 @@ export async function getBalanceSheet(
   // override means "use this for this entity," not "render both rows."
   // Without dedup, the BS would show two lines per code and
   // .find(c => c.code === X) becomes ambiguous.
-  const byCode = new Map<string, (typeof rawAccounts)[number]>();
-  for (const a of rawAccounts) {
-    const existing = byCode.get(a.code);
-    if (!existing || (a.entityId !== null && existing.entityId === null)) {
-      byCode.set(a.code, a);
-    }
-  }
-  const accounts = Array.from(byCode.values()).sort((a, b) =>
-    a.code.localeCompare(b.code)
-  );
+  // The sort is kept rather than relying on the query's ORDER BY:
+  // Postgres's collation and localeCompare can disagree on mixed-case
+  // or punctuated codes, and this is not the change to find that out in.
+  const accounts = Array.from(
+    indexEntityScopedByCode(rawAccounts, entityId).values()
+  ).sort((a, b) => a.code.localeCompare(b.code));
 
   const assets: BalanceSheet["assets"] = [];
   const liabilities: BalanceSheet["liabilities"] = [];

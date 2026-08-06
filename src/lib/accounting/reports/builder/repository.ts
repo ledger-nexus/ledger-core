@@ -11,15 +11,14 @@
 // SOC 2 CC6.1: every query takes tenantId and uses it. Cross-tenant
 // reads not possible at this layer.
 
-import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { SYSTEM_TEMPLATES } from "./templates";
 import type {
   ReportTemplate,
   ReportTemplateDefinition,
 } from "./types";
+import type { DbClient } from "@/lib/db";
 
-type DbClient = PrismaClient | Prisma.TransactionClient;
 
 /**
  * Load a template by (tenantId, code).
