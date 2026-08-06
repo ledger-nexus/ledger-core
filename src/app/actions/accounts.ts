@@ -27,6 +27,7 @@ import { canEditAccounts, PermissionDeniedError } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 // RLS Phase 2b widening — local helpers take either PrismaClient OR
 // TransactionClient. Used by wouldCreateCycle which is called from
@@ -417,5 +418,5 @@ function handleAuthError(
     // requirePermitted already wrote the ACCESS_DENIED audit row.
     return { ok: false, message: "Managing accounts requires admin permission." };
   }
-  return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+  return { ok: false, message: sanitizeActionError(e, "Unknown error") };
 }

@@ -17,6 +17,7 @@ import {
 import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface ReassignArItemState {
   ok: boolean;
@@ -77,6 +78,6 @@ export async function reassignArItemAction(input: {
     if (e instanceof ReassignError) {
       return { ok: false, message: `${e.code}: ${e.message}` };
     }
-    return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+    return { ok: false, message: sanitizeActionError(e, "Unknown error") };
   }
 }

@@ -26,6 +26,7 @@ import {
   requirePermission,
 } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export async function toggleRequireJeApprovalAction(
   enabled: boolean
@@ -129,5 +130,5 @@ function mapError(e: unknown): { ok: boolean; message?: string } {
     return { ok: false, message: e.message };
   if (e instanceof PermissionDeniedError)
     return { ok: false, message: e.message };
-  return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+  return { ok: false, message: sanitizeActionError(e, "Unknown error") };
 }

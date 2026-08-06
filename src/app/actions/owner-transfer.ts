@@ -41,6 +41,7 @@ import { redactPii } from "@/lib/soc2";
 import { sendOwnerTransferOfferedEmail } from "@/lib/email/templates/owner-transfer-offered";
 import { sendOwnerTransferAcceptedEmail } from "@/lib/email/templates/owner-transfer-accepted";
 import { sendOwnerTransferCancelledEmail } from "@/lib/email/templates/owner-transfer-cancelled";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface OwnerTransferActionState {
   ok: boolean;
@@ -356,6 +357,6 @@ function mapError(e: unknown): OwnerTransferActionState {
     return { ok: false, message: e.message };
   return {
     ok: false,
-    message: e instanceof Error ? e.message : "Unknown error",
+    message: sanitizeActionError(e, "Unknown error"),
   };
 }

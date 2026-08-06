@@ -37,6 +37,7 @@ import { PeriodClosedError } from "@/lib/accounting/types";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { sendJeApprovedEmail } from "@/lib/email/templates/je-approved";
 import { sendJeRejectedEmail } from "@/lib/email/templates/je-rejected";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface ApprovalActionState {
   ok: boolean;
@@ -304,6 +305,6 @@ function mapError(e: unknown): ApprovalActionState {
     return { ok: false, message: e.message };
   return {
     ok: false,
-    message: e instanceof Error ? e.message : "Unknown error",
+    message: sanitizeActionError(e, "Unknown error"),
   };
 }

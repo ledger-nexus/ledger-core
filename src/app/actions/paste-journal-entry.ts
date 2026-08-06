@@ -20,6 +20,7 @@ import { requireCurrentUser } from "@/lib/auth/current-user";
 import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 // ─── Preview ───────────────────────────────────────────────────────────────
 
@@ -179,7 +180,7 @@ export async function postPastedEntryAction(
   } catch (e) {
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "Unknown error during posting",
+      message: sanitizeActionError(e, "Unknown error during posting"),
     };
   }
 }

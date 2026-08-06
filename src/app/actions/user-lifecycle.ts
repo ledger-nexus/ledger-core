@@ -40,6 +40,7 @@ import { requirePermitted } from "@/lib/auth/authorize";
 import { canManageUsers, PermissionDeniedError } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface DeactivateUserInput {
   userId: string;
@@ -201,7 +202,7 @@ export async function deactivateUserAction(
   } catch (e) {
     if (e instanceof NotAuthenticatedError) return { ok: false, message: e.message };
     if (e instanceof PermissionDeniedError) return { ok: false, message: e.message };
-    return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+    return { ok: false, message: sanitizeActionError(e, "Unknown error") };
   }
 }
 
@@ -254,6 +255,6 @@ export async function reactivateUserAction(
   } catch (e) {
     if (e instanceof NotAuthenticatedError) return { ok: false, message: e.message };
     if (e instanceof PermissionDeniedError) return { ok: false, message: e.message };
-    return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+    return { ok: false, message: sanitizeActionError(e, "Unknown error") };
   }
 }

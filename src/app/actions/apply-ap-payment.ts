@@ -7,6 +7,7 @@ import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-us
 import { requireCurrentTenant, NoTenantSelectedError } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export type ApplyApPaymentState =
   | { ok?: undefined; error?: undefined }
@@ -116,7 +117,7 @@ export async function applyApPaymentAction(
     }
     return {
       ok: false,
-      error: e instanceof Error ? e.message : "Unknown error applying vendor payment",
+      error: sanitizeActionError(e, "Unknown error applying vendor payment"),
     };
   }
 }

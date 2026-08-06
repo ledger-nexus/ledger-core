@@ -44,6 +44,7 @@ import { requirePermitted } from "@/lib/auth/authorize";
 import { canClosePeriods, PermissionDeniedError } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { checkRequiredTasksComplete } from "@/lib/close-tasks/rollup";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface ClosePeriodInput {
   entityCode: string;
@@ -230,7 +231,7 @@ export async function closePeriodAction(
       // don't double-log the same refusal here.
       return { ok: false, message: "Period close requires admin permission." };
     }
-    return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+    return { ok: false, message: sanitizeActionError(e, "Unknown error") };
   }
 }
 
@@ -368,6 +369,6 @@ export async function reopenPeriodAction(
       // requirePermitted already wrote the ACCESS_DENIED audit row.
       return { ok: false, message: "Period reopen requires admin permission." };
     }
-    return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+    return { ok: false, message: sanitizeActionError(e, "Unknown error") };
   }
 }

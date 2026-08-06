@@ -30,6 +30,7 @@ import {
 import { requireCurrentScope, NoScopeError } from "@/lib/scope";
 import { auditPrivilegedAction, auditAccessDenied } from "@/lib/audit/log";
 import { prisma } from "@/lib/db";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface RecordCommodityTradeInput {
   side: "BUY" | "SELL";
@@ -223,7 +224,7 @@ export async function recordCommodityTradeAction(
     }
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "Unknown error recording the trade.",
+      message: sanitizeActionError(e, "Unknown error recording the trade."),
     };
   }
 }

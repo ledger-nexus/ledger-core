@@ -15,6 +15,7 @@ import { withTenantContext } from "@/lib/tenant-context";
 import { Decimal } from "@/lib/utils/decimal";
 import { canApproveJournalEntries } from "@/lib/auth/policy";
 import { resolveApprovalRoute } from "@/lib/accounting/approval-threshold";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface NewEntryDraftLine {
   accountCode: string;
@@ -171,7 +172,7 @@ export async function createJournalEntryAction(
     }
     return {
       ok: false,
-      error: e instanceof Error ? e.message : "Unknown error during posting",
+      error: sanitizeActionError(e, "Unknown error during posting"),
     };
   }
 

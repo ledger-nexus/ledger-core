@@ -37,6 +37,7 @@ import {
 } from "@/lib/audit/log";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface ReverseJournalEntryInput {
   /** Source JE id. The reversal targets THIS entry. */
@@ -198,7 +199,7 @@ export async function reverseJournalEntryAction(
     }
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "Unknown error during reversal.",
+      message: sanitizeActionError(e, "Unknown error during reversal."),
     };
   }
 

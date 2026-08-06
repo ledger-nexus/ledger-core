@@ -26,6 +26,7 @@ import { requireCurrentTenant } from "@/lib/auth/tenant";
 import { canClosePeriods } from "@/lib/auth/policy";
 import { auditAccessDenied } from "@/lib/audit/log";
 import { postRevaluation } from "@/lib/accounting/revaluation-posting";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 // Period codes are "2026-06" (monthly) or "2026-Q2" (quarterly). Keep the
 // validation permissive of both but reject free-form input.
@@ -130,7 +131,7 @@ export async function postFxRevaluationAction(
     return {
       ok: false,
       code: "POST_FAILED",
-      error: e instanceof Error ? e.message : "Unknown error posting revaluation",
+      error: sanitizeActionError(e, "Unknown error posting revaluation"),
     };
   }
 }

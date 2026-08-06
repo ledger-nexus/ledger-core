@@ -22,6 +22,7 @@ import {
   requireCurrentTenant,
   NoTenantSelectedError,
 } from "@/lib/auth/tenant";
+import { sanitizeActionError } from "@/lib/actions/action-error";
 
 export interface MarkNotificationsReadState {
   ok: boolean;
@@ -50,6 +51,6 @@ export async function markNotificationsReadAction(
     if (e instanceof NotAuthenticatedError) return { ok: false, message: e.message };
     if (e instanceof NoTenantSelectedError)
       return { ok: false, message: e.message };
-    return { ok: false, message: e instanceof Error ? e.message : "Unknown error" };
+    return { ok: false, message: sanitizeActionError(e, "Unknown error") };
   }
 }
