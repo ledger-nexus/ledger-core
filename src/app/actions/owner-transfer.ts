@@ -16,14 +16,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import {
-  requireCurrentUser,
-  NotAuthenticatedError,
-} from "@/lib/auth/current-user";
-import {
-  requireCurrentTenant,
-  NoTenantSelectedError,
-} from "@/lib/auth/tenant";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { NoTenantSelectedError } from "@/lib/auth/tenant";
 import {
   initiateOwnerTransfer,
   acceptOwnerTransfer,
@@ -42,6 +36,7 @@ import { sendOwnerTransferOfferedEmail } from "@/lib/email/templates/owner-trans
 import { sendOwnerTransferAcceptedEmail } from "@/lib/email/templates/owner-transfer-accepted";
 import { sendOwnerTransferCancelledEmail } from "@/lib/email/templates/owner-transfer-cancelled";
 import { sanitizeActionError } from "@/lib/actions/action-error";
+import { requireActor } from "@/lib/auth/authorize";
 
 export interface OwnerTransferActionState {
   ok: boolean;
@@ -54,8 +49,7 @@ export async function initiateOwnerTransferAction(
   targetUserId: string
 ): Promise<OwnerTransferActionState> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
+    const { user, tenant } = await requireActor("tenant.owner-transfer.initiate");
 
     const result = await initiateOwnerTransfer(prisma, {
       tenantId: tenant.id,
@@ -109,8 +103,7 @@ export async function initiateOwnerTransferAction(
 
 export async function acceptOwnerTransferAction(): Promise<OwnerTransferActionState> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
+    const { user, tenant } = await requireActor("tenant.owner-transfer.accept");
 
     const result = await acceptOwnerTransfer(prisma, {
       tenantId: tenant.id,
@@ -167,8 +160,7 @@ export async function acceptOwnerTransferAction(): Promise<OwnerTransferActionSt
 
 export async function cancelOwnerTransferAction(): Promise<OwnerTransferActionState> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
+    const { user, tenant } = await requireActor("tenant.owner-transfer.cancel");
 
     const result = await cancelOwnerTransfer(prisma, {
       tenantId: tenant.id,

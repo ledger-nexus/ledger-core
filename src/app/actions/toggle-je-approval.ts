@@ -12,29 +12,21 @@
 import { revalidatePath } from "next/cache";
 import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
-import {
-  requireCurrentUser,
-  NotAuthenticatedError,
-} from "@/lib/auth/current-user";
-import {
-  requireCurrentTenant,
-  NoTenantSelectedError,
-} from "@/lib/auth/tenant";
-import {
-  canViewAdminPages,
-  PermissionDeniedError,
-  requirePermission,
-} from "@/lib/auth/policy";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { NoTenantSelectedError } from "@/lib/auth/tenant";
+import { canViewAdminPages, PermissionDeniedError } from "@/lib/auth/policy";
 import { auditPrivilegedAction } from "@/lib/audit/log";
 import { sanitizeActionError } from "@/lib/actions/action-error";
+import { requirePermitted } from "@/lib/auth/authorize";
 
 export async function toggleRequireJeApprovalAction(
   enabled: boolean
 ): Promise<{ ok: boolean; message?: string }> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
-    requirePermission("toggle_je_approval", tenant.role, canViewAdminPages);
+    const { user, tenant } = await requirePermitted(
+      "toggle_je_approval",
+      canViewAdminPages
+    );
 
     await prisma.tenant.update({
       where: { id: tenant.id },
@@ -68,9 +60,10 @@ export async function setJeApprovalThresholdAction(
   rawAmount: string
 ): Promise<{ ok: boolean; message?: string }> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
-    requirePermission("toggle_je_approval", tenant.role, canViewAdminPages);
+    const { user, tenant } = await requirePermitted(
+      "toggle_je_approval",
+      canViewAdminPages
+    );
 
     // Normalize: empty / whitespace / non-positive number → clear it
     // (null in the DB = original binary behavior). Anything else must

@@ -67,32 +67,58 @@ function refusalReason(e: unknown): string | null {
   return null;
 }
 
+/**
+ * Resolve the caller, auditing any refusal to resolve one.
+ *
+ * `requireActor` is `requirePermitted` without the permission check —
+ * for actions every member of the tenant may perform, where there is no
+ * role floor to name. Reaching for it is a positive statement ("this is
+ * open to any member"), which is why it takes an `attemptedAction`: the
+ * audit row still has to say what was being attempted.
+ *
+ * Not a way to skip authorization. An action with a floor uses
+ * `requirePermitted`; an action whose rule is richer than a role (the
+ * ownership transfer's only-OWNER-initiates, only-TARGET-accepts) still
+ * enforces it in its own domain layer.
+ */
+export async function requireActor(
+  attemptedAction: string
+): Promise<AuthzContext> {
+  try {
+    const user = await requireCurrentUser();
+    const tenant = await requireCurrentTenant();
+    return { user, tenant };
+  } catch (e) {
+    await auditUnresolvedActor(attemptedAction, e);
+    throw e;
+  }
+}
+
+/** Audit a caller we could not resolve, then let the error through. */
+async function auditUnresolvedActor(
+  attemptedAction: string,
+  e: unknown
+): Promise<void> {
+  const reason = refusalReason(e);
+  if (!reason) return;
+  // Best-effort actor: absent when nobody is signed in, present for the
+  // tenant cases (the session resolved, the tenant did not), so the row
+  // names who when it can.
+  const actor = await getCurrentUser().catch(() => null);
+  await auditAccessDenied({
+    attemptedAction,
+    actor: actor ? { id: actor.id, email: actor.email } : null,
+    reason,
+    resource: "Permission",
+    resourceId: attemptedAction,
+  });
+}
+
 export async function requirePermitted(
   permission: string,
   check: (role: TenantRole | undefined | null) => boolean
 ): Promise<AuthzContext> {
-  let user: CurrentUser;
-  let tenant: CurrentTenant;
-  try {
-    user = await requireCurrentUser();
-    tenant = await requireCurrentTenant();
-  } catch (e) {
-    const reason = refusalReason(e);
-    if (reason) {
-      // Best-effort actor: absent when nobody is signed in, present for
-      // the tenant cases (the session resolved, the tenant did not), so
-      // the row names who when it can.
-      const actor = await getCurrentUser().catch(() => null);
-      await auditAccessDenied({
-        attemptedAction: permission,
-        actor: actor ? { id: actor.id, email: actor.email } : null,
-        reason,
-        resource: "Permission",
-        resourceId: permission,
-      });
-    }
-    throw e;
-  }
+  const { user, tenant } = await requireActor(permission);
 
   if (!check(tenant.role)) {
     await auditAccessDenied({

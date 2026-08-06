@@ -3,11 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { applyApPaymentInTx } from "@/lib/accounting/sub-ledgers/ap";
-import { requireCurrentUser, NotAuthenticatedError } from "@/lib/auth/current-user";
-import { requireCurrentTenant, NoTenantSelectedError } from "@/lib/auth/tenant";
+import { NotAuthenticatedError } from "@/lib/auth/current-user";
+import { NoTenantSelectedError } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
 import { sanitizeActionError } from "@/lib/actions/action-error";
+import { requireActor } from "@/lib/auth/authorize";
 
 export type ApplyApPaymentState =
   | { ok?: undefined; error?: undefined }
@@ -36,8 +37,7 @@ export async function applyApPaymentAction(
   formData: FormData
 ): Promise<ApplyApPaymentState> {
   try {
-    const user = await requireCurrentUser();
-    const tenant = await requireCurrentTenant();
+    const { user, tenant } = await requireActor("ap.payment.apply");
 
     const openItemId = String(formData.get("openItemId") ?? "");
     const cashAccountCode = String(formData.get("cashAccountCode") ?? "1000");
