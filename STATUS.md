@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session flux-entity-scope · 2026-08-05
+- **Scope**: the defect #354 found and deferred. `getFluxAnalysis` resolved account ids with `tenantId` + `code` and NO entity filter (nor `orderBy`), so a sibling entity's account could win the code and land on a persisted `FluxLine`. Now entity-or-shared + `indexEntityScopedByCode`; `resolveEntityBook` exported from reports.ts rather than re-deriving entity resolution in flux.
+- **Verification**: pre-fix, the new sibling fixture makes **6 tests fail including 4 pre-existing ones** — reachable, not theoretical. 26 flux tests + 12 reports/consolidation tests green; tsc 0; build clean. Dev DB scanned for existing damage (`flux_line`→`flux_statement`→`account` on mismatched entityId): 0 of 0 rows.
+- **Branch**: fix/flux-entity-scoped-accounts (worktree ~/Code/ledger-core-je-approvals).
+
 ### Session recon-match-index · 2026-08-05
 - **Scope**: last item from the 2026-08-05 review. `matchTransactions` scanned every unclaimed GL line for every statement line; amount equality is EXACT, so the candidates worth inspecting are exactly those sharing an amount. Now bucketed by `amountKey` = `Decimal.toFixed()`, filled in `gl` order so "earliest of equally-close candidates" is preserved.
 - **Verification**: equivalence against a full-scan reference over a 120×120 collision-heavy dataset (>50 pairs, identical); an operation COUNT (not a timing — reproducible anywhere): 150×150 distinct amounts made 0 pairwise `Decimal.equals` calls where the scan made ~22,500. A lossy `toFixed(2)` key fails 2 of the new tests. 23 tests green across recon-transaction-match / recon-auto-open / banking-match; tsc 0; build clean.
