@@ -62,7 +62,11 @@ import {
   deactivateUserAction,
   reactivateUserAction,
 } from "@/app/actions/user-lifecycle";
-import { _internal as authInternal } from "@/lib/auth/current-user";
+import {
+  _internal as authInternal,
+  NotAuthenticatedError,
+} from "@/lib/auth/current-user";
+import { NotAuthenticatedError as TenantNotAuthenticatedError } from "@/lib/auth/tenant";
 
 const prisma = new PrismaClient();
 
@@ -275,6 +279,44 @@ describe("requirePermitted through real Server Actions", () => {
       orderBy: { occurredAt: "desc" },
     });
     expect(denial).not.toBeNull();
+  });
+
+  it("audits an UNAUTHENTICATED attempt at a gated action (CC7.2)", async () => {
+    // `deactivateUserAction` is deliberate: it is one of the eighteen
+    // action files whose catch block did NOT write this row, so it only
+    // passes because requirePermitted now audits at the throw site. Ten
+    // other files (period-close among them) hand-rolled the audit and
+    // would pass either way — they cannot discriminate.
+    mockCookieStore.clear(); // signed out entirely
+    const since = new Date(Date.now() - 1000);
+
+    const res = await deactivateUserAction({ userId: memberA.id });
+    expect(res.ok).toBe(false);
+
+    const denial = await prisma.auditLog.findFirst({
+      where: {
+        eventType: "ACCESS_DENIED",
+        action: "user.manage",
+        // No actor — nobody was signed in. The attempt is still a fact
+        // the log has to carry.
+        actorUserId: null,
+        occurredAt: { gte: since },
+      },
+      orderBy: { occurredAt: "desc" },
+    });
+    expect(denial).not.toBeNull();
+    expect((denial!.metadata as { reason?: string })?.reason).toBe(
+      "Not authenticated"
+    );
+    expect(denial!.outcome).toBe("FAILURE");
+  });
+
+  it("NotAuthenticatedError is one class, so every instanceof check matches", () => {
+    // Two classes of this name used to exist — this one and a second in
+    // ./tenant that requireCurrentTenant threw. Action catch blocks
+    // import THIS one, so the check was silently false for anything the
+    // tenant resolver raised: handled branch skipped, no audit row.
+    expect(TenantNotAuthenticatedError).toBe(NotAuthenticatedError);
   });
 
   it("admits an ADMIN past the gate (fails later on unknown entity, not permission)", async () => {

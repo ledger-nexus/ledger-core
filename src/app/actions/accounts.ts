@@ -24,10 +24,7 @@ import type { AccountType, NormalBalance, Prisma, PrismaClient } from "@prisma/c
 import { NotAuthenticatedError } from "@/lib/auth/current-user";
 import { requirePermitted } from "@/lib/auth/authorize";
 import { canEditAccounts, PermissionDeniedError } from "@/lib/auth/policy";
-import {
-  auditPrivilegedAction,
-  auditAccessDenied,
-} from "@/lib/audit/log";
+import { auditPrivilegedAction } from "@/lib/audit/log";
 import { prisma } from "@/lib/db";
 import { withTenantContext } from "@/lib/tenant-context";
 
@@ -412,11 +409,8 @@ function handleAuthError(
   attemptedAction: string
 ): { ok: false; message: string } {
   if (e instanceof NotAuthenticatedError) {
-    void auditAccessDenied({
-      attemptedAction,
-      reason: "Not authenticated",
-      resource: "Account",
-    });
+    // requirePermitted wrote the ACCESS_DENIED row at the throw site —
+    // logging here too would double-count the same refusal.
     return { ok: false, message: "You must be signed in." };
   }
   if (e instanceof PermissionDeniedError) {
