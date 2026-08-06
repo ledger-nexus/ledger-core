@@ -17,7 +17,7 @@
 
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
-import { getCurrentUser } from "./current-user";
+import { getCurrentUser, NotAuthenticatedError } from "./current-user";
 import type { TenantRole } from "@prisma/client";
 
 export interface CurrentTenant {
@@ -83,12 +83,22 @@ export async function getCurrentTenant(): Promise<CurrentTenant | null> {
   return null;
 }
 
-export class NotAuthenticatedError extends Error {
-  constructor() {
-    super("Not authenticated — sign in first");
-    this.name = "NotAuthenticatedError";
-  }
-}
+// NotAuthenticatedError is ONE class, defined in ./current-user and
+// re-exported here.
+//
+// This file used to declare a second class of the same name and its own
+// message. Nothing imported it — but `requireCurrentTenant` THREW it,
+// and every `catch (e) { if (e instanceof NotAuthenticatedError) ... }`
+// in the action layer imports the other one. Two classes named the same
+// thing make that check silently false: the handled branch is skipped,
+// the caller falls through to its generic catch, and the ACCESS_DENIED
+// row never gets written.
+//
+// Today every call site happens to reach `requireCurrentUser` first, so
+// the current-user class always throws first and the checks match. That
+// is luck, not design — the first site to need only a tenant would have
+// found the trap. One class removes the question.
+export { NotAuthenticatedError };
 
 export class NoTenantSelectedError extends Error {
   constructor() {

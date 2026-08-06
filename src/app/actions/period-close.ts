@@ -42,10 +42,7 @@ import { prisma } from "@/lib/db";
 import { NotAuthenticatedError } from "@/lib/auth/current-user";
 import { requirePermitted } from "@/lib/auth/authorize";
 import { canClosePeriods, PermissionDeniedError } from "@/lib/auth/policy";
-import {
-  auditPrivilegedAction,
-  auditAccessDenied,
-} from "@/lib/audit/log";
+import { auditPrivilegedAction } from "@/lib/audit/log";
 import { checkRequiredTasksComplete } from "@/lib/close-tasks/rollup";
 
 export interface ClosePeriodInput {
@@ -223,12 +220,9 @@ export async function closePeriodAction(
     };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
-      await auditAccessDenied({
-        attemptedAction: "close-period",
-        reason: "Not authenticated",
-        resource: "Period",
-        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
-      });
+      // requirePermitted wrote the ACCESS_DENIED row — same rule as the
+      // PermissionDenied branch below. This used to log its own, which
+      // is now a duplicate of the central one.
       return { ok: false, message: "You must be signed in." };
     }
     if (e instanceof PermissionDeniedError) {
@@ -367,12 +361,7 @@ export async function reopenPeriodAction(
     };
   } catch (e) {
     if (e instanceof NotAuthenticatedError) {
-      await auditAccessDenied({
-        attemptedAction: "reopen-period",
-        reason: "Not authenticated",
-        resource: "Period",
-        resourceId: `${input.entityCode}/${input.bookCode}/${input.periodCode}`,
-      });
+      // See closePeriodAction — the central row covers this now.
       return { ok: false, message: "You must be signed in." };
     }
     if (e instanceof PermissionDeniedError) {

@@ -33,10 +33,7 @@ import {
   canManageRecurringEntries,
   PermissionDeniedError,
 } from "@/lib/auth/policy";
-import {
-  auditPrivilegedAction,
-  auditAccessDenied,
-} from "@/lib/audit/log";
+import { auditPrivilegedAction } from "@/lib/audit/log";
 import {
   runRecurringEntries,
   enumerateDueDates,
@@ -557,11 +554,8 @@ function handleAuthError(
   attemptedAction: string
 ): { ok: false; message: string } {
   if (e instanceof NotAuthenticatedError) {
-    void auditAccessDenied({
-      attemptedAction,
-      reason: "Not authenticated",
-      resource: "RecurringEntry",
-    });
+    // requirePermitted wrote the ACCESS_DENIED row at the throw site —
+    // logging here too would double-count the same refusal.
     return { ok: false, message: "You must be signed in." };
   }
   if (e instanceof PermissionDeniedError) {
