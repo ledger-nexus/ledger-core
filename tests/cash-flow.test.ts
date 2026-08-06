@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getCashFlowStatement } from "../src/lib/accounting/reports/cash-flow";
 import { CHART_OF_ACCOUNTS } from "../src/lib/db/chart-of-accounts";

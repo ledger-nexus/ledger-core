@@ -4,7 +4,7 @@
 // all balance and move the category the right way.
 
 import { describe, it, expect } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { deriveCategorizationLines } from "../src/lib/banking/post";
 
 function balanced(lines: { debit?: string; credit?: string }[]): boolean {

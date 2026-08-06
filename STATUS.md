@@ -32,6 +32,11 @@ _No active claims._
 
 ## Recent completions
 
+### Session decimal-guard-that-guards · 2026-08-05
+- **Scope**: #347's codemod stopped at the `src/` boundary — **44 test files still imported `decimal.js` directly** (ROUND_HALF_UP / precision 20) while prod runs half-even/28, and `tests/decimal-config.test.ts` only ever pinned that the HELPER is configured, never that nothing bypasses it. All 43 remaining files converted; the guard now walks src/tests/prisma/scripts and FAILS naming any offender, with the configuring module the single exception.
+- **Verification**: guard proven by dropping a probe file in `src/lib/` → `expected [ 'src/lib/_bypass_probe.ts' ] to deeply equal []`. **69 tests across the 10 rounding-sensitive suites passed with no expectation moved** — the bypass was latent, not an active wrong expectation. tsc 0; build clean.
+- **Branch**: chore/decimal-import-guard (worktree ~/Code/ledger-core-je-approvals).
+
 ### Session flux-entity-scope · 2026-08-05
 - **Scope**: the defect #354 found and deferred. `getFluxAnalysis` resolved account ids with `tenantId` + `code` and NO entity filter (nor `orderBy`), so a sibling entity's account could win the code and land on a persisted `FluxLine`. Now entity-or-shared + `indexEntityScopedByCode`; `resolveEntityBook` exported from reports.ts rather than re-deriving entity resolution in flux.
 - **Verification**: pre-fix, the new sibling fixture makes **6 tests fail including 4 pre-existing ones** — reachable, not theoretical. 26 flux tests + 12 reports/consolidation tests green; tsc 0; build clean. Dev DB scanned for existing damage (`flux_line`→`flux_statement`→`account` on mismatched entityId): 0 of 0 rows.

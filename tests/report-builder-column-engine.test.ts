@@ -10,7 +10,7 @@
 //     getIncomeStatement implementation
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { PrismaClient } from "@prisma/client";
 
 import { postJournalEntry } from "@/lib/accounting/post-journal";

@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { checkSubledgerTies } from "@/lib/accounting/subledger-ties";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { openArItem } from "@/lib/accounting/sub-ledgers/ar";

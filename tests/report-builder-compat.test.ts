@@ -17,7 +17,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";

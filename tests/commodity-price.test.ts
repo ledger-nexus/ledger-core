@@ -17,7 +17,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { getCommodityPrice, recordCommodityPrice } from "@/lib/accounting/commodity-price";
 import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";
 

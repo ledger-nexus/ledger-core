@@ -34,7 +34,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { getBalanceSheet } from "../src/lib/accounting/reports";
 

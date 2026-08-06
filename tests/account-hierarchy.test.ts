@@ -1,7 +1,7 @@
 // Pure-function unit tests for the account-hierarchy helper. No DB.
 
 import { describe, it, expect } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import {
   buildHierarchy,
   flattenForDisplay,

@@ -25,7 +25,7 @@ import {
   vi,
 } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import Decimal from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { withAuditLogMutable } from "./_helpers/audit-log-cleanup";
 
 const mockCookieStore = new Map<string, { value: string }>();

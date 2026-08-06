@@ -24,6 +24,9 @@
 //
 // DB-free.
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { Decimal } from "@/lib/utils/decimal";
@@ -88,5 +91,51 @@ describe("the configured Decimal", () => {
     });
     expect(r.matched).toHaveLength(1);
     expect(r.netUnmatched.toString()).toBe("0");
+  });
+});
+
+// ── The guard that was missing ──────────────────────────────────────────
+//
+// Everything above pins that `@/lib/utils/decimal` hands out a
+// CONFIGURED constructor. None of it noticed that 44 test files were
+// importing `decimal.js` directly and therefore never getting it —
+// #347's codemod stopped at the `src/` boundary, and the suite that was
+// supposed to protect the invariant only ever checked the helper.
+//
+// A property nobody can bypass needs a check on the bypass, not on the
+// happy path.
+
+describe("nothing imports decimal.js directly", () => {
+  const HELPER = path.join("src", "lib", "utils", "decimal.ts");
+
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        walk(full, out);
+      } else if (/\.tsx?$/.test(e.name)) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  it("across src/ and tests/, except the one module that configures it", () => {
+    const offenders = ["src", "tests", "prisma", "scripts"]
+      .filter((d) => fs.existsSync(d))
+      .flatMap((d) => walk(d))
+      .filter((f) => path.normalize(f) !== HELPER)
+      .filter((f) => /from\s+["']decimal\.js["']/.test(fs.readFileSync(f, "utf8")));
+
+    // Named, not counted: a failure should say which file to fix.
+    expect(offenders).toEqual([]);
+  });
+
+  it("and the helper itself is the one that configures it", () => {
+    const src = fs.readFileSync(HELPER, "utf8");
+    expect(src).toMatch(/from ["']decimal\.js["']/);
+    expect(src).toMatch(/Decimal\.set\(/);
+    expect(src).toMatch(/ROUND_HALF_EVEN/);
   });
 });

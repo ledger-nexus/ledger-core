@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { augmentLot, getOpenLots, consumeLots } from "@/lib/accounting/lots";
 import { bookReduction } from "@/lib/accounting/inventory";
 import { withAuditLogMutableTransaction } from "./_helpers/audit-log-cleanup";

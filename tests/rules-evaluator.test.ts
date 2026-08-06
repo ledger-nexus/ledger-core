@@ -1,7 +1,7 @@
 // Reassignment rules — evaluator unit tests. Pure functions, no DB.
 
 import { describe, it, expect } from "vitest";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { evaluate, resolveFieldPath, EvaluatorError } from "../src/lib/rules/evaluator";
 import type { Clause } from "../src/lib/rules/types";
 

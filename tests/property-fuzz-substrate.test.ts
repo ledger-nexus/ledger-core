@@ -25,7 +25,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import fc from "fast-check";
 import { PrismaClient } from "@prisma/client";
-import { Decimal } from "decimal.js";
+import { Decimal } from "@/lib/utils/decimal";
 import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 import { postJournalEntry } from "@/lib/accounting/post-journal";
 import {
