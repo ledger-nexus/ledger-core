@@ -28,18 +28,32 @@
 // treatments land in this one entity, and the seed only has to set the
 // equity one — 4000 already carries WEIGHTED_AVG.
 //
+// As the consolidation page renders it out of the box — asOf 30 Jun
+// with the DEFAULT period start, which is a quarter back day 1, i.e.
+// 1 March (not 1 April; see the correction below):
+//
 //   cash     €28,000 × 1.11500  CURRENT_RATE   30 Jun close  = $31,220 DR
 //   capital  €20,000 × 1.05000  HISTORICAL     2 Jan, the
 //                               day it was contributed       = $21,000 CR
-//   revenue   €8,000 × 1.10625  WEIGHTED_AVG   mean of the
-//                               31 Mar 1.0975 open and the
-//                               1.115 close                  =  $8,850 CR
-//   CTA (the balancing plug)                                 =  $1,370 CR
+//   revenue   €8,000 × 1.10300  WEIGHTED_AVG   mean of the
+//                               28 Feb 1.091 (the on-or-before
+//                               rate at a 1 Mar start) and
+//                               the 1.115 close              =  $8,824 CR
+//   CTA (the balancing plug)                                 =  $1,396 CR
+//
+// ⚠️ This example previously read 1.10625 / $8,850 / CTA $1,370, which
+// is what you get from a 1 APRIL start (mean of the 31 Mar 1.0975 and
+// the close) — and the page reproduces those figures exactly if you
+// hand it `periodStart=2026-04-01`. But `deriveDefaultPeriodStart`
+// subtracts three months from 30 Jun and clamps to day 1, which lands
+// on 1 March, and `resolveFxRate` is on-or-before, so the start rate is
+// February's 1.091. The engine was right both times; the worked example
+// was assuming a window the default does not produce.
 //
 // Read: the euros bought more dollars at the 30 Jun close than at the
 // 2 Jan contribution rate, and that unrealized gain sits in equity
 // rather than income. Consolidated revenue becomes $15,000 from the
-// USD subs + $8,850 translated = $23,850.
+// USD subs + $8,824 translated = $23,824.
 
 import { PrismaClient } from "@prisma/client";
 import { postJournalEntry } from "../accounting/post-journal";
