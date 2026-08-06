@@ -26,7 +26,7 @@ const DEFAULT_BOOK = "US_GAAP";
 // exists in another tenant would silently load THAT tenant's entity.
 // All UI report callers MUST pass tenantId (from getCurrentScope).
 // The optional fallback exists for legacy seed / single-tenant scripts.
-async function resolveEntityBook(
+export async function resolveEntityBook(
   prisma: PrismaClient,
   entityCode: string,
   bookCode: string,

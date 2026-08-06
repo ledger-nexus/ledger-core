@@ -61,6 +61,7 @@ let fromPeriod: { id: string; code: string; endsOn: Date };
 let toPeriod: { id: string; code: string; endsOn: Date };
 // Accounts with controlled GL balances so the helper produces known deltas.
 const accountIds: Record<string, string> = {};
+let siblingCashAccountId: string;
 
 async function postPair(
   debitId: string,
@@ -220,6 +221,35 @@ beforeAll(async () => {
     `${SUFFIX}_OFF`.slice(0, 20),
     "LIABILITY"
   );
+
+  // A SIBLING entity holding an account at the SAME code as CASH.
+  // It is not in this flux's scope at all — the analysis is for
+  // `entity` — so it must never be able to supply the accountId that
+  // lands on a persisted FluxLine. Before the entity filter, flux's
+  // account scan was tenant-and-code only, and the entity-scoped
+  // sibling row beat both the shared account and the entity's own.
+  const sibling = await prisma.legalEntity.create({
+    data: {
+      tenantId: tenant.id,
+      code: `FX2S-${SUFFIX}`.slice(0, 50),
+      name: "Flux Sibling Entity",
+      functionalCurrencyId: "USD",
+    },
+    select: { id: true },
+  });
+  siblingCashAccountId = (
+    await prisma.account.create({
+      data: {
+        tenantId: tenant.id,
+        entityId: sibling.id,
+        code: `${SUFFIX}_CASH`.slice(0, 20), // deliberately the same code
+        name: "Sibling cash — must not win",
+        type: "ASSET",
+        normalBalance: "DEBIT",
+      },
+      select: { id: true },
+    })
+  ).id;
 
   // Seed FROM-period balances (post by end of May).
   //   CASH:    Dr 50,000 / Cr OFFSET 50,000
@@ -562,5 +592,29 @@ describe("generateFluxStatement — Server Action end-to-end", () => {
       select: { status: true },
     });
     expect(ar!.status).toBe("WAIVED");
+  });
+});
+
+describe("account resolution is entity-scoped", () => {
+  it("never resolves a sibling entity's account at the same code", async () => {
+    // The numbers come from the trial balance and were always right.
+    // What was wrong is the accountId this analysis hands to FluxLine —
+    // and a flux line pointing at another entity's account is a
+    // referential lie that survives in the database.
+    const result = await getFluxAnalysis(prisma, {
+      tenantId: tenant.id,
+      entityCode: entity.code,
+      bookCode: book.code,
+      asOfPrior: fromPeriod.endsOn,
+      asOfCurrent: toPeriod.endsOn,
+      absoluteThreshold: new Decimal("5000"),
+      percentThreshold: new Decimal("10"),
+    });
+
+    // The shared account is the one in scope; the sibling's is not.
+    expect(result.lines.some((l) => l.accountId === accountIds.CASH)).toBe(true);
+    expect(result.lines.some((l) => l.accountId === siblingCashAccountId)).toBe(
+      false
+    );
   });
 });

@@ -28,8 +28,10 @@ import type { DbClient } from "@/lib/db";
 
 import {
   getTrialBalance,
+  resolveEntityBook,
   type TrialBalanceRow,
 } from "@/lib/accounting/reports";
+import { indexEntityScopedByCode } from "@/lib/accounting/entity-scope";
 
 
 export interface FluxAnalysisLine {
@@ -78,10 +80,17 @@ export async function getFluxAnalysis(
     tenantId: args.tenantId,
   };
 
-  // Two trial balances. Run in parallel — independent reads.
-  const [priorTb, currentTb] = await Promise.all([
+  // Two trial balances, plus the entity id the account scan needs.
+  // Run in parallel — independent reads.
+  const [priorTb, currentTb, { entityId }] = await Promise.all([
     getTrialBalance(prisma as PrismaClient, scope, args.asOfPrior),
     getTrialBalance(prisma as PrismaClient, scope, args.asOfCurrent),
+    resolveEntityBook(
+      prisma as PrismaClient,
+      args.entityCode,
+      args.bookCode,
+      args.tenantId
+    ),
   ]);
 
   // Index both by accountCode for the join. Each TB returns one row
@@ -98,14 +107,27 @@ export async function getFluxAnalysis(
     ...currentByCode.keys(),
   ]);
 
-  // Pull accountIds in one query. Codes can be entity-specific or
-  // shared (entityId=null); we accept any matching code in the
-  // tenant — the trial-balance dedup already collapsed the
-  // entity-override-wins logic before reaching us.
+  // Pull accountIds for the FluxLine FK.
+  //
+  // This query used to filter on tenant + code ALONE, with a comment
+  // saying the trial-balance dedup had already settled which account
+  // wins. It hadn't — the TB collapses its OWN rows, but this is a
+  // fresh query, and without an entity filter it returns every account
+  // in the TENANT at that code, including ones scoped to SIBLING
+  // entities. The hand-rolled dedup then kept whichever arrived first
+  // unless a later row was entity-scoped, so a sibling's account beat
+  // both the shared account AND this entity's own — and with no
+  // `orderBy`, which sibling won was down to Postgres. The id landed on
+  // a persisted FluxLine.
+  //
+  // Scoped the same way every other report scopes: entity-or-shared,
+  // then `indexEntityScopedByCode`, which drops sibling rows outright
+  // rather than ranking them.
   const accounts = await prisma.account.findMany({
     where: {
       tenantId: args.tenantId,
       code: { in: Array.from(allCodes) },
+      OR: [{ entityId: null }, { entityId }],
     },
     select: {
       id: true,
@@ -114,24 +136,9 @@ export async function getFluxAnalysis(
       type: true,
       entityId: true,
     },
+    orderBy: { code: "asc" },
   });
-  // Dedup the same way getTrialBalance does: entity-override wins
-  // over shared (entityId=null) at the same code.
-  const accountByCode = new Map<
-    string,
-    { id: string; name: string; type: AccountType; entityId: string | null }
-  >();
-  for (const a of accounts) {
-    const existing = accountByCode.get(a.code);
-    if (!existing || (a.entityId !== null && existing.entityId === null)) {
-      accountByCode.set(a.code, {
-        id: a.id,
-        name: a.name,
-        type: a.type,
-        entityId: a.entityId,
-      });
-    }
-  }
+  const accountByCode = indexEntityScopedByCode(accounts, entityId);
 
   // Build the lines.
   const lines: FluxAnalysisLine[] = [];
