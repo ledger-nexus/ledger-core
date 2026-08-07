@@ -86,10 +86,10 @@ export default async function HoldingsPage() {
                     <TD className="amount-cell text-right">{formatMoney(h.averageCost)}</TD>
                     <TD className="amount-cell text-right">{formatMoney(h.totalCost)}</TD>
                     <TD className="amount-cell text-right">
-                      {h.marketValue ? formatMoney(h.marketValue) : <span className="text-ink-400">—</span>}
+                      {h.marketValue ? formatMoney(h.marketValue) : <span className="text-ink-500">—</span>}
                     </TD>
                     <TD className="amount-cell text-right">
-                      {h.unrealizedGain ? formatMoney(h.unrealizedGain) : <span className="text-ink-400">—</span>}
+                      {h.unrealizedGain ? formatMoney(h.unrealizedGain) : <span className="text-ink-500">—</span>}
                     </TD>
                     <TD className="text-right text-ink-500">{h.lotCount}</TD>
                   </TR>

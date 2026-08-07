@@ -105,7 +105,7 @@ export default async function FixedAssetsPage() {
                     <TD>
                       {r.description}
                       {r.category ? (
-                        <span className="text-ink-400 text-xs"> · {r.category}</span>
+                        <span className="text-ink-500 text-xs"> · {r.category}</span>
                       ) : null}
                     </TD>
                     <TD className="font-mono text-xs">{r.assetAccountCode}</TD>

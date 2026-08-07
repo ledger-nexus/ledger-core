@@ -91,7 +91,7 @@ export default async function CommoditiesPage() {
                         {c.assetClass ? (
                           <Badge tone="neutral">{c.assetClass}</Badge>
                         ) : (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                       </TD>
                       <TD className="amount-cell text-right">
@@ -100,14 +100,14 @@ export default async function CommoditiesPage() {
                         ) : (
                           // No price on file: holdings will report this
                           // position at cost rather than invent a mark.
-                          <span className="text-ink-400">no price</span>
+                          <span className="text-ink-500">no price</span>
                         )}
                       </TD>
                       <TD>
                         {latest ? (
                           latest.asOf.toISOString().slice(0, 10)
                         ) : (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                       </TD>
                       <TD className="text-right">{c._count.lots}</TD>

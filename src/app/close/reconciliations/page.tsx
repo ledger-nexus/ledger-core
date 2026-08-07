@@ -490,7 +490,7 @@ export default async function ReconciliationsListPage({
                               new Decimal(r.supportingBalance.toString())
                             )
                           : (
-                            <span className="text-ink-400">—</span>
+                            <span className="text-ink-500">—</span>
                           )}
                       </TD>
                       <TD
@@ -503,7 +503,7 @@ export default async function ReconciliationsListPage({
                         {diff ? (
                           formatMoney(diff)
                         ) : (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                       </TD>
                       <TD className="text-xs text-ink-500">
@@ -511,20 +511,20 @@ export default async function ReconciliationsListPage({
                       </TD>
                       <TD className="text-xs text-ink-700">
                         {r.preparer?.displayName ?? (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                         {r.preparedAt && (
-                          <div className="text-[10px] text-ink-500">
+                          <div className="text-[11px] text-ink-500">
                             {formatDate(r.preparedAt)}
                           </div>
                         )}
                       </TD>
                       <TD className="text-xs text-ink-700">
                         {r.reviewer?.displayName ?? (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                         {r.reviewedAt && (
-                          <div className="text-[10px] text-ink-500">
+                          <div className="text-[11px] text-ink-500">
                             {formatDate(r.reviewedAt)}
                           </div>
                         )}
@@ -536,7 +536,7 @@ export default async function ReconciliationsListPage({
                         {r._count.attachments > 0 ? (
                           <Badge tone="info">{r._count.attachments}</Badge>
                         ) : (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                       </TD>
                     </TR>

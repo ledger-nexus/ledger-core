@@ -31,7 +31,7 @@ export function ApplyApPaymentRow({
       <div className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="openItemId" value={openItemId} />
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-ink-500">Cash account</label>
+          <label className="block text-[11px] uppercase tracking-wide text-ink-500">Cash account</label>
           <Select name="cashAccountCode" defaultValue={cashAccounts[0]?.code ?? "1000"} className="min-w-[140px]">
             {cashAccounts.map((a) => (
               <option key={a.code} value={a.code}>
@@ -41,7 +41,7 @@ export function ApplyApPaymentRow({
           </Select>
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-ink-500">Amount</label>
+          <label className="block text-[11px] uppercase tracking-wide text-ink-500">Amount</label>
           <Input
             type="text"
             name="amount"
@@ -51,7 +51,7 @@ export function ApplyApPaymentRow({
           />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-ink-500">Date</label>
+          <label className="block text-[11px] uppercase tracking-wide text-ink-500">Date</label>
           <Input
             type="date"
             name="paymentDate"

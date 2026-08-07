@@ -71,7 +71,7 @@ function NavLink({
         </span>
       )}
       {item.hint && (
-        <span className="ml-2 shrink-0 text-[10px] uppercase tracking-wide opacity-60">
+        <span className="ml-2 shrink-0 text-[11px] uppercase tracking-wide opacity-60">
           {item.hint}
         </span>
       )}
@@ -111,7 +111,7 @@ export function Sidebar({
       <div className="flex flex-col gap-5">
         {visibleSections.map((section) => (
           <div key={section.label}>
-            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-ink-400">
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-ink-500">
               {section.label}
             </div>
             <ul className="flex flex-col gap-px">

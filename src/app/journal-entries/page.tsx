@@ -234,7 +234,7 @@ export default async function JournalEntriesPage({
                             {entry.sourceSystem} · {entry.sourceRecordType}
                           </span>
                         ) : (
-                          <span className="text-xs text-ink-400">—</span>
+                          <span className="text-xs text-ink-500">—</span>
                         )}
                       </TD>
                       <TD className="amount-cell text-right">{formatMoney(total)}</TD>

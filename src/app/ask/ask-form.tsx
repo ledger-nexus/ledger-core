@@ -69,7 +69,7 @@ export function AskForm() {
           rows={2}
           maxLength={500}
           placeholder="Ask about your books — a balance, what you spent, your net worth…"
-          className="w-full resize-none rounded-md border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-ink-900"
+          className="w-full resize-none rounded-md border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-500 focus:border-ink-900"
         />
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-wrap gap-1.5">
@@ -97,7 +97,7 @@ export function AskForm() {
       {(pending || result) && (
         <div className="rounded-md border border-ink-200 bg-white px-4 py-3">
           {asked && (
-            <p className="mb-2 text-xs text-ink-400">You asked: “{asked}”</p>
+            <p className="mb-2 text-xs text-ink-500">You asked: “{asked}”</p>
           )}
           {pending ? (
             <p className="text-sm text-ink-500">Reading your ledger…</p>
@@ -114,7 +114,7 @@ export function AskForm() {
                 {result.answer}
               </p>
               {result.consulted.length > 0 && (
-                <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-400">
+                <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
                   <span>Read:</span>
                   {result.consulted.map((c) => (
                     <Badge key={c} tone="neutral">

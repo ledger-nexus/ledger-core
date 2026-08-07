@@ -157,7 +157,7 @@ export default async function NotificationChannelsPage() {
                     <td className="py-1.5 font-medium text-ink-900">
                       {c.name}
                     </td>
-                    <td className="py-1.5 font-mono text-[10px] text-ink-500">
+                    <td className="py-1.5 font-mono text-[11px] text-ink-500">
                       {c.maskedUrl}
                     </td>
                     <td className="py-1.5">
@@ -194,7 +194,7 @@ export default async function NotificationChannelsPage() {
                     <td className="py-1.5 text-ink-600">
                       {formatDate(c.createdAt)}
                       {c.createdBy?.displayName && (
-                        <span className="ml-1 text-ink-400">
+                        <span className="ml-1 text-ink-500">
                           · {c.createdBy.displayName}
                         </span>
                       )}

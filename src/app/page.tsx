@@ -483,7 +483,7 @@ function Kpi({
         <div className={`mt-1 font-mono text-xl font-semibold tabular-nums ${accent}`}>
           {formatMoney(value)}
         </div>
-        {hint && <div className="mt-1 text-[11px] text-ink-400">{hint}</div>}
+        {hint && <div className="mt-1 text-[11px] text-ink-500">{hint}</div>}
       </CardContent>
     </Card>
   );

@@ -68,10 +68,10 @@ export function ReassignApRow({
             <span className="text-ink-700">{ownerLabel}</span>
           </>
         ) : (
-          <span className="text-ink-400">unassigned</span>
+          <span className="text-ink-500">unassigned</span>
         )}
         {lockedAt ? (
-          <span className="text-[10px] text-amber-700" title="Manual reassignment — rules skip this record">
+          <span className="text-[11px] text-amber-700" title="Manual reassignment — rules skip this record">
             🔒
           </span>
         ) : null}
@@ -105,12 +105,12 @@ export function ReassignApRow({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="self-start text-[10px] text-accent-600 hover:underline"
+          className="self-start text-[11px] text-accent-600 hover:underline"
         >
           reassign
         </button>
       )}
-      {error ? <span className="text-[10px] text-negative">{error}</span> : null}
+      {error ? <span className="text-xs text-negative">{error}</span> : null}
     </div>
   );
 }

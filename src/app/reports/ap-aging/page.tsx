@@ -204,7 +204,7 @@ export default async function ApAgingPage({
               <div className="amount-cell mt-1 text-lg font-semibold text-ink-900">
                 {formatMoney(b.totalBalance)}
               </div>
-              <div className="text-[11px] text-ink-400">
+              <div className="text-[11px] text-ink-500">
                 {b.itemCount} item{b.itemCount === 1 ? "" : "s"}
               </div>
             </CardContent>

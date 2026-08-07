@@ -90,7 +90,7 @@ export function OrphanReassignRow({ recordType, recordId, users, queues }: Props
           reassign
         </button>
       )}
-      {error ? <span className="text-[10px] text-negative">{error}</span> : null}
+      {error ? <span className="text-xs text-negative">{error}</span> : null}
     </div>
   );
 }

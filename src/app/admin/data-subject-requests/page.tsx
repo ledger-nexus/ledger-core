@@ -113,7 +113,7 @@ export default async function DataSubjectRequestsPage() {
                       <TD>
                         <div className="text-sm text-ink-900">
                           {redacted ? (
-                            <span className="text-ink-400 italic">
+                            <span className="text-ink-500 italic">
                               [Redacted user]
                             </span>
                           ) : (

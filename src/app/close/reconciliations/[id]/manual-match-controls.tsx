@@ -63,7 +63,7 @@ export function ManualMatchForm({
       <div className="text-xs uppercase tracking-wide text-ink-500">
         Match two lines by hand
       </div>
-      <p className="text-xs text-ink-400">
+      <p className="text-xs text-ink-500">
         For what the automatic pass cannot pair — a cheque split across
         deposits, a fee posted net. Amounts do not have to agree; whatever
         is left over stays in the difference.

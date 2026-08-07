@@ -185,7 +185,7 @@ export function ReactivateButton({ userId, userName }: ReactivateProps) {
       >
         {pending ? "Reactivating…" : "Reactivate"}
       </button>
-      {error ? <span className="text-[10px] text-negative">{error}</span> : null}
+      {error ? <span className="text-xs text-negative">{error}</span> : null}
     </div>
   );
 }

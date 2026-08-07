@@ -75,7 +75,7 @@ export function NotificationBell({ unread, recentRead, unreadCount }: Props) {
       >
         <BellIcon />
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-medium text-white">
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-medium text-white">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
@@ -121,7 +121,7 @@ export function NotificationBell({ unread, recentRead, unreadCount }: Props) {
                   ))}
                   {recentRead.length > 0 && (
                     <>
-                      <div className="border-t border-ink-100 bg-ink-50 px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-400">
+                      <div className="border-t border-ink-100 bg-ink-50 px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-ink-500">
                         Recently read
                       </div>
                       {recentRead.map((n) => (
@@ -172,7 +172,7 @@ function NotificationItem({
         {notification.body && (
           <div className="mt-0.5 text-[11px] text-ink-500">{notification.body}</div>
         )}
-        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-ink-400">
+        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-ink-500">
           <span>{formatRelativeTime(notification.createdAt)}</span>
           {notification.actor && (
             <>

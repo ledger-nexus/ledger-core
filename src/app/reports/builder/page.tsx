@@ -108,7 +108,7 @@ export default async function ReportBuilderIndex() {
                       <code className="text-xs">{t.code}</code> · v{t.version}
                     </p>
                     {t.source === "registry" && (
-                      <p className="text-xs text-ink-400">
+                      <p className="text-xs text-ink-500">
                         not yet persisted in this tenant — will lazy-seed on first
                         clone
                       </p>

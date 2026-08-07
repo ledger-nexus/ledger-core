@@ -277,7 +277,7 @@ export default async function CloseAlertsPage({
                   </span>
                 </div>
                 <p className="text-xs text-ink-600">{a.description}</p>
-                <span className="text-[10px] text-ink-400">
+                <span className="text-[11px] text-ink-500">
                   Created {formatDate(a.createdAt)}
                 </span>
               </Link>

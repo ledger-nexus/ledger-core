@@ -161,11 +161,11 @@ export function CommandPalette({
             }
           }}
           placeholder="Jump to… (type a page or action)"
-          className="w-full border-b border-ink-200 px-4 py-3 text-sm text-ink-900 outline-none placeholder:text-ink-400"
+          className="w-full border-b border-ink-200 px-4 py-3 text-sm text-ink-900 outline-none placeholder:text-ink-500"
         />
         <ul ref={listRef} className="max-h-80 overflow-y-auto py-1">
           {results.length === 0 ? (
-            <li className="px-4 py-3 text-sm text-ink-400">No matches</li>
+            <li className="px-4 py-3 text-sm text-ink-500">No matches</li>
           ) : (
             results.map((c, i) => (
               <li key={c.href} data-idx={i}>
@@ -195,7 +195,7 @@ export function CommandPalette({
                   <span
                     className={cn(
                       "text-[11px] uppercase tracking-wide",
-                      i === active ? "text-white/60" : "text-ink-400"
+                      i === active ? "text-white/60" : "text-ink-500"
                     )}
                   >
                     {c.hint ?? c.group}
@@ -205,7 +205,7 @@ export function CommandPalette({
             ))
           )}
         </ul>
-        <div className="flex items-center gap-3 border-t border-ink-200 px-4 py-2 text-[11px] text-ink-400">
+        <div className="flex items-center gap-3 border-t border-ink-200 px-4 py-2 text-[11px] text-ink-500">
           <span>↑↓ to move</span>
           <span>↵ to open</span>
           <span>esc to close</span>

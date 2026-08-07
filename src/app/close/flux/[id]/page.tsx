@@ -154,7 +154,7 @@ export default async function FluxDetailPage({
         <TD
           className={
             delta.abs().isZero()
-              ? "amount-cell text-right text-xs text-ink-400"
+              ? "amount-cell text-right text-xs text-ink-500"
               : "amount-cell text-right text-xs font-medium text-ink-900"
           }
         >
@@ -164,7 +164,7 @@ export default async function FluxDetailPage({
           {line.deltaPercent ? (
             `${new Decimal(line.deltaPercent.toString()).toFixed(1)}%`
           ) : (
-            <span className="text-ink-400" title="Prior balance was zero">
+            <span className="text-ink-500" title="Prior balance was zero">
               new
             </span>
           )}
@@ -179,7 +179,7 @@ export default async function FluxDetailPage({
                 {line.commentary}
               </p>
               {line.commenter?.displayName && (
-                <div className="mt-0.5 text-[10px] text-ink-400">
+                <div className="mt-0.5 text-[11px] text-ink-500">
                   {line.commenter.displayName}
                   {line.commentaryAt && ` · ${formatDate(line.commentaryAt)}`}
                 </div>
@@ -197,11 +197,11 @@ export default async function FluxDetailPage({
           ) : isOpen ? (
             <CommentaryForm lineId={line.id} initialValue="" />
           ) : line.status === "IMMATERIAL" ? (
-            <span className="text-xs text-ink-400">
+            <span className="text-xs text-ink-500">
               below threshold — no commentary needed
             </span>
           ) : (
-            <span className="text-xs text-ink-400">—</span>
+            <span className="text-xs text-ink-500">—</span>
           )}
         </TD>
         <TD>

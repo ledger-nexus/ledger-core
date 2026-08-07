@@ -89,13 +89,13 @@ export function MemberActions({
   }
 
   if (currentRole === "OWNER") {
-    return <span className="text-[11px] text-ink-400">workspace owner</span>;
+    return <span className="text-[11px] text-ink-500">workspace owner</span>;
   }
 
   if (!canEdit) {
     // ADMIN can't manage another ADMIN unless caller is OWNER.
     return (
-      <span className="text-[11px] text-ink-400">
+      <span className="text-[11px] text-ink-500">
         {callerIsOwner ? "—" : "owner-only"}
       </span>
     );

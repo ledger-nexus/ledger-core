@@ -26,7 +26,7 @@ export default async function AskPage() {
 
       <AskForm />
 
-      <p className="text-xs text-ink-400">
+      <p className="text-xs text-ink-500">
         Answers are grounded in the same balances and reports you see elsewhere
         in the app. This is a read-only assistant; it can&rsquo;t post entries,
         edit accounts, or move money.

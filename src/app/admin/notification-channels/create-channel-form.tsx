@@ -102,7 +102,7 @@ export default function CreateChannelForm() {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-ink-600">
             {type === "SLACK" ? "Slack webhook URL" : "Endpoint URL"}
-            <span className="ml-1 text-ink-400 font-normal">(encrypted at rest)</span>
+            <span className="ml-1 text-ink-500 font-normal">(encrypted at rest)</span>
           </label>
           <div className="flex gap-2">
             <Input
@@ -134,7 +134,7 @@ export default function CreateChannelForm() {
           <div className="flex flex-col gap-1 md:col-span-2">
             <label className="text-xs font-medium text-ink-600">
               Signing secret
-              <span className="ml-1 font-normal text-ink-400">
+              <span className="ml-1 font-normal text-ink-500">
                 (optional, encrypted at rest — 16+ chars)
               </span>
             </label>
@@ -165,7 +165,7 @@ export default function CreateChannelForm() {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-ink-600">
             Severity filter
-            <span className="ml-1 text-ink-400 font-normal">
+            <span className="ml-1 text-ink-500 font-normal">
               (leave blank for all severities)
             </span>
           </label>
@@ -193,7 +193,7 @@ export default function CreateChannelForm() {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-ink-600">
             Cadence
-            <span className="ml-1 text-ink-400 font-normal">
+            <span className="ml-1 text-ink-500 font-normal">
               (immediate pings every 15m; daily digest batches at 09:00 UTC)
             </span>
           </label>

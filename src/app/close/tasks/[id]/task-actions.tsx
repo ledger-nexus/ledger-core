@@ -180,7 +180,7 @@ export default function TaskActions({
             placeholder="Accrued $12,450 based on May timesheet rollup — see workpaper for detail"
             disabled={pending}
             maxLength={2000}
-            className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+            className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-500 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -226,9 +226,9 @@ export default function TaskActions({
             disabled={pending}
             maxLength={2000}
             autoFocus
-            className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+            className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-500 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
           />
-          <div className="mt-1 text-xs text-ink-400">
+          <div className="mt-1 text-xs text-ink-500">
             {reason.length}/2000 · persists to the audit log
           </div>
         </div>

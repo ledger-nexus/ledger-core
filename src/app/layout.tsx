@@ -113,7 +113,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       <span className="mx-2 text-ink-300">·</span>
                     </>
                   )}
-                  {scope.entityCode} <span className="text-ink-400">/</span>{" "}
+                  {scope.entityCode} <span className="text-ink-500">/</span>{" "}
                   <span className="text-ink-700">{scope.bookCode}</span>
                 </h1>
               </div>

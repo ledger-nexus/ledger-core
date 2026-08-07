@@ -151,7 +151,7 @@ export default function PreparerForm({
                 Use this
               </button>
               {usedSuggestion && supporting === suggestion.amount && (
-                <span className="text-ink-400">
+                <span className="text-ink-500">
                   · audit tag will be added to notes
                 </span>
               )}
@@ -170,11 +170,11 @@ export default function PreparerForm({
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
           placeholder="Bank statement reconciles to GL except for one outstanding check #1234 cleared 7/2..."
-          className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+          className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-500 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
           disabled={pending}
           maxLength={4000}
         />
-        <div className="mt-1 text-xs text-ink-400">
+        <div className="mt-1 text-xs text-ink-500">
           {notes.length}/4000 characters · the auditor reads these
         </div>
       </div>

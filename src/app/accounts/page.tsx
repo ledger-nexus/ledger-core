@@ -122,14 +122,14 @@ export default async function AccountsPage() {
                           {a.isContra && <Badge tone="warning">contra</Badge>}
                           {a.isControlAccount && <Badge tone="info">control</Badge>}
                           {a.isBank && <Badge tone="info">bank</Badge>}
-                          {!a.isContra && !a.isControlAccount && !a.isBank && <span className="text-ink-400">—</span>}
+                          {!a.isContra && !a.isControlAccount && !a.isBank && <span className="text-ink-500">—</span>}
                         </div>
                       </TD>
                       <TD>
                         {a.sourceSystem ? (
                           <Badge tone="neutral">{a.sourceSystem}</Badge>
                         ) : (
-                          <span className="text-ink-400">native</span>
+                          <span className="text-ink-500">native</span>
                         )}
                       </TD>
                     </TR>
