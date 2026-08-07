@@ -122,7 +122,7 @@ export default async function ConsolidationPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-ink-900">Consolidation</h2>
           <p className="text-sm text-ink-500">
@@ -130,8 +130,8 @@ export default async function ConsolidationPage({
             {formatDate(report.asOf)} · {report.entitiesIncluded.length} entities
           </p>
         </div>
-        <div className="flex items-end gap-2">
-          <form method="GET" className="flex items-end gap-2">
+        <div className="flex items-end gap-2 flex-wrap">
+          <form method="GET" className="flex items-end gap-2 flex-wrap">
             <div>
               <Label htmlFor="root">Root entity</Label>
               <Select name="root" id="root" defaultValue={root} className="min-w-[180px]">

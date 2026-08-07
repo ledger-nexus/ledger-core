@@ -149,7 +149,7 @@ export default function GenerateForm({ entities, books, periods }: Props) {
           disabled={pending}
         />
       </div>
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2 flex-wrap">
         <Button type="submit" disabled={pending}>
           {pending ? "Generating..." : "Generate"}
         </Button>

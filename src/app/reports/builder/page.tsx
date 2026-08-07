@@ -102,7 +102,7 @@ export default async function ReportBuilderIndex() {
                     )}
                   </div>
                 </CardHeader>
-                <CardContent className="flex items-end justify-between gap-3">
+                <CardContent className="flex items-end justify-between gap-3 flex-wrap">
                   <div className="text-sm text-ink-500">
                     <p>
                       <code className="text-xs">{t.code}</code> · v{t.version}

@@ -128,7 +128,7 @@ export default async function JournalEntriesPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-ink-900">Journal entries</h2>
           <p className="text-sm text-ink-500">
@@ -143,7 +143,7 @@ export default async function JournalEntriesPage({
             )}
           </p>
         </div>
-        <form method="GET" className="flex items-end gap-2">
+        <form method="GET" className="flex items-end gap-2 flex-wrap">
           <div className="min-w-[200px]">
             <Label htmlFor="q">Search</Label>
             <Input
