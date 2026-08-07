@@ -16,6 +16,14 @@
 -- key that is no longer there. A rollback that converts an obvious error
 -- now into an obscure one next Tuesday is worse than one that refuses.
 --
+-- EXERCISED, not just written. On a disposable Neon branch forked from
+-- dev (br-falling-queen-ak8e5udm, since deleted):
+--   * with a WEBHOOK_GENERIC channel present, the guard REFUSED —
+--     'Refusing to roll back 0041: 1 WEBHOOK_GENERIC channel(s) still exist'
+--   * with none, it passed through and the column dropped cleanly
+--   * the enum value survived the rollback, exactly as described above
+--   * re-applying the forward migration restored the column
+--
 -- Apply with:  prisma db execute --file prisma/migrations/0041_generic_webhook_channel/down.sql
 
 DO $$

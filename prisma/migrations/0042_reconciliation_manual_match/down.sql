@@ -20,6 +20,13 @@
 -- Auto-matching is unaffected either way — it derives on read and never
 -- consulted this table except to exclude rows already claimed.
 --
+-- EXERCISED, not just written. On a disposable Neon branch forked from
+-- dev (br-falling-queen-ak8e5udm, since deleted): the DROP took the table,
+-- its 4 indexes, all 5 foreign keys and the RLS policy with it, and left
+-- reconciliation / bank_transaction / gl_entry_line / app_user intact —
+-- no cascade damage. Re-applying the forward migration restored all of it
+-- (4 indexes, 5 FKs, 1 policy, RLS enabled).
+--
 -- Apply with:  prisma db execute --file prisma/migrations/0042_reconciliation_manual_match/down.sql
 
 DROP TABLE IF EXISTS "reconciliation_manual_match";
