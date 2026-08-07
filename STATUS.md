@@ -32,6 +32,14 @@ _No active claims._
 
 ## Recent completions
 
+### Session migration-down-sql · 2026-08-07
+- **Scope**: the reversibility gap found while preparing the prod runbook — **0 of 42 migrations had a `down.sql`**, against the global standard's "always include a down() migration". Prisma Migrate has no built-in down, so the convention is a sibling `down.sql` applied with `prisma db execute`.
+- **⚠️ Deliberately NOT back-filling the other 40.** Several are irreversible in principle (data backfills that discard the prior value; enum additions Postgres cannot undo), and a `down.sql` that looks authoritative but is wrong is more dangerous than none — it invites someone mid-incident to run destructive SQL confidently. Cutoff is a NUMBER (`REVERSIBLE_FROM = 41`), not a 40-entry grandfather list that would silently stop covering anything.
+- 0041's down is **partial by nature and says so**: Postgres cannot remove an enum value, so `WEBHOOK_GENERIC` stays (inert). Its substance is a guard that REFUSES if any WEBHOOK_GENERIC channel exists — dropping `signingSecret` under live rows fails at send time, not rollback time, and a rollback that turns an obvious error now into an obscure one later is worse than one that refuses.
+- 0042's down is symmetric in schema, **not in data**: it discards operator matching decisions that are not derivable from the ledger. The file carries the backup statement.
+- **Verified**: both DROP targets exist on a live DB; 0041's guard block parses and runs (0 generic channels → passes through); the refusal path fires with the count interpolated (`P0001 ... 3 WEBHOOK_GENERIC channel(s) still exist`). ⚠️ **The DROP statements themselves were NOT executed** — that means dropping a table on the shared dev DB, which the standard forbids without confirmation. They are `IF EXISTS` DDL against confirmed-present objects.
+- **Branch**: chore/migration-down-sql. PR #365.
+
 ### Session unify-tone-scales · 2026-08-07
 - **Scope**: the ~215 raw tone classes #362 deferred, on Chris's "one green". positive/negative/warning are now full scales spread from Tailwind's green/red/amber with DEFAULT = the 700 step, so existing bare `text-positive`/`bg-negative` keep their exact values. **219 occurrences converted across 64 files; zero raw palette classes remain in `src`.**
 - **⚠️ The sweep was not a rename — it surfaced 4 real AA failures** that had never been checked because raw classes were outside the guard: `text-emerald-600` (3.61), `text-amber-600` (3.05), **`bg-emerald-600` + `text-white` buttons (3.77, and would have become 3.30 as green-600)**, and `text-negative-600` at **4.43 on `bg-ink-100`** — same shape as the original ink-500 finding: passes on the page, fails on the panel. All four bumped to the 700 step. The last one also collapsed **two different reds for one meaning** (82 sites bare + 35 at -600).

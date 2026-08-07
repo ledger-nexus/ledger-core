@@ -1,0 +1,25 @@
+-- Reverse of 0042_reconciliation_manual_match.
+--
+-- DROP TABLE takes the indexes, the four foreign keys and the RLS policy
+-- with it, so this is genuinely symmetric in schema terms.
+--
+-- ⚠️ IT IS NOT SYMMETRIC IN DATA. Every row here is an operator's
+-- judgement — that a cheque split across two deposits, a fee posted net
+-- or a transposition is the same transaction as a given GL line — with
+-- their name and the reason against it. None of it is derivable from the
+-- ledger, which is the whole point of the table: auto-matching pairs on
+-- exact amount inside a date window and these are precisely the cases it
+-- cannot reach. Dropping the table discards those decisions permanently.
+--
+-- Preserve them first if the rollback is anything other than "this
+-- feature never shipped and the table is empty":
+--
+--   CREATE TABLE reconciliation_manual_match_backup_YYYYMMDD AS
+--     SELECT * FROM "reconciliation_manual_match";
+--
+-- Auto-matching is unaffected either way — it derives on read and never
+-- consulted this table except to exclude rows already claimed.
+--
+-- Apply with:  prisma db execute --file prisma/migrations/0042_reconciliation_manual_match/down.sql
+
+DROP TABLE IF EXISTS "reconciliation_manual_match";
