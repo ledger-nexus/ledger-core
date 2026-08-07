@@ -164,7 +164,7 @@ export default async function ApAgingPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-ink-900">AP Aging</h2>
           <p className="text-sm text-ink-500">
@@ -172,8 +172,8 @@ export default async function ApAgingPage({
             bills · total <span className="font-mono">{formatMoney(total)}</span>
           </p>
         </div>
-        <div className="flex items-end gap-2">
-          <form method="GET" className="flex items-end gap-2">
+        <div className="flex items-end gap-2 flex-wrap">
+          <form method="GET" className="flex items-end gap-2 flex-wrap">
             <div>
               <Label htmlFor="asOf">As of</Label>
               <Input type="date" name="asOf" id="asOf" defaultValue={asOf} />

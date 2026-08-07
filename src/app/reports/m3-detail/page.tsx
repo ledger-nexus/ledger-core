@@ -53,7 +53,7 @@ export default async function M3DetailPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-ink-900">M-1 / M-3 Detail</h2>
           <p className="text-sm text-ink-500">
@@ -64,8 +64,8 @@ export default async function M3DetailPage({
             Groups book-tax differences by IRS Form 1120 Schedule M-3 line for tax-provision input.
           </p>
         </div>
-        <div className="flex items-end gap-2">
-          <form method="GET" className="flex items-end gap-2">
+        <div className="flex items-end gap-2 flex-wrap">
+          <form method="GET" className="flex items-end gap-2 flex-wrap">
             <div>
               <Label htmlFor="bookFrom">Book</Label>
               <Select name="bookFrom" id="bookFrom" defaultValue={bookFrom}>

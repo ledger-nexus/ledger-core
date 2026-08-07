@@ -88,7 +88,7 @@ export default async function FxRevaluationPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-ink-900">FX revaluation</h2>
           <p className="text-sm text-ink-500">
@@ -97,7 +97,7 @@ export default async function FxRevaluationPage({
             monetary-item remeasurement at the period-end CLOSE rate
           </p>
         </div>
-        <form method="GET" className="flex items-end gap-2">
+        <form method="GET" className="flex items-end gap-2 flex-wrap">
           <div className="flex flex-col gap-1">
             <label htmlFor="period" className="text-xs font-medium text-ink-600">
               Period

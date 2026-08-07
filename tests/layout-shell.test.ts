@@ -42,6 +42,14 @@ import { describe, expect, it } from "vitest";
 
 const LAYOUT = path.join(__dirname, "..", "src", "app", "layout.tsx");
 
+function sourceFiles(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) return sourceFiles(full);
+    return e.name.endsWith(".tsx") ? [full] : [];
+  });
+}
+
 describe("the app shell grid", () => {
   const source = fs.readFileSync(LAYOUT, "utf8");
 
@@ -51,6 +59,40 @@ describe("the app shell grid", () => {
     // The sidebar is a fixed track; the content track must be minmax(0,...).
     expect(grid![0]).toMatch(/minmax\(0,\s*1fr\)/);
     expect(grid![0]).not.toMatch(/_1fr\]/);
+  });
+
+  it("wraps page toolbars instead of letting them clip", () => {
+    // Second-order effect of the zero-minimum track, and one I missed when
+    // I made that change: I checked that wide TABLES still scroll (they do,
+    // `Table` wraps them in overflow-x-auto) and never checked page-level
+    // toolbars, which have no scroller at all. Before the track was bounded
+    // they pushed the page wide and you could scroll to reach them; after,
+    // they are simply CUT OFF. On /reports/consolidation at 1024 the Run
+    // button and the Download CSV link sat past the right edge, unreachable
+    // and invisible — the page reported 0 overflow while hiding a control.
+    //
+    // `flex-wrap` lets them reflow onto a second line. month-end/page.tsx
+    // already did this; the rest had not been brought along.
+    const rows = [
+      "flex items-end justify-between gap-4",
+      "flex items-end justify-between gap-3",
+      "flex items-end gap-2",
+    ];
+    const files = sourceFiles(path.join(__dirname, "..", "src", "app"));
+    const failures: string[] = [];
+
+    for (const file of files) {
+      const text = fs.readFileSync(file, "utf8");
+      for (const row of rows) {
+        // Exact-match the class string: a longer string that merely starts
+        // with it (already carrying flex-wrap) must not be reported.
+        if (text.includes(`"${row}"`)) {
+          failures.push(`${path.relative(path.join(__dirname, ".."), file)}: "${row}" does not wrap`);
+        }
+      }
+    }
+
+    expect(failures).toEqual([]);
   });
 
   it("keeps the header's control row shrinkable", () => {
