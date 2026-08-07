@@ -26,16 +26,19 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session design-system-contrast · started 2026-08-06 18:20 · heartbeat 18:45
-- **Scope**: implementing impeccable.style's lessons as an enforced visual contract. `ink-400` (2.41:1) carried text in 120 places; `ink-500` failed on `bg-ink-100`; 45 sizes below 11px incl. 6 validation errors; `warning` used as a colour utility but absent from the config; 2 side-tab accent borders.
-- **Files / globs**: `tailwind.config.ts`, `docs/design-system.md`, `tests/design-system.test.ts`, `src/app/reports/consolidation/page.tsx`, plus className-only edits across `src/**/*.tsx`
-- **Branch**: a11y/muted-text-contrast
-- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
-
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session design-system-contrast · 2026-08-06
+- **Scope**: implementing impeccable.style's lessons as an enforced visual contract (#359). Most of the 58-rule catalogue found nothing — no gradients, glass, `transition-all`, pulse, marquee, hover transforms, gradient text. Four fired. **`ink-400` was 2.41:1 against a 4.5 floor while carrying text in 120 places across 60 files**; `ink-500` (#78716c) failed at 4.40:1 on `bg-ink-100` and is the muted-text step, so it moved to #726b66. 45 sizes below the 11px floor, **six of them validation errors** — now `text-xs`. Two `border-l-4` accent strips dropped.
+- **⚠️ A live defect, not a style nit: `warning` was used as `text-warning` / `border-warning` / `bg-warning/5` and was never defined in the config.** Tailwind emits nothing for an unknown token, so the consolidation page's "FX translation not active" callout rendered **untinted with a fallback border**, beneath an identically-built positive callout that was green. It looked deliberate because `<Badge tone="warning">` hardcodes `bg-amber-100` and carried the tone alone. Now defined as amber-700.
+- **Verification**: each check proven to fail on its own defect first. Browser-driven at 1280×720 on `/reports/consolidation` — `ink-500` computes `rgb(114,107,102)`, **0** elements with a ≥4px side border, smallest rendered font **11px**, and the warning callout tints (`rgba(180,83,9,0.05)`) where it previously computed `rgba(0,0,0,0)`. tsc 0. **CI green on a fresh Postgres.**
+- **⚠️ Guard-writing false positives worth knowing** (all four hit while writing the test, each looks right naively): pair colours within one **string literal**, not one line, or a ternary reports dark-on-dark for a state that cannot render; ignore variant prefixes (`file:bg-ink-900` is the file-picker button); `bg-x/5` is a wash, not solid; and admitting `'` as a string delimiter lets "doesn't" swallow the file.
+- **⚠️ Found, NOT caused, NOT fixed**: `tests/close-retrospective.test.ts > Task lead time by category` fails on the **shared dev DB** and passes in CI on a fresh one — residue, the hazard CLAUDE.md documents. This commit touches no `src/lib` at all. Also: **the header overflows horizontally at 1280px** (scrollWidth 1455), from fixed-width `w-64` switcher panels — unaffected by a colour/size change. And `Badge` maps tones to raw Tailwind while the config defines semantic equivalents — two colour vocabularies, unification untouched.
+- **Branch**: a11y/muted-text-contrast (worktree ~/Code/ledger-core-je-approvals). PR #359.
 
 ### Session authz-remaining-eleven · 2026-08-06
 - **Scope**: the 11 files #352 deferred. My "this needs an authorization decision" framing was wrong — **3 of them already gate on the policy catalog** via `requirePermission(name, role, check)`, and **`requirePermission` throws WITHOUT auditing**, so `approve-journal-entry` / `data-subject-request` / `toggle-je-approval` logged neither unauthenticated refusals nor role denials. Converted to `requirePermitted`: identical predicate and floor, both rows gained, no decision needed. The other 8 have no named permission because several are deliberately member-open → new `requireActor(attemptedAction)` = `requirePermitted` minus the permission check; resolves + audits, changes no gate. 6 of 8 converted.
