@@ -37,7 +37,7 @@ export async function TenantSwitcher() {
   if (!current || all.length < 2) return null;
 
   return (
-    <div className="w-48">
+    <div className="w-48 min-w-0">
       <Card className="shadow-none">
         <CardContent className="px-3 py-2">
     <form action={setTenantAction} className="flex flex-col gap-2">
