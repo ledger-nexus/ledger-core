@@ -106,7 +106,17 @@ const FILES = sourceFiles(SRC).map((f) => ({
   text: fs.readFileSync(f, "utf8"),
 }));
 
-/** Flatten the config's nested color scales to `token -> hex`. */
+/**
+ * Flatten the config's nested color scales to `token -> hex`.
+ *
+ * A `DEFAULT` step maps to the BARE name, because that is the class
+ * Tailwind emits: `{ positive: { DEFAULT, 100 } }` yields `text-positive`
+ * and `bg-positive-100`. Flattening it to `positive-DEFAULT` instead would
+ * leave no entry named `positive`, so every `text-positive` in the app
+ * would match nothing here and the contrast check would skip it in
+ * silence — the exact way a derived guard rots into a guard that passes
+ * because it stopped looking.
+ */
 function paletteFromConfig(): Record<string, string> {
   const colors = (tailwindConfig.theme?.extend?.colors ?? {}) as Record<
     string,
@@ -115,7 +125,11 @@ function paletteFromConfig(): Record<string, string> {
   const flat: Record<string, string> = {};
   for (const [name, value] of Object.entries(colors)) {
     if (typeof value === "string") flat[name] = value;
-    else for (const [step, hex] of Object.entries(value)) flat[`${name}-${step}`] = hex;
+    else {
+      for (const [step, hex] of Object.entries(value)) {
+        flat[step === "DEFAULT" ? name : `${name}-${step}`] = hex;
+      }
+    }
   }
   return flat;
 }
@@ -128,6 +142,18 @@ describe("the ink ramp's contrast contract", () => {
     // yields {}, every check below would vacuously pass.
     expect(Object.keys(palette).length).toBeGreaterThan(8);
     expect(palette["ink-500"]).toMatch(/^#[0-9a-f]{6}$/i);
+
+    // Every name used as a bare `text-`/`bg-` class must appear under that
+    // bare name. Restructuring `positive` from a string to a
+    // { DEFAULT, 100 } pair broke this once: the flatten produced
+    // `positive-DEFAULT`, nothing matched `text-positive`, and the contrast
+    // check quietly stopped covering it. Failing here is much louder than
+    // a check that passes because it found nothing to look at.
+    for (const bare of ["positive", "negative", "warning"]) {
+      expect(palette[bare], `${bare} must flatten to its bare name`).toMatch(
+        /^#[0-9a-f]{6}$/i
+      );
+    }
   });
 
   it("keeps every text-legal token at AA on every surface it can land on", () => {
@@ -246,6 +272,54 @@ describe("the type scale's floor", () => {
             failures.push(`${rel}: ${px}px — ${line.trim().slice(0, 80)}`);
           }
         }
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+});
+
+describe("the UI primitives' colour vocabulary", () => {
+  // Two vocabularies were live at once: semantic tokens (`positive`,
+  // `negative`, `warning`) and raw Tailwind (`emerald-700`, `red-700`,
+  // `amber-700`). They did not even agree — `positive` is GREEN-700 while
+  // Badge rendered EMERALD-700, so a positive amount and a positive badge
+  // were two different greens meaning the same thing.
+  //
+  // That split is also what hid the `warning` bug: the token was missing
+  // from the config, but Badge hardcoded `bg-amber-100` and carried the
+  // tone by itself, so the untinted callout beside it still looked
+  // deliberate.
+  //
+  // Scoped to `src/components/ui/` deliberately. The app still holds ~215
+  // raw tone classes across steps 50-900, and the tokens define only
+  // DEFAULT and 100 — converting those needs new scale steps and would
+  // shift greens at 24 sites, which is a design decision, not a sweep.
+  // The primitives are the tractable boundary and the one that matters:
+  // they are what everything else copies.
+  it("uses design tokens, not raw Tailwind palette colours", () => {
+    const PRIMITIVES = path.join(SRC, "components", "ui");
+    const raw = /(?:text|bg|border|ring|divide)-(?:red|green|emerald|amber|yellow|cyan|blue|indigo|violet|purple|pink|orange|teal|lime|sky|rose|fuchsia)-\d{2,3}/;
+    const failures: string[] = [];
+
+    for (const { rel, text } of FILES) {
+      if (!path.join(__dirname, "..", rel).startsWith(PRIMITIVES)) continue;
+
+      // Drop comment lines before scanning. A comment naming the class it
+      // warns against is documentation, not a usage — and this guard caught
+      // its OWN explanation the first time it ran, because the comment wrote
+      // the class in markdown backticks and the literal scan below reads
+      // backticks as a template string. Comment-only lines are dropped
+      // rather than all `//` runs, so a URL inside a real string survives.
+      const code = text
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\/?\*)/.test(line))
+        .join("\n");
+
+      for (const seg of code.matchAll(/"([^"]*)"|`([^`]*)`/g)) {
+        const s = seg[1] ?? seg[2] ?? "";
+        const hit = s.match(raw);
+        if (hit) failures.push(`${rel}: ${hit[0]}`);
       }
     }
 

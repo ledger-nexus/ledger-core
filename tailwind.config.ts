@@ -30,17 +30,25 @@ const config: Config = {
           900: "#1c1917",
         },
         accent: {
+          100: "#cffafe",  // cyan-100 — the status-surface step
           500: "#0891b2",  // cyan-600 — 3.53:1, so surfaces and borders only
-          600: "#0e7490",  // the text-legal step (5.13:1)
+          600: "#0e7490",  // cyan-700 — the text-legal step (5.13:1)
         },
-        positive: "#15803d", // emerald-700 (debit-side balances, gains)
-        negative: "#b91c1c", // red-700 (credit-side / losses on disposal)
+        // Each tone is a pair: DEFAULT is the text-legal ink, 100 is the
+        // surface it sits on. Before this, the 100s did not exist as tokens
+        // and Badge reached straight for raw Tailwind — which is how the two
+        // vocabularies drifted apart without anyone noticing. `positive` is
+        // GREEN-700; Badge was using EMERALD-700, so a positive amount and a
+        // positive badge were two different greens meaning the same thing.
+        // (The comment here used to say emerald-700. It was wrong.)
+        positive: { DEFAULT: "#15803d", 100: "#dcfce7" }, // green-700 / green-100
+        negative: { DEFAULT: "#b91c1c", 100: "#fee2e2" }, // red-700 / red-100
         // Was never defined, while `text-warning`, `border-warning` and
         // `bg-warning/5` were all in use — Tailwind emits nothing for a token
         // it does not know, so the consolidation page's "FX translation not
         // active" callout rendered untinted with a fallback border, beside an
         // identically-built positive callout that was tinted green.
-        warning: "#b45309", // amber-700, matching Badge's warning tone
+        warning: { DEFAULT: "#b45309", 100: "#fef3c7" }, // amber-700 / amber-100
       },
       fontFamily: {
         sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Helvetica", "Arial"],
