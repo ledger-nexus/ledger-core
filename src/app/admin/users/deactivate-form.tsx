@@ -77,7 +77,7 @@ export function DeactivateForm({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100"
+        className="rounded border border-negative-200 bg-negative-50 px-2 py-1 text-[11px] font-medium text-negative hover:bg-negative-100"
       >
         Deactivate
       </button>
@@ -85,7 +85,7 @@ export function DeactivateForm({
   }
 
   return (
-    <div className="flex w-72 flex-col gap-2 rounded-md border border-red-200 bg-red-50/40 p-2">
+    <div className="flex w-72 flex-col gap-2 rounded-md border border-negative-200 bg-negative-50/40 p-2">
       <div className="text-[11px] font-medium text-ink-900">
         Deactivate {userName}?
       </div>
@@ -133,7 +133,7 @@ export function DeactivateForm({
           type="button"
           onClick={onSubmit}
           disabled={pending}
-          className="rounded bg-red-700 px-2 py-1 text-[11px] font-medium text-white hover:bg-red-800 disabled:opacity-50"
+          className="rounded bg-negative px-2 py-1 text-[11px] font-medium text-white hover:bg-negative-800 disabled:opacity-50"
         >
           {pending ? "Deactivating…" : "Confirm deactivation"}
         </button>
@@ -181,7 +181,7 @@ export function ReactivateButton({ userId, userName }: ReactivateProps) {
         onClick={onClick}
         disabled={pending}
         title={`Reactivate ${userName}`}
-        className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100"
+        className="rounded border border-positive-200 bg-positive-50 px-2 py-1 text-[11px] font-medium text-positive hover:bg-positive-100"
       >
         {pending ? "Reactivating…" : "Reactivate"}
       </button>

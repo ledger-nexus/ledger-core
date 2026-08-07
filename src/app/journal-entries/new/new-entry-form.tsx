@@ -324,7 +324,7 @@ export function NewEntryForm({
       </Card>
 
       {state?.ok === false && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-md border border-negative-200 bg-negative-50 px-4 py-3 text-sm text-negative">
           <span className="font-medium">Posting failed: </span>
           {state.error}
         </div>

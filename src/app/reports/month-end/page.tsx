@@ -250,18 +250,18 @@ export default async function MonthEndPage({
           </CardTitle>
           <span className="text-xs text-ink-500">
             Tie-out checks:{" "}
-            <span className={tbTies ? "text-emerald-700" : "text-red-700"}>
+            <span className={tbTies ? "text-positive" : "text-negative"}>
               {tbTies ? "✓" : "✗"} TB DR/CR ties
             </span>{" "}
             ·{" "}
-            <span className={bsTies ? "text-emerald-700" : "text-red-700"}>
+            <span className={bsTies ? "text-positive" : "text-negative"}>
               {bsTies ? "✓" : "✗"} BS A = L + E
             </span>
             {checkedSubTies.length > 0 && (
               <>
                 {" "}
                 ·{" "}
-                <span className={allSubTies ? "text-emerald-700" : "text-red-700"}>
+                <span className={allSubTies ? "text-positive" : "text-negative"}>
                   {allSubTies ? "✓" : "✗"} Sub-ledger ties
                 </span>
               </>
@@ -270,7 +270,7 @@ export default async function MonthEndPage({
               <>
                 {" "}
                 ·{" "}
-                <span className={reconsAllDone ? "text-emerald-700" : "text-red-700"}>
+                <span className={reconsAllDone ? "text-positive" : "text-negative"}>
                   {reconsAllDone ? "✓" : "✗"} Recons signed off (
                   {reconRollup.done}/{reconRollup.total})
                 </span>

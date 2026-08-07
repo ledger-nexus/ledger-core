@@ -24,7 +24,7 @@ export default async function SignInPage() {
           For local development, use the user switcher in the top-right of
           the app to pick a seeded test user.
         </p>
-        <Link href="/" className="mt-6 inline-block text-sm text-blue-600 underline">
+        <Link href="/" className="mt-6 inline-block text-sm text-accent-600 underline">
           ← Return to app
         </Link>
       </div>

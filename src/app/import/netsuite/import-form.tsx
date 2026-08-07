@@ -533,7 +533,7 @@ function BookMappingEditor({
   }
   if (parsedNsBooks.length === 0) {
     return (
-      <p className="text-xs text-amber-700">
+      <p className="text-xs text-warning">
         No <code className="rounded bg-ink-100 px-1">AccountingBook</code>{" "}
         array found in the pasted JSON. Either re-export from NS with
         AccountingBook included, or switch to single-book mode.

@@ -185,7 +185,7 @@ export function CommandPalette({
                       <span
                         className={cn(
                           "rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
-                          i === active ? "bg-white text-ink-900" : "bg-amber-100 text-amber-900"
+                          i === active ? "bg-white text-ink-900" : "bg-warning-100 text-warning-900"
                         )}
                       >
                         {reviewCount}

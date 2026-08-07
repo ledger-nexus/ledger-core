@@ -127,7 +127,7 @@ export default async function FxRevaluationPage({
       {computeError ? (
         <Card>
           <CardContent className="px-4 py-3">
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
               {computeError}
             </div>
             <p className="mt-2 text-xs text-ink-500">
@@ -165,7 +165,7 @@ export default async function FxRevaluationPage({
             </CardHeader>
             <CardContent>
               {existing ? (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                <div className="rounded-md border border-positive-200 bg-positive-50 px-3 py-2 text-sm text-positive-800">
                   Posted as{" "}
                   <Link
                     href="/journal-entries"

@@ -73,7 +73,7 @@ export function ReassignArRow({
           <span className="text-ink-500">unassigned</span>
         )}
         {lockedAt ? (
-          <span className="text-[11px] text-amber-700" title="Manual reassignment — rules skip this record">
+          <span className="text-[11px] text-warning" title="Manual reassignment — rules skip this record">
             🔒
           </span>
         ) : null}

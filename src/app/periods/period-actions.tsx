@@ -112,7 +112,7 @@ export default function PeriodActions({
           {pending ? "..." : "Close"}
         </Button>
       )}
-      {error ? <span className="text-xs text-red-600">{error}</span> : null}
+      {error ? <span className="text-xs text-negative">{error}</span> : null}
 
       <Modal
         open={dialog === "close"}
@@ -187,7 +187,7 @@ export default function PeriodActions({
           <p
             id={`${reasonFieldId}-error`}
             role="alert"
-            className="mt-2 text-xs text-red-600"
+            className="mt-2 text-xs text-negative"
           >
             {reasonError}
           </p>

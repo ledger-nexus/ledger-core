@@ -89,7 +89,7 @@ export default function ReviewerActions({ reconId }: Props) {
             {mode === "sendBack"
               ? "Why are you sending this back?"
               : "Why is this an exception?"}{" "}
-            <span className="text-red-600">*</span>
+            <span className="text-negative">*</span>
           </label>
           <textarea
             id="reviewer-comment"
@@ -130,7 +130,7 @@ export default function ReviewerActions({ reconId }: Props) {
           >
             Cancel
           </Button>
-          {error && <span className="text-xs text-red-600">{error}</span>}
+          {error && <span className="text-xs text-negative">{error}</span>}
         </div>
       </form>
     );
@@ -161,7 +161,7 @@ export default function ReviewerActions({ reconId }: Props) {
       >
         Mark exception
       </Button>
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-negative">{error}</span>}
     </div>
   );
 }

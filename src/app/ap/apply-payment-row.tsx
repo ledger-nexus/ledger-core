@@ -62,7 +62,7 @@ export function ApplyApPaymentRow({
         <SubmitButton />
       </div>
       {state?.ok === false && (
-        <div className="text-xs text-red-700">{state.error}</div>
+        <div className="text-xs text-negative">{state.error}</div>
       )}
       {state?.ok === true && (
         <div className="text-xs text-positive">Paid. Posted {state.entryNumber}.</div>

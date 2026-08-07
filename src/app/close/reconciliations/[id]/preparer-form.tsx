@@ -116,7 +116,7 @@ export default function PreparerForm({
         </div>
         <div>
           <Label htmlFor="supporting">
-            Supporting balance <span className="text-red-600">*</span>
+            Supporting balance <span className="text-negative">*</span>
           </Label>
           <Input
             id="supporting"
@@ -182,7 +182,7 @@ export default function PreparerForm({
         <Button type="submit" disabled={pending}>
           {pending ? "Signing..." : "Sign as preparer"}
         </Button>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && <span className="text-xs text-negative">{error}</span>}
       </div>
     </form>
   );

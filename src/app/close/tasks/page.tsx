@@ -521,7 +521,7 @@ export default async function CloseTasksListPage({
                                 <span
                                   className={
                                     overdue
-                                      ? "text-red-700 font-medium"
+                                      ? "text-negative font-medium"
                                       : "text-ink-700"
                                   }
                                 >

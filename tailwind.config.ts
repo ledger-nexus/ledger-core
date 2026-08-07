@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import colors from "tailwindcss/colors";
 
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
@@ -29,10 +30,20 @@ const config: Config = {
           800: "#292524",
           900: "#1c1917",
         },
+        // ⚠️ This scale is OFFSET from Tailwind's cyan by one step and must
+        // stay that way: accent-500 IS cyan-600 and accent-600 IS cyan-700.
+        // Spreading `...colors.cyan` here would silently lighten every
+        // focus ring in the app (accent-500 drives `focus:border-accent-500`
+        // and `ring-accent-500/15`) and push an already-marginal 3.53:1
+        // further down. The extra steps below are added by hand for that
+        // reason — they fill the gaps without renumbering what exists.
         accent: {
-          100: "#cffafe",  // cyan-100 — the status-surface step
-          500: "#0891b2",  // cyan-600 — 3.53:1, so surfaces and borders only
-          600: "#0e7490",  // cyan-700 — the text-legal step (5.13:1)
+          50: colors.cyan[50],    // info-panel surface
+          100: "#cffafe",         // cyan-100 — the status-surface step
+          200: colors.cyan[200],  // info-panel border
+          500: "#0891b2",         // cyan-600 — 3.53:1, so surfaces and borders only
+          600: "#0e7490",         // cyan-700 — the text-legal step (5.13:1)
+          900: colors.cyan[900],  // info-panel ink
         },
         // Each tone is a pair: DEFAULT is the text-legal ink, 100 is the
         // surface it sits on. Before this, the 100s did not exist as tokens
@@ -41,14 +52,23 @@ const config: Config = {
         // GREEN-700; Badge was using EMERALD-700, so a positive amount and a
         // positive badge were two different greens meaning the same thing.
         // (The comment here used to say emerald-700. It was wrong.)
-        positive: { DEFAULT: "#15803d", 100: "#dcfce7" }, // green-700 / green-100
-        negative: { DEFAULT: "#b91c1c", 100: "#fee2e2" }, // red-700 / red-100
+        // Full scales, so a tone has a step for every job the raw palette
+        // was being used for — 50/100 surfaces, 200/300 borders, 500 fills,
+        // 600-900 ink. DEFAULT stays the 700 step, so existing bare
+        // `text-positive` / `bg-negative` keep their exact values.
+        //
+        // Spread from Tailwind's own palette rather than transcribing ~30
+        // hexes: a hand-copied scale is a scale that drifts on the first
+        // typo, and the whole point of this change is that two vocabularies
+        // drifted apart.
+        positive: { ...colors.green, DEFAULT: colors.green[700] },
+        negative: { ...colors.red, DEFAULT: colors.red[700] },
         // Was never defined, while `text-warning`, `border-warning` and
         // `bg-warning/5` were all in use — Tailwind emits nothing for a token
         // it does not know, so the consolidation page's "FX translation not
         // active" callout rendered untinted with a fallback border, beside an
         // identically-built positive callout that was tinted green.
-        warning: { DEFAULT: "#b45309", 100: "#fef3c7" }, // amber-700 / amber-100
+        warning: { ...colors.amber, DEFAULT: colors.amber[700] },
       },
       fontFamily: {
         sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Helvetica", "Arial"],

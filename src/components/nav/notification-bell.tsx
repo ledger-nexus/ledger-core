@@ -36,9 +36,9 @@ interface Props {
 }
 
 const CATEGORY_TONE: Record<NotificationRow["category"], string> = {
-  REASSIGNMENT: "bg-blue-500",
-  APPROVAL_NEEDED: "bg-amber-500",
-  ORPHAN_DETECTED: "bg-red-500",
+  REASSIGNMENT: "bg-accent-500",
+  APPROVAL_NEEDED: "bg-warning-500",
+  ORPHAN_DETECTED: "bg-negative-500",
   SYSTEM: "bg-ink-400",
 };
 
@@ -75,7 +75,7 @@ export function NotificationBell({ unread, recentRead, unreadCount }: Props) {
       >
         <BellIcon />
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-medium text-white">
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-negative-600 px-1 text-[11px] font-medium text-white">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}

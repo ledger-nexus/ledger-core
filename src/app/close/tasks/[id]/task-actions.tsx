@@ -195,7 +195,7 @@ export default function TaskActions({
           >
             Cancel
           </Button>
-          {error && <span className="text-xs text-red-600">{error}</span>}
+          {error && <span className="text-xs text-negative">{error}</span>}
         </div>
       </form>
     );
@@ -211,7 +211,7 @@ export default function TaskActions({
         <div>
           <Label htmlFor="action-reason">
             {isBlock ? "Block reason" : "Waiver reason"}{" "}
-            <span className="text-red-600">*</span>
+            <span className="text-negative">*</span>
           </Label>
           <textarea
             id="action-reason"
@@ -244,7 +244,7 @@ export default function TaskActions({
           >
             Cancel
           </Button>
-          {error && <span className="text-xs text-red-600">{error}</span>}
+          {error && <span className="text-xs text-negative">{error}</span>}
         </div>
       </form>
     );
@@ -327,7 +327,7 @@ export default function TaskActions({
           Waive
         </Button>
       )}
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-negative">{error}</span>}
     </div>
   );
 }

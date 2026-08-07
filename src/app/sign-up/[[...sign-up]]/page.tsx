@@ -16,7 +16,7 @@ export default async function SignUpPage() {
           public sign-up flow. New users are seeded via{" "}
           <code>src/lib/seed/</code> and selected from the user switcher.
         </p>
-        <Link href="/" className="mt-6 inline-block text-sm text-blue-600 underline">
+        <Link href="/" className="mt-6 inline-block text-sm text-accent-600 underline">
           ← Return to app
         </Link>
       </div>

@@ -228,8 +228,8 @@ export default async function CloseRetrospectivePage({
                             <div
                               className={
                                 p.metTarget
-                                  ? "absolute inset-y-0 left-0 bg-emerald-500"
-                                  : "absolute inset-y-0 left-0 bg-rose-500"
+                                  ? "absolute inset-y-0 left-0 bg-positive-500"
+                                  : "absolute inset-y-0 left-0 bg-negative-500"
                               }
                               style={{ width: `${widthPct}%` }}
                             />
@@ -352,8 +352,8 @@ export default async function CloseRetrospectivePage({
                           <div
                             className={
                               hot
-                                ? "absolute inset-y-0 left-0 bg-rose-500"
-                                : "absolute inset-y-0 left-0 bg-amber-400"
+                                ? "absolute inset-y-0 left-0 bg-negative-500"
+                                : "absolute inset-y-0 left-0 bg-warning-400"
                             }
                             style={{ width: `${Math.min(100, widthPct)}%` }}
                           />

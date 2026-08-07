@@ -124,7 +124,7 @@ export function ApprovalToggle({
       </div>
 
       {message && (
-        <div className="ml-6 mt-2 text-[11px] text-emerald-700">{message}</div>
+        <div className="ml-6 mt-2 text-[11px] text-positive">{message}</div>
       )}
       {error && (
         <div className="ml-6 mt-2 text-[11px] text-negative">{error}</div>

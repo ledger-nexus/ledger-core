@@ -62,7 +62,7 @@ export default function AutoOpenButton({
         {pending ? "Opening..." : (label ?? `Open recons for ${periodCode}`)}
       </Button>
       {result && <span className="text-xs text-ink-500">{result}</span>}
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-negative">{error}</span>}
     </div>
   );
 }

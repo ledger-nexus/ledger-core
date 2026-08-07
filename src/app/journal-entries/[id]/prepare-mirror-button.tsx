@@ -65,7 +65,7 @@ export default function PrepareMirrorButton({
 
   if (success) {
     return (
-      <p className="text-sm text-emerald-700">
+      <p className="text-sm text-positive">
         Mirror{" "}
         <Link href={`/journal-entries/${success.id}`} className="font-mono text-link hover:underline">
           {success.entryNumber}
@@ -102,7 +102,7 @@ export default function PrepareMirrorButton({
         </Button>
       </div>
       {error && (
-        <div className="text-xs text-red-600">
+        <div className="text-xs text-negative">
           {error}
           {existingMirrorId && (
             <>
@@ -118,7 +118,7 @@ export default function PrepareMirrorButton({
         </div>
       )}
       {blockers.length > 0 && (
-        <ul className="list-disc pl-4 text-xs text-red-600">
+        <ul className="list-disc pl-4 text-xs text-negative">
           {blockers.map((b, i) => (
             <li key={i}>{b}</li>
           ))}

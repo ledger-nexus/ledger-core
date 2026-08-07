@@ -114,7 +114,7 @@ export default function NotesCard({
                   className={`rounded-md border p-3 ${
                     resolved
                       ? "border-ink-200 bg-ink-50 text-ink-500"
-                      : "border-amber-200 bg-amber-50"
+                      : "border-warning-200 bg-warning-50"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">

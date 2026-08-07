@@ -117,7 +117,7 @@ export default async function RecurringDetail({
             <Field label="Entries produced">{producedEntries.length}</Field>
             <Field label="Periods due">
               {due.length > 0 ? (
-                <span className="text-amber-700">{due.length}</span>
+                <span className="text-warning">{due.length}</span>
               ) : (
                 <span className="text-ink-500">0</span>
               )}
@@ -125,7 +125,7 @@ export default async function RecurringDetail({
             <Field label="Created by">{t.createdBy ?? "—"}</Field>
           </dl>
           {due.length > 0 && admin && (
-            <p className="text-xs text-amber-700 mt-3">
+            <p className="text-xs text-warning mt-3">
               Next {due.length} due date{due.length === 1 ? "" : "s"}:{" "}
               {due
                 .slice(0, 6)

@@ -86,7 +86,7 @@ export default async function RecurringEntriesPage() {
             the same date is a no-op (lineage dedup).
           </p>
           {totalDue > 0 && (
-            <p className="text-sm text-amber-700 mt-2">
+            <p className="text-sm text-warning mt-2">
               {totalDue} period{totalDue === 1 ? "" : "s"} due across active templates as of today.
             </p>
           )}
@@ -158,7 +158,7 @@ export default async function RecurringEntriesPage() {
                     <TD>{r.lastPostedDate ? formatDate(r.lastPostedDate) : "—"}</TD>
                     <TD className="text-right tabular-nums">
                       {r.dueCount > 0 ? (
-                        <span className="text-amber-700">{r.dueCount}</span>
+                        <span className="text-warning">{r.dueCount}</span>
                       ) : (
                         <span className="text-ink-500">0</span>
                       )}

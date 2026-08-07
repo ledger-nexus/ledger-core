@@ -71,8 +71,8 @@ export default function InstantiateCalendarButton({
           ? "Opening checklist..."
           : `Open checklist for ${periodCode} (${templateCount} task${templateCount === 1 ? "" : "s"})`}
       </Button>
-      {result && <span className="text-xs text-emerald-700">{result}</span>}
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {result && <span className="text-xs text-positive">{result}</span>}
+      {error && <span className="text-xs text-negative">{error}</span>}
     </div>
   );
 }

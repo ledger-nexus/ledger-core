@@ -62,8 +62,8 @@ export default function CommentaryForm({
         <Button type="submit" size="sm" disabled={pending || !value.trim()}>
           {pending ? "..." : "Save"}
         </Button>
-        {error && <span className="text-xs text-red-600">{error}</span>}
-        {success && <span className="text-xs text-emerald-600">Saved</span>}
+        {error && <span className="text-xs text-negative">{error}</span>}
+        {success && <span className="text-xs text-positive">Saved</span>}
       </div>
     </form>
   );

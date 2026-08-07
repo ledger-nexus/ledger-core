@@ -110,8 +110,8 @@ export default function AssertionForm({
           </div>
         </div>
 
-        {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-        {success && <p className="mt-4 text-sm text-emerald-700">{success}</p>}
+        {error && <p className="mt-4 text-sm text-negative">{error}</p>}
+        {success && <p className="mt-4 text-sm text-positive">{success}</p>}
 
         <div className="mt-4">
           <Button onClick={submit} disabled={pending}>

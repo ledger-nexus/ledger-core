@@ -103,8 +103,8 @@ export function WithdrawAction({
         </div>
       )}
 
-      {error && <div className="mt-2 text-xs text-red-700">{error}</div>}
-      {success && <div className="mt-2 text-xs text-emerald-700">{success}</div>}
+      {error && <div className="mt-2 text-xs text-negative">{error}</div>}
+      {success && <div className="mt-2 text-xs text-positive">{success}</div>}
     </div>
   );
 }

@@ -282,7 +282,7 @@ export default async function DashboardPage() {
                   .map((tie) => (
                     <div
                       key={tie.name}
-                      className="flex items-start justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-2"
+                      className="flex items-start justify-between gap-3 rounded-md border border-warning-200 bg-warning-50 p-2"
                     >
                       <div className="flex flex-col">
                         <span className="text-sm text-ink-900">
