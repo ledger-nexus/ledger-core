@@ -21,7 +21,9 @@ import { getDefaultTenantId } from "@/lib/seed/default-tenant";
 
 const prisma = new PrismaClient();
 
-const SUFFIX = "rt4" + Date.now().toString(36) + Math.floor(Math.random() * 9999);
+// Stable prefix for the self-healing scrub; the rest is per-run.
+const PREFIX = "rt4";
+const SUFFIX = PREFIX + Date.now().toString(36) + Math.floor(Math.random() * 9999);
 
 let tenantId: string;
 let entityId: string;
@@ -44,11 +46,36 @@ beforeAll(async () => {
   if (!u) throw new Error("Run Northwind seed first.");
   userId = u.id;
 
-  const entity = await prisma.legalEntity.findFirst({
-    where: { tenantId, code: "NORTHWIND" },
+  await scrubOrphans();
+
+  // A dedicated ENTITY, not just a dedicated calendar.
+  //
+  // This suite used to borrow NORTHWIND and mint its own calendar under
+  // it, on the reasoning that a private calendar keeps period ordinals
+  // from colliding. It does — but ordinals were never the whole problem,
+  // because `getCloseRetrospective` does not window by calendar:
+  //
+  //     where: { tenantId, calendar: { entityId: scope.entityId } }
+  //
+  // The lookback is the newest N periods across EVERY calendar on the
+  // entity. So Northwind's own STANDARD_2026 periods sat in the window
+  // alongside ours, and any close task anyone had ever left on one of
+  // them counted toward our averages. On the shared dev database that
+  // was a single DONE ACCRUAL task ("Accrue bonus", 2026-12) — enough to
+  // turn an expected sampleSize of 2 into 3 and fail the lead-time
+  // assertion. CI never saw it because CI seeds a fresh database.
+  //
+  // Owning the entity makes the query's own scope axis ours, so no
+  // amount of unrelated data on Northwind can reach these numbers.
+  const entity = await prisma.legalEntity.create({
+    data: {
+      tenantId,
+      code: `${SUFFIX}-ENT`.slice(0, 32),
+      name: "Retrospective Test Co.",
+      functionalCurrencyId: "USD",
+    },
     select: { id: true },
   });
-  if (!entity) throw new Error("Need Northwind entity.");
   entityId = entity.id;
 
   const book = await prisma.book.findUnique({
@@ -58,15 +85,11 @@ beforeAll(async () => {
   if (!book) throw new Error("Need US_GAAP book.");
   bookId = book.id;
 
-  // Mint a DEDICATED calendar for this suite (not the shared Northwind
-  // one) so our period ordinals can't collide. The earlier "reuse the
-  // Northwind calendar + random ordinal in 700..792" scheme was flaky:
-  // the per-i random ranges OVERLAP within a single run, and the shared
-  // calendar accumulates periods across runs on the persistent CI DB —
-  // both produce P2002 on (calendarId, ordinal). A fresh calendar scopes
-  // ordinals to rows nobody else touches. It still belongs to the
-  // Northwind entity, so the (entity, book)-scoped retrospective query
-  // sees these periods exactly as before.
+  // The calendar hangs off our own entity, so ordinals are ours too.
+  // (The earlier "reuse the Northwind calendar + random ordinal in
+  // 700..792" scheme produced P2002 on (calendarId, ordinal): the per-i
+  // random ranges overlap within a run, and the shared calendar
+  // accumulates periods across runs on a persistent database.)
   const cal = await prisma.fiscalCalendar.create({
     data: {
       tenantId,
@@ -136,7 +159,10 @@ afterAll(async () => {
       /* leftover FKs from earlier failing runs — leak */
     }
   }
-  // Remove the dedicated calendar once its periods are gone.
+  // Remove the dedicated calendar once its periods are gone, then the
+  // entity that owned it. Failures here are swallowed on purpose — a
+  // leaked row must not turn a green suite red — which is exactly why
+  // `scrubOrphans` exists to collect them on the next run.
   if (calendarId) {
     try {
       await prisma.fiscalCalendar.delete({ where: { id: calendarId } });
@@ -144,22 +170,86 @@ afterAll(async () => {
       /* periods may have leaked above — leave the calendar too */
     }
   }
+  if (entityId) {
+    try {
+      await prisma.legalEntity.delete({ where: { id: entityId } });
+    } catch {
+      /* calendar may have leaked above — leave the entity too */
+    }
+  }
   await prisma.$disconnect();
 });
+
+/**
+ * Delete anything this suite leaked on an earlier run, before seeding.
+ *
+ * A killed vitest (Ctrl-C, OOM, signal) skips `afterAll`, and what it
+ * leaves is not inert: a leaked entity keeps its calendar, its periods
+ * and their DONE close tasks, and those are precisely the rows a later
+ * run averages over. Cleaning up only on the way out means the first
+ * interrupted run poisons every run after it.
+ *
+ * Keyed on the entity code prefix, which is stable across runs while the
+ * rest of the suffix is not. Deletes in FK order, and deliberately does
+ * NOT swallow errors — a scrub that cannot finish should say so here
+ * rather than let the suite seed on top of half-removed fixtures.
+ */
+async function scrubOrphans(): Promise<void> {
+  const stale = await prisma.legalEntity.findMany({
+    where: { tenantId, code: { startsWith: PREFIX } },
+    select: { id: true },
+  });
+  if (stale.length === 0) return;
+  const entityIds = stale.map((e) => e.id);
+
+  const calendars = await prisma.fiscalCalendar.findMany({
+    where: { entityId: { in: entityIds } },
+    select: { id: true },
+  });
+  const calendarIds = calendars.map((c) => c.id);
+  const periods = await prisma.period.findMany({
+    where: { calendarId: { in: calendarIds } },
+    select: { id: true },
+  });
+  const staleperiodIds = periods.map((p) => p.id);
+
+  const tasks = await prisma.closeTask.findMany({
+    where: { periodId: { in: staleperiodIds } },
+    select: { id: true },
+  });
+  const taskIds = tasks.map((t) => t.id);
+  await prisma.closeTaskComment.deleteMany({ where: { closeTaskId: { in: taskIds } } });
+  await prisma.closeTaskStateChange.deleteMany({ where: { closeTaskId: { in: taskIds } } });
+  await prisma.closeTask.deleteMany({ where: { id: { in: taskIds } } });
+
+  const recons = await prisma.reconciliation.findMany({
+    where: { entityId: { in: entityIds } },
+    select: { id: true },
+  });
+  const reconIds = recons.map((r) => r.id);
+  await prisma.reconciliationManualMatch.deleteMany({
+    where: { reconciliationId: { in: reconIds } },
+  });
+  await prisma.reconciliation.deleteMany({ where: { id: { in: reconIds } } });
+
+  await prisma.periodClose.deleteMany({ where: { entityId: { in: entityIds } } });
+  await prisma.period.deleteMany({ where: { id: { in: staleperiodIds } } });
+  await prisma.fiscalCalendar.deleteMany({ where: { id: { in: calendarIds } } });
+  await prisma.account.deleteMany({ where: { tenantId, code: { startsWith: PREFIX } } });
+  await prisma.legalEntity.deleteMany({ where: { id: { in: entityIds } } });
+}
 
 const scope = () => ({ tenantId, entityId, bookId });
 
 describe("getCloseRetrospective — empty case", () => {
   it("returns empty trends and null summary stats when window has no data", async () => {
-    // Pass a tiny lookback so the test-minted periods are out of scope
-    // and the entity has no other periods returning data. (The
-    // Northwind seed minted other periods on the same calendar, but
-    // those carry no recons or tasks for this (entity, book) tuple
-    // when no closes exist either.)
-    //
-    // We can't fully isolate because the entity has prior periods
-    // from the Northwind seed. So we verify the SHAPE: arrays of the
-    // right type exist, summary fields are populated.
+    // This used to verify the SHAPE only — arrays exist, summary
+    // populated — because the suite borrowed NORTHWIND and "we can't
+    // fully isolate because the entity has prior periods from the
+    // Northwind seed". Owning the entity removes that compromise, so
+    // the empty case can assert it is actually empty. That assertion
+    // doubles as the proof that the isolation holds: it fails the
+    // moment anything outside this suite reaches the window.
     const retro = await getCloseRetrospective(prisma, scope(), 1);
     expect(retro.scope).toEqual(scope());
     expect(retro.targetDays).toBe(5);
@@ -168,6 +258,9 @@ describe("getCloseRetrospective — empty case", () => {
     expect(Array.isArray(retro.exceptionRateTrend)).toBe(true);
     expect(Array.isArray(retro.recurringBlockers)).toBe(true);
     expect(retro.summary.windowPeriods).toBe(1);
+    expect(retro.daysToCloseTrend).toEqual([]);
+    expect(retro.taskLeadTime).toEqual([]);
+    expect(retro.recurringBlockers).toEqual([]);
   });
 });
 
