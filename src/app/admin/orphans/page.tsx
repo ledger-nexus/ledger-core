@@ -291,6 +291,6 @@ function resolveOwnerLabel(
 
 function ageDaysBadge(ageDays: number): { className: string } {
   if (ageDays > 30) return { className: "text-negative font-semibold" };
-  if (ageDays > 14) return { className: "text-amber-700" };
+  if (ageDays > 14) return { className: "text-warning" };
   return { className: "text-ink-500" };
 }

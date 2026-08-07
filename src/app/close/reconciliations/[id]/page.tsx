@@ -275,7 +275,7 @@ export default async function ReconciliationDetailPage({
               <div
                 className={
                   overTolerance
-                    ? "amount-cell mt-1 text-lg font-semibold text-red-700"
+                    ? "amount-cell mt-1 text-lg font-semibold text-negative"
                     : "amount-cell mt-1 text-lg text-ink-900"
                 }
               >

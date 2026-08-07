@@ -291,19 +291,19 @@ describe("the UI primitives' colour vocabulary", () => {
   // tone by itself, so the untinted callout beside it still looked
   // deliberate.
   //
-  // Scoped to `src/components/ui/` deliberately. The app still holds ~215
-  // raw tone classes across steps 50-900, and the tokens define only
-  // DEFAULT and 100 — converting those needs new scale steps and would
-  // shift greens at 24 sites, which is a design decision, not a sweep.
-  // The primitives are the tractable boundary and the one that matters:
-  // they are what everything else copies.
+  // This began scoped to `src/components/ui/`, because the app still held
+  // ~215 raw tone classes across steps 50-900 while the tokens defined only
+  // DEFAULT and 100 — converting them needed new scale steps and shifted
+  // greens, which was a design decision rather than a sweep. That decision
+  // was taken: the tones are full scales now and all 219 occurrences are
+  // converted, so the check covers every source file. Widening it is the
+  // point — a rule enforced only where it was already easy is a rule that
+  // never catches the next drift.
   it("uses design tokens, not raw Tailwind palette colours", () => {
-    const PRIMITIVES = path.join(SRC, "components", "ui");
     const raw = /(?:text|bg|border|ring|divide)-(?:red|green|emerald|amber|yellow|cyan|blue|indigo|violet|purple|pink|orange|teal|lime|sky|rose|fuchsia)-\d{2,3}/;
     const failures: string[] = [];
 
     for (const { rel, text } of FILES) {
-      if (!path.join(__dirname, "..", rel).startsWith(PRIMITIVES)) continue;
 
       // Drop comment lines before scanning. A comment naming the class it
       // warns against is documentation, not a usage — and this guard caught

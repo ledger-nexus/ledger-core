@@ -174,7 +174,7 @@ export default async function PeriodsPage() {
           {admin ? null : (
             <>
               {" "}
-              · <span className="text-amber-600">read-only (admin required to close)</span>
+              · <span className="text-warning">read-only (admin required to close)</span>
             </>
           )}
         </p>

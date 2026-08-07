@@ -56,8 +56,8 @@ export default function PostRevaluationButton({
         <div
           className={
             message.kind === "ok"
-              ? "text-xs text-emerald-700"
-              : "text-xs text-red-700"
+              ? "text-xs text-positive"
+              : "text-xs text-negative"
           }
         >
           {message.text}

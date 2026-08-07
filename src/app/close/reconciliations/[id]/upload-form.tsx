@@ -122,10 +122,10 @@ export default function UploadForm({ reconId }: Props) {
           </span>
         )}
         {clientError && (
-          <span className="text-xs text-red-600">{clientError}</span>
+          <span className="text-xs text-negative">{clientError}</span>
         )}
         {serverError && (
-          <span className="text-xs text-red-600">{serverError}</span>
+          <span className="text-xs text-negative">{serverError}</span>
         )}
       </div>
     </form>

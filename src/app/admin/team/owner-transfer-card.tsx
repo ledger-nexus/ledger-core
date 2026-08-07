@@ -131,7 +131,7 @@ export function OwnerTransferCard({
           OWNER until then, and you can cancel at any time. After acceptance,
           you become ADMIN.
         </p>
-        {message && <div className="text-[11px] text-emerald-700">{message}</div>}
+        {message && <div className="text-[11px] text-positive">{message}</div>}
         {error && <div className="text-[11px] text-negative">{error}</div>}
       </div>
     );
@@ -139,11 +139,11 @@ export function OwnerTransferCard({
 
   if (mode === "OWNER_PENDING") {
     return (
-      <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
-        <div className="text-xs font-medium text-amber-900">
+      <div className="flex flex-col gap-2 rounded-md border border-warning-200 bg-warning-50 p-3">
+        <div className="text-xs font-medium text-warning-900">
           Transfer pending
         </div>
-        <p className="text-[11px] text-amber-800">
+        <p className="text-[11px] text-warning-800">
           You&rsquo;ve offered ownership to{" "}
           <span className="font-medium">{targetDisplayName}</span>{" "}
           (<span className="font-mono">{targetEmail}</span>)
@@ -158,12 +158,12 @@ export function OwnerTransferCard({
             type="button"
             onClick={handleCancel}
             disabled={pending}
-            className="h-7 inline-flex items-center rounded-md border border-amber-300 bg-white px-2.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+            className="h-7 inline-flex items-center rounded-md border border-warning-300 bg-white px-2.5 text-[11px] font-medium text-warning-900 hover:bg-warning-100 disabled:opacity-50"
           >
             {pending ? "Cancelling..." : "Cancel transfer"}
           </button>
         </div>
-        {message && <div className="text-[11px] text-emerald-700">{message}</div>}
+        {message && <div className="text-[11px] text-positive">{message}</div>}
         {error && <div className="text-[11px] text-negative">{error}</div>}
       </div>
     );
@@ -171,11 +171,11 @@ export function OwnerTransferCard({
 
   // TARGET_PENDING
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3">
-      <div className="text-xs font-medium text-emerald-900">
+    <div className="flex flex-col gap-2 rounded-md border border-positive-200 bg-positive-50 p-3">
+      <div className="text-xs font-medium text-positive-900">
         Ownership offered to you
       </div>
-      <p className="text-[11px] text-emerald-800">
+      <p className="text-[11px] text-positive-800">
         The current OWNER has offered to transfer this workspace to you
         {initiatedAtLabel && (
           <> on <span className="font-mono">{initiatedAtLabel}</span></>
@@ -188,7 +188,7 @@ export function OwnerTransferCard({
           type="button"
           onClick={handleAccept}
           disabled={pending}
-          className="h-7 inline-flex items-center rounded-md bg-emerald-600 px-2.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          className="h-7 inline-flex items-center rounded-md bg-positive px-2.5 text-[11px] font-medium text-white hover:bg-positive-800 disabled:opacity-50"
         >
           {pending ? "Accepting..." : "Accept ownership"}
         </button>
@@ -196,12 +196,12 @@ export function OwnerTransferCard({
           type="button"
           onClick={handleCancel}
           disabled={pending}
-          className="h-7 inline-flex items-center rounded-md border border-emerald-300 bg-white px-2.5 text-[11px] font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+          className="h-7 inline-flex items-center rounded-md border border-positive-300 bg-white px-2.5 text-[11px] font-medium text-positive-900 hover:bg-positive-100 disabled:opacity-50"
         >
           Decline
         </button>
       </div>
-      {message && <div className="text-[11px] text-emerald-700">{message}</div>}
+      {message && <div className="text-[11px] text-positive">{message}</div>}
       {error && <div className="text-[11px] text-negative">{error}</div>}
     </div>
   );

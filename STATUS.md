@@ -32,6 +32,14 @@ _No active claims._
 
 ## Recent completions
 
+### Session unify-tone-scales · 2026-08-07
+- **Scope**: the ~215 raw tone classes #362 deferred, on Chris's "one green". positive/negative/warning are now full scales spread from Tailwind's green/red/amber with DEFAULT = the 700 step, so existing bare `text-positive`/`bg-negative` keep their exact values. **219 occurrences converted across 64 files; zero raw palette classes remain in `src`.**
+- **⚠️ The sweep was not a rename — it surfaced 4 real AA failures** that had never been checked because raw classes were outside the guard: `text-emerald-600` (3.61), `text-amber-600` (3.05), **`bg-emerald-600` + `text-white` buttons (3.77, and would have become 3.30 as green-600)**, and `text-negative-600` at **4.43 on `bg-ink-100`** — same shape as the original ink-500 finding: passes on the page, fails on the panel. All four bumped to the 700 step. The last one also collapsed **two different reds for one meaning** (82 sites bare + 35 at -600).
+- **⚠️ Landmine avoided and verified**: `accent` is OFFSET from Tailwind's cyan by one step — `accent-500` IS cyan-600, `accent-600` IS cyan-700. Spreading `...colors.cyan` would have silently lightened every focus ring (`focus:border-accent-500`, `ring-accent-500/15`). Missing steps (50/200/900) were added by hand instead; browser-verified `accent-500` still computes `rgb(8,145,178)`.
+- 6 stragglers with no token remapped by meaning, not by hue: `bg-rose-500`→`bg-negative-500` (the bad end, beside `bg-positive-500`/`bg-warning-400`), blue links/dot→`accent`, sky info panel→`accent-50/200/900`.
+- The #362 guard widened from `src/components/ui/` to all of `src` — a rule enforced only where it was already easy never catches the next drift.
+- **Verification**: 9/9 guards, tsc 0, every token probed by computed style in the browser. **Branch**: chore/unify-tone-scales. PR #364.
+
 ### Session unify-tone-vocabulary · 2026-08-07
 - **Scope**: the two-colour-vocabulary drift flagged in #359, closed at the primitives. ⚠️ **They did not merely duplicate — they disagreed.** `positive` is `#15803d` = **green**-700 (the config comment claiming "emerald-700" was wrong), while `Badge` rendered emerald-700 `#047857`. A positive amount and a positive badge were two different greens meaning the same thing. `negative`/`warning` matched exactly; `accent-600` is cyan-700 exactly.
 - Tones are now `{ DEFAULT, 100 }` pairs so a surface step exists as a token, and `Badge` resolves through them. Only `positive` changes visually (4.84 → **4.57** contrast, still AA); the rest are value-identical.

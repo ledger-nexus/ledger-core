@@ -58,7 +58,7 @@ export function CheckoutButton({ plan }: { plan: string }) {
       <Button onClick={go} disabled={pending} className="w-full">
         {pending ? "Starting…" : "Subscribe"}
       </Button>
-      {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-[11px] text-negative">{error}</p>}
     </div>
   );
 }
@@ -70,7 +70,7 @@ export function PortalButton() {
       <Button variant="outline" onClick={go} disabled={pending}>
         {pending ? "Opening…" : "Manage subscription"}
       </Button>
-      {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-[11px] text-negative">{error}</p>}
     </div>
   );
 }

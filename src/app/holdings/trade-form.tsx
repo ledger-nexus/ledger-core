@@ -151,8 +151,8 @@ export default function TradeForm() {
           <Button onClick={submit} disabled={pending}>
             {pending ? "Recording…" : side === "BUY" ? "Record purchase" : "Record sale"}
           </Button>
-          {error ? <span className="text-xs text-red-600">{error}</span> : null}
-          {success ? <span className="text-xs text-emerald-700">{success}</span> : null}
+          {error ? <span className="text-xs text-negative">{error}</span> : null}
+          {success ? <span className="text-xs text-positive">{success}</span> : null}
         </div>
       </CardContent>
     </Card>

@@ -89,11 +89,11 @@ export function DataSubjectActions({
         </button>
         {canErase && (
           <details className="inline-block">
-            <summary className="h-7 inline-flex items-center rounded-md border border-red-300 bg-white px-2.5 text-[11px] font-medium text-red-700 hover:bg-red-50 cursor-pointer">
+            <summary className="h-7 inline-flex items-center rounded-md border border-negative-300 bg-white px-2.5 text-[11px] font-medium text-negative hover:bg-negative-50 cursor-pointer">
               Erase PII…
             </summary>
-            <div className="mt-2 flex flex-col gap-1 rounded-md border border-red-200 bg-red-50 p-2">
-              <label className="text-[11px] text-red-900">
+            <div className="mt-2 flex flex-col gap-1 rounded-md border border-negative-200 bg-negative-50 p-2">
+              <label className="text-[11px] text-negative-900">
                 Type the user's email to confirm:
               </label>
               <input
@@ -102,17 +102,17 @@ export function DataSubjectActions({
                 onChange={(e) => setEraseConfirm(e.target.value)}
                 placeholder={subjectEmail}
                 disabled={pending}
-                className="rounded-md border border-red-300 px-2 py-1 text-[11px] font-mono"
+                className="rounded-md border border-negative-300 px-2 py-1 text-[11px] font-mono"
               />
               <button
                 type="button"
                 onClick={handleErase}
                 disabled={pending || eraseConfirm.length === 0}
-                className="h-7 inline-flex items-center justify-center rounded-md bg-red-600 px-2.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                className="h-7 inline-flex items-center justify-center rounded-md bg-negative-600 px-2.5 text-[11px] font-medium text-white hover:bg-negative disabled:opacity-50"
               >
                 {pending ? "Erasing..." : "Confirm erase"}
               </button>
-              <p className="text-xs text-red-700">
+              <p className="text-xs text-negative">
                 Irreversible. Audit-logged. Financial records keep the
                 user_id pointer; only the User row + email deliveries
                 get redacted.
@@ -123,9 +123,9 @@ export function DataSubjectActions({
       </div>
 
       {message && (
-        <div className="text-[11px] text-emerald-700">{message}</div>
+        <div className="text-[11px] text-positive">{message}</div>
       )}
-      {error && <div className="text-[11px] text-red-700">{error}</div>}
+      {error && <div className="text-[11px] text-negative">{error}</div>}
 
       {!canErase && !isSelf && !isOwnerRole && (
         <p className="text-[11px] text-ink-500">

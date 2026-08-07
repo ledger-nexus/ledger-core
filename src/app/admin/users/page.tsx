@@ -204,7 +204,7 @@ export default async function UsersPage() {
               senior-collectors queue membership)
             </li>
             <li>
-              Click <span className="font-medium text-red-700">Deactivate</span>{" "}
+              Click <span className="font-medium text-negative">Deactivate</span>{" "}
               and choose <span className="font-medium">Skip</span> — records
               become orphans
             </li>

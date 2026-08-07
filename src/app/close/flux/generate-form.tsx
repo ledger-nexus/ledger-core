@@ -153,7 +153,7 @@ export default function GenerateForm({ entities, books, periods }: Props) {
         <Button type="submit" disabled={pending}>
           {pending ? "Generating..." : "Generate"}
         </Button>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && <span className="text-xs text-negative">{error}</span>}
       </div>
     </form>
   );

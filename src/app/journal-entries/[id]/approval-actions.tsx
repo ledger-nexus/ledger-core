@@ -64,11 +64,11 @@ export function ApprovalActions({
   }
 
   return (
-    <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-      <div className="text-sm font-medium text-amber-900">
+    <div className="rounded-md border border-warning-200 bg-warning-50 p-4">
+      <div className="text-sm font-medium text-warning-900">
         This entry is pending approval
       </div>
-      <p className="mt-1 text-xs text-amber-700">
+      <p className="mt-1 text-xs text-warning">
         Review the lines below. Approving posts the entry to the ledger;
         rejecting voids it and notifies the submitter via the rejection
         reason.
@@ -79,7 +79,7 @@ export function ApprovalActions({
           <button
             onClick={handleApprove}
             disabled={pending}
-            className="h-8 inline-flex items-center rounded-md bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="h-8 inline-flex items-center rounded-md bg-positive px-3 text-xs font-medium text-white hover:bg-positive-800 disabled:opacity-50"
           >
             {pending ? "Approving..." : "Approve & post"}
           </button>
@@ -89,14 +89,14 @@ export function ApprovalActions({
               setError(null);
             }}
             disabled={pending}
-            className="h-8 inline-flex items-center rounded-md border border-red-300 bg-white px-3 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            className="h-8 inline-flex items-center rounded-md border border-negative-300 bg-white px-3 text-xs font-medium text-negative hover:bg-negative-50 disabled:opacity-50"
           >
             Reject…
           </button>
         </div>
       ) : (
         <div className="mt-3 flex flex-col gap-2">
-          <label className="text-xs font-medium text-amber-900">
+          <label className="text-xs font-medium text-warning-900">
             Rejection reason (required)
           </label>
           <textarea
@@ -104,14 +104,14 @@ export function ApprovalActions({
             onChange={(e) => setRejectReason(e.target.value)}
             rows={3}
             placeholder="e.g. Account 4000 should be 4100 — please resubmit."
-            className="w-full rounded-md border border-amber-300 px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+            className="w-full rounded-md border border-warning-300 px-3 py-2 text-xs focus:border-warning-500 focus:outline-none"
             disabled={pending}
           />
           <div className="flex gap-2">
             <button
               onClick={handleReject}
               disabled={pending || !rejectReason.trim()}
-              className="h-8 inline-flex items-center rounded-md bg-red-600 px-3 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              className="h-8 inline-flex items-center rounded-md bg-negative-600 px-3 text-xs font-medium text-white hover:bg-negative disabled:opacity-50"
             >
               {pending ? "Rejecting..." : "Confirm reject"}
             </button>
@@ -131,10 +131,10 @@ export function ApprovalActions({
       )}
 
       {error && (
-        <div className="mt-2 text-xs text-red-700">{error}</div>
+        <div className="mt-2 text-xs text-negative">{error}</div>
       )}
       {success && (
-        <div className="mt-2 text-xs text-emerald-700">{success}</div>
+        <div className="mt-2 text-xs text-positive">{success}</div>
       )}
     </div>
   );

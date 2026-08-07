@@ -213,11 +213,11 @@ export default function PasteForm({
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {preview.errors && preview.errors.length > 0 && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3">
-                <p className="text-sm font-medium text-red-700 mb-1">
+              <div className="rounded-md border border-negative-200 bg-negative-50 p-3">
+                <p className="text-sm font-medium text-negative mb-1">
                   {preview.errors.length} error{preview.errors.length === 1 ? "" : "s"}:
                 </p>
-                <ul className="text-xs text-red-700 list-disc list-inside space-y-0.5">
+                <ul className="text-xs text-negative list-disc list-inside space-y-0.5">
                   {preview.errors.map((e, i) => (
                     <li key={i}>{e}</li>
                   ))}
@@ -225,11 +225,11 @@ export default function PasteForm({
               </div>
             )}
             {preview.warnings && preview.warnings.length > 0 && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
-                <p className="text-sm font-medium text-amber-700 mb-1">
+              <div className="rounded-md border border-warning-200 bg-warning-50 p-3">
+                <p className="text-sm font-medium text-warning mb-1">
                   {preview.warnings.length} warning{preview.warnings.length === 1 ? "" : "s"}:
                 </p>
-                <ul className="text-xs text-amber-700 list-disc list-inside space-y-0.5">
+                <ul className="text-xs text-warning list-disc list-inside space-y-0.5">
                   {preview.warnings.map((w, i) => (
                     <li key={i}>{w}</li>
                   ))}
@@ -287,7 +287,7 @@ export default function PasteForm({
       )}
 
       {postError && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-md border border-negative-200 bg-negative-50 p-3 text-sm text-negative">
           {postError}
         </div>
       )}

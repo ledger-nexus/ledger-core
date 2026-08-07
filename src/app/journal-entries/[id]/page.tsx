@@ -205,8 +205,8 @@ export default async function JournalEntryDetailPage({
           re-checks); the submitter gets withdraw; everyone else sees why
           the entry has no ledger effect yet. */}
       {entry.status === "PENDING_APPROVAL" && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <div className="text-sm font-medium text-amber-900">
+        <div className="rounded-xl border border-warning-200 bg-warning-50 p-4">
+          <div className="text-sm font-medium text-warning-900">
             Awaiting approval — this entry has no ledger effect until an
             approver posts it.
           </div>
@@ -218,7 +218,7 @@ export default async function JournalEntryDetailPage({
             ) : entry.submittedById === currentUser?.id ? (
               <WithdrawAction entryId={entry.id} entryNumber={entry.entryNumber} />
             ) : (
-              <p className="text-xs text-amber-800">
+              <p className="text-xs text-warning-800">
                 An ADMIN or OWNER (other than the submitter) can approve or
                 reject it.
               </p>
@@ -227,7 +227,7 @@ export default async function JournalEntryDetailPage({
         </div>
       )}
       {entry.status === "VOID" && entry.rejectionReason && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+        <div className="rounded-xl border border-negative-200 bg-negative-50 p-4 text-sm text-negative-900">
           <span className="font-medium">
             {entry.rejectionReason.startsWith("Withdrawn")
               ? "Withdrawn by submitter"
@@ -239,7 +239,7 @@ export default async function JournalEntryDetailPage({
       )}
 
       {isMirror && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+        <div className="rounded-xl border border-accent-200 bg-accent-50 p-4 text-sm text-accent-900">
           <span className="font-medium">Intercompany mirror</span> — the
           counterparty half of{" "}
           {mirrorSource ? (
@@ -400,7 +400,7 @@ export default async function JournalEntryDetailPage({
                             counterparty {paired} {isDebit ? "CR" : "DR"} {formatMoney(amount)}
                           </>
                         ) : (
-                          <span className="text-red-600">
+                          <span className="text-negative">
                             no intercompany subtype — blocks the mirror
                           </span>
                         )}

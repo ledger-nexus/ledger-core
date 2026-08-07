@@ -258,19 +258,19 @@ export default async function CloseDashboardPage({
           </CardTitle>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-ink-500">
             <span
-              className={tasksReady ? "text-emerald-700" : "text-red-700"}
+              className={tasksReady ? "text-positive" : "text-negative"}
             >
               {tasksReady ? "✓" : "✗"} Tasks
               {taskBlockers.length > 0 && ` (${taskBlockers.length} blocking)`}
             </span>
             <span
-              className={reconReady ? "text-emerald-700" : "text-red-700"}
+              className={reconReady ? "text-positive" : "text-negative"}
             >
               {reconReady ? "✓" : "✗"} Recons (
               {reconRollup.done}/{reconRollup.total})
             </span>
             <span
-              className={fluxReady ? "text-emerald-700" : "text-red-700"}
+              className={fluxReady ? "text-positive" : "text-negative"}
             >
               {fluxReady ? "✓" : "✗"} Flux
               {fluxRollup
@@ -323,7 +323,7 @@ export default async function CloseDashboardPage({
                 </li>
                 <li className="flex items-center justify-between">
                   <span className="text-ink-500">Exception</span>
-                  <span className={reconRollup.exception > 0 ? "text-red-700 font-medium" : "text-ink-900"}>
+                  <span className={reconRollup.exception > 0 ? "text-negative font-medium" : "text-ink-900"}>
                     {reconRollup.exception}
                   </span>
                 </li>
@@ -405,7 +405,7 @@ export default async function CloseDashboardPage({
                 </li>
                 <li className="flex items-center justify-between">
                   <span className="text-ink-500">Blocked</span>
-                  <span className={taskRollup.blocked > 0 ? "text-red-700 font-medium" : "text-ink-900"}>
+                  <span className={taskRollup.blocked > 0 ? "text-negative font-medium" : "text-ink-900"}>
                     {taskRollup.blocked}
                   </span>
                 </li>
@@ -462,7 +462,7 @@ export default async function CloseDashboardPage({
                 </li>
                 <li className="flex items-center justify-between">
                   <span className="text-ink-500">Pending</span>
-                  <span className={fluxRollup.needsComment > 0 ? "text-red-700 font-medium" : "text-ink-900"}>
+                  <span className={fluxRollup.needsComment > 0 ? "text-negative font-medium" : "text-ink-900"}>
                     {fluxRollup.needsComment}
                   </span>
                 </li>
@@ -495,7 +495,7 @@ export default async function CloseDashboardPage({
                 <li>
                   <Link
                     href={`/close/tasks?period=${selectedPeriod.code}&status=NOT_STARTED`}
-                    className="text-red-700 hover:underline"
+                    className="text-negative hover:underline"
                   >
                     ✗ {taskBlockers.length} required close task
                     {taskBlockers.length === 1 ? "" : "s"} not yet terminal:{" "}
@@ -511,7 +511,7 @@ export default async function CloseDashboardPage({
                 <li>
                   <Link
                     href={`/close/reconciliations?period=${selectedPeriod.code}&status=EXCEPTION`}
-                    className="text-red-700 hover:underline"
+                    className="text-negative hover:underline"
                   >
                     ✗ {reconRollup.total - reconRollup.done} reconciliation
                     {reconRollup.total - reconRollup.done === 1 ? "" : "s"} not signed off
@@ -524,7 +524,7 @@ export default async function CloseDashboardPage({
                 <li>
                   <Link
                     href={`/close/flux/${fluxRollup.statementId}`}
-                    className="text-red-700 hover:underline"
+                    className="text-negative hover:underline"
                   >
                     ✗ Flux statement{" "}
                     {fluxRollup.status === "FINALIZED"
@@ -559,7 +559,7 @@ export default async function CloseDashboardPage({
                   >
                     {t.name}
                   </Link>
-                  <span className="text-xs text-red-700">
+                  <span className="text-xs text-negative">
                     due {t.dueAt ? formatDate(t.dueAt) : "—"} · {t.status}
                   </span>
                 </li>

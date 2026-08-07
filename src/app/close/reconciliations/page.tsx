@@ -496,7 +496,7 @@ export default async function ReconciliationsListPage({
                       <TD
                         className={
                           overTolerance
-                            ? "amount-cell text-right text-red-700 font-medium"
+                            ? "amount-cell text-right text-negative font-medium"
                             : "amount-cell text-right text-ink-700"
                         }
                       >

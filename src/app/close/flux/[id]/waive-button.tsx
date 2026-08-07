@@ -76,7 +76,7 @@ export default function WaiveButton({ lineId, accountName }: Props) {
         >
           Cancel
         </Button>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && <span className="text-xs text-negative">{error}</span>}
       </div>
     </form>
   );

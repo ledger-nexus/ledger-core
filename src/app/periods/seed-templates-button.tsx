@@ -36,8 +36,8 @@ export default function SeedTemplatesButton() {
       <Button onClick={handleClick} disabled={pending}>
         {pending ? "Seeding..." : "Seed 50 templates"}
       </Button>
-      {result && <span className="text-xs text-emerald-700">{result}</span>}
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {result && <span className="text-xs text-positive">{result}</span>}
+      {error && <span className="text-xs text-negative">{error}</span>}
     </div>
   );
 }

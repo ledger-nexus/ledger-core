@@ -77,8 +77,8 @@ export default async function BillingPage({
       </div>
 
       {searchParams.status === "success" && (
-        <Card className="border-emerald-200 bg-emerald-50">
-          <CardContent className="pt-6 text-sm text-emerald-800">
+        <Card className="border-positive-200 bg-positive-50">
+          <CardContent className="pt-6 text-sm text-positive-800">
             Checkout complete. Stripe confirms the subscription in the
             background — this page shows the new plan within a few seconds of
             a refresh.
@@ -86,8 +86,8 @@ export default async function BillingPage({
         </Card>
       )}
       {searchParams.status === "cancel" && (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="pt-6 text-sm text-amber-800">
+        <Card className="border-warning-200 bg-warning-50">
+          <CardContent className="pt-6 text-sm text-warning-800">
             Checkout canceled. Nothing was charged.
           </CardContent>
         </Card>
@@ -118,7 +118,7 @@ export default async function BillingPage({
                 )}
               </div>
               {billing?.subscriptionStatus === "past_due" && (
-                <p className="mt-3 text-sm text-red-700">
+                <p className="mt-3 text-sm text-negative">
                   Payment failed. The workspace is on free-tier caps until the
                   card is updated.
                 </p>

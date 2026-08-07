@@ -8,7 +8,7 @@ interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 // Tones resolve through the design tokens, not raw Tailwind. Reaching for
-// `bg-amber-100` here is what let `warning` be used as a colour utility
+// `bg-warning-100` here is what let `warning` be used as a colour utility
 // elsewhere while being absent from the config: the badge stayed amber on
 // its own, so the untinted callout beside it still looked deliberate.
 const toneClasses: Record<BadgeTone, string> = {

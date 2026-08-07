@@ -127,8 +127,8 @@ export default function CommodityForms({
               />
             </div>
           </div>
-          {addError && <p className="mt-4 text-sm text-red-600">{addError}</p>}
-          {addOk && <p className="mt-4 text-sm text-emerald-700">{addOk}</p>}
+          {addError && <p className="mt-4 text-sm text-negative">{addError}</p>}
+          {addOk && <p className="mt-4 text-sm text-positive">{addOk}</p>}
           <div className="mt-4">
             <Button onClick={submitAdd} disabled={addPending}>
               {addPending ? "Adding…" : "Add commodity"}
@@ -196,8 +196,8 @@ export default function CommodityForms({
               />
             </div>
           </div>
-          {priceError && <p className="mt-4 text-sm text-red-600">{priceError}</p>}
-          {priceOk && <p className="mt-4 text-sm text-emerald-700">{priceOk}</p>}
+          {priceError && <p className="mt-4 text-sm text-negative">{priceError}</p>}
+          {priceOk && <p className="mt-4 text-sm text-positive">{priceOk}</p>}
           <div className="mt-4">
             <Button onClick={submitPrice} disabled={pricePending}>
               {pricePending ? "Recording…" : "Record price"}

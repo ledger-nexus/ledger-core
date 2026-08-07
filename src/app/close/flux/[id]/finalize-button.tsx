@@ -54,7 +54,7 @@ export default function FinalizeButton({
         <span className="text-xs text-ink-500">{pendingHint}</span>
       )}
       {error && (
-        <div className="text-xs text-red-600">
+        <div className="text-xs text-negative">
           <div>{error}</div>
           {pendingNames.length > 0 && (
             <div className="mt-1">

@@ -30,12 +30,12 @@ export function MultiBookBanner({
   if (others.length === 0) return null;
 
   return (
-    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+    <div className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-900">
       <span className="font-medium">Multi-book entity:</span>{" "}
       This entity also has open {side} items on:{" "}
       {others.map((b, i) => (
         <span key={b.bookCode}>
-          <code className="rounded bg-white px-1 ring-1 ring-amber-200">
+          <code className="rounded bg-white px-1 ring-1 ring-warning-200">
             {b.bookCode}
           </code>{" "}
           <span className="opacity-70">

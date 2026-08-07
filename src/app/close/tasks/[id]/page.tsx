@@ -275,7 +275,7 @@ export default async function CloseTaskDetailPage({
               )}
             </dd>
             <dt className="text-ink-500">Due</dt>
-            <dd className={overdue ? "text-red-700 font-medium" : "text-ink-700"}>
+            <dd className={overdue ? "text-negative font-medium" : "text-ink-700"}>
               {task.dueAt ? formatDate(task.dueAt) : "—"}
               {task.dueOffsetDays != null && (
                 <span className="ml-2 text-xs text-ink-500">
@@ -289,7 +289,7 @@ export default async function CloseTaskDetailPage({
             {task.status === "BLOCKED" && task.blockedReason && (
               <>
                 <dt className="text-ink-500">Blocked because</dt>
-                <dd className="text-red-700 whitespace-pre-wrap">
+                <dd className="text-negative whitespace-pre-wrap">
                   {task.blockedReason}
                 </dd>
               </>

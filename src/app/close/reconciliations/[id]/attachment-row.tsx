@@ -67,7 +67,7 @@ export default function AttachmentRow({
           {formatDate(attachment.uploadedAt)}
         </div>
         {error && (
-          <div className="mt-1 text-xs text-red-600">{error}</div>
+          <div className="mt-1 text-xs text-negative">{error}</div>
         )}
       </div>
       <div className="flex items-center gap-2 pl-3">

@@ -67,7 +67,7 @@ export default function WaiveButton({ reconId, accountCode }: Props) {
           htmlFor="waive-reason"
           className="block text-sm font-medium text-ink-900"
         >
-          Reason <span className="text-red-600">*</span>
+          Reason <span className="text-negative">*</span>
         </label>
         <textarea
           id="waive-reason"
@@ -97,7 +97,7 @@ export default function WaiveButton({ reconId, accountCode }: Props) {
         >
           Cancel
         </Button>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && <span className="text-xs text-negative">{error}</span>}
       </div>
     </form>
   );

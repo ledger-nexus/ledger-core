@@ -58,7 +58,7 @@ export default function CommentForm({ taskId }: Props) {
         <span className="text-xs text-ink-500">
           {body.length}/4000
         </span>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && <span className="text-xs text-negative">{error}</span>}
       </div>
     </form>
   );

@@ -114,10 +114,10 @@ export default async function ReportBuilderEditPage({
       {searchParams.err && (
         <Card>
           <CardContent>
-            <p className="text-sm font-medium text-red-700">
+            <p className="text-sm font-medium text-negative">
               Validation failed — no changes saved.
             </p>
-            <pre className="mt-2 whitespace-pre-wrap text-xs text-red-600">
+            <pre className="mt-2 whitespace-pre-wrap text-xs text-negative">
               {searchParams.err}
             </pre>
           </CardContent>

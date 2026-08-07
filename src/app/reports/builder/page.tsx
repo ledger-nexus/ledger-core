@@ -149,7 +149,7 @@ export default async function ReportBuilderIndex() {
                       >
                         <button
                           type="submit"
-                          className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                          className="rounded border border-negative-300 bg-white px-3 py-1.5 text-sm font-medium text-negative hover:bg-negative-50"
                         >
                           Delete
                         </button>
