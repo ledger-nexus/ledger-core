@@ -119,7 +119,7 @@ export default async function RecurringDetail({
               {due.length > 0 ? (
                 <span className="text-amber-700">{due.length}</span>
               ) : (
-                <span className="text-ink-400">0</span>
+                <span className="text-ink-500">0</span>
               )}
             </Field>
             <Field label="Created by">{t.createdBy ?? "—"}</Field>

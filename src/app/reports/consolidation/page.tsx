@@ -178,8 +178,11 @@ export default async function ConsolidationPage({
           the original naïve-sum disclosure, plus the reason when it's a
           missing FX rate. */}
       {report.translationActive && (
-        <Card>
-          <CardContent className="border-l-4 border-positive bg-positive/5 px-5 py-4">
+        // Tone rides on the card surface, not a 4px strip down its left
+        // edge. The tint plus the Badge already say "positive"; the strip
+        // only added a second, louder voice saying the same thing.
+        <Card className="border-positive/30 bg-positive/5">
+          <CardContent className="px-5 py-4">
             <div className="flex items-start gap-3">
               <Badge tone="positive">FX translation active</Badge>
               <div className="text-sm text-ink-900">
@@ -216,8 +219,12 @@ export default async function ConsolidationPage({
         </Card>
       )}
       {report.hasMultiCurrency && !report.translationActive && (
-        <Card>
-          <CardContent className="border-l-4 border-warning bg-warning/5 px-5 py-4">
+        // `warning` resolved to nothing until it was added to the config,
+        // so this callout shipped untinted with a default border while its
+        // positive twin above was green — the Badge was carrying the tone
+        // single-handed.
+        <Card className="border-warning/30 bg-warning/5">
+          <CardContent className="px-5 py-4">
             <div className="flex items-start gap-3">
               <Badge tone="warning">FX translation not active</Badge>
               <div className="text-sm text-ink-900">
@@ -300,7 +307,7 @@ export default async function ConsolidationPage({
               {report.entitiesIncluded.map((e) => (
                 <TR key={e.code}>
                   <TD className="font-mono text-xs text-ink-700">
-                    {e.code} <span className="text-ink-400">— {e.name}</span>
+                    {e.code} <span className="text-ink-500">— {e.name}</span>
                   </TD>
                   <TD>
                     <Badge tone={e.isRoot ? "info" : "neutral"}>{e.isRoot ? "Root" : "Subsidiary"}</Badge>

@@ -227,7 +227,7 @@ export default async function FluxListPage() {
                           <>
                             {formatDate(s.finalizedAt)}
                             {s.finalizer?.displayName && (
-                              <div className="text-[10px] text-ink-400">
+                              <div className="text-[11px] text-ink-500">
                                 {s.finalizer.displayName}
                               </div>
                             )}

@@ -145,7 +145,7 @@ export default function ReviewRow({
                     className="rounded-md border border-ink-300 bg-white px-2 py-0.5 font-medium text-accent-600 hover:bg-ink-100"
                   >
                     Match {c.entryNumber}
-                    <span className="ml-1 text-ink-400">{c.date}</span>
+                    <span className="ml-1 text-ink-500">{c.date}</span>
                   </button>
                 </form>
               ))}

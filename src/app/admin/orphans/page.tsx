@@ -172,13 +172,13 @@ export default async function OrphansPage() {
                       </TD>
                       <TD className="text-xs text-ink-600">
                         <div>{o.entityCode}</div>
-                        <div className="text-[11px] text-ink-400">{o.bookCode}</div>
+                        <div className="text-[11px] text-ink-500">{o.bookCode}</div>
                       </TD>
                       <TD className="text-xs">
                         {ownerLabel ? (
                           <span className="text-ink-700">{ownerLabel}</span>
                         ) : (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                       </TD>
                       <TD>
@@ -240,7 +240,7 @@ function PermissionDenied({ reason }: { reason: string }) {
       <CardContent className="px-6 py-10 text-center">
         <h2 className="text-base font-semibold text-ink-900">Admin only</h2>
         <p className="mt-1 text-sm text-ink-500">{reason}</p>
-        <p className="mt-3 text-xs text-ink-400">
+        <p className="mt-3 text-xs text-ink-500">
           Pick the <span className="font-medium">Carla Controller</span> user from
           the switcher in the header to view this page (interim email allowlist).
         </p>

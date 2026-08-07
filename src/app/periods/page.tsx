@@ -234,14 +234,14 @@ export default async function PeriodsPage() {
                             {jeCount}
                           </Link>
                         ) : (
-                          <span className="text-ink-400">0</span>
+                          <span className="text-ink-500">0</span>
                         )}
                       </TD>
                       <TD className="text-xs">
                         {(() => {
                           const r = taskRollupByPeriod.get(p.id);
                           if (!r || r.total === 0) {
-                            return <span className="text-ink-400">—</span>;
+                            return <span className="text-ink-500">—</span>;
                           }
                           const allDone = r.done === r.total;
                           return (
@@ -286,14 +286,14 @@ export default async function PeriodsPage() {
                             </Link>
                             <Link
                               href={`/reports/month-end?period=${p.code}`}
-                              className="text-ink-400 hover:text-accent-600"
+                              className="text-ink-500 hover:text-accent-600"
                               title="Open month-end review"
                             >
                               ↗
                             </Link>
                           </span>
                         ) : (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                       </TD>
                       {admin ? (

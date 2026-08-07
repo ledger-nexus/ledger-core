@@ -40,10 +40,10 @@ export function UserSwitcher({ currentUserId, options }: Props) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-amber-700">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-amber-700">
           dev auth stub
         </span>
-        {pending ? <span className="text-[10px] text-ink-400">switching…</span> : null}
+        {pending ? <span className="text-[11px] text-ink-500">switching…</span> : null}
       </div>
       <select
         value={currentUserId ?? "__none__"}

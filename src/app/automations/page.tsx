@@ -91,7 +91,7 @@ export default async function AutomationsPage() {
                 <p className="text-sm text-ink-700">{a.description}</p>
                 <p className="text-xs text-ink-500">{status?.detail}</p>
                 {a.provenance && (
-                  <p className="text-xs text-ink-400">{a.provenance}</p>
+                  <p className="text-xs text-ink-500">{a.provenance}</p>
                 )}
                 {a.href && (
                   <Link
@@ -107,7 +107,7 @@ export default async function AutomationsPage() {
         })}
       </div>
 
-      <p className="text-xs text-ink-400">
+      <p className="text-xs text-ink-500">
         This is a read-only view. Turning automations on and off from here —
         and bundling them into presets — is coming.
       </p>

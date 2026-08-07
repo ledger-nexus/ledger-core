@@ -177,7 +177,7 @@ export default async function AuditLogPage({
                 {tenant ? (
                   <span className="font-medium">{tenant.name}</span>
                 ) : (
-                  <span className="text-ink-400">none</span>
+                  <span className="text-ink-500">none</span>
                 )}
               </span>
             </div>
@@ -350,7 +350,7 @@ function AuditRow({ row }: AuditRowProps) {
     <TR>
       <TD className="text-ink-700 whitespace-nowrap text-xs">
         <div>{formatDate(row.occurredAt)}</div>
-        <div className="text-[10px] text-ink-400">
+        <div className="text-[11px] text-ink-500">
           {row.occurredAt.toISOString().slice(11, 19)}
         </div>
       </TD>
@@ -359,7 +359,7 @@ function AuditRow({ row }: AuditRowProps) {
       </TD>
       <TD className="text-xs text-ink-700">
         {row.actorEmail ?? (
-          <span className="text-ink-400">system</span>
+          <span className="text-ink-500">system</span>
         )}
       </TD>
       <TD className="text-xs text-ink-700 font-mono">{row.action}</TD>
@@ -368,7 +368,7 @@ function AuditRow({ row }: AuditRowProps) {
           <>
             <span className="font-medium">{row.resource}</span>
             {row.resourceId && (
-              <span className="text-ink-400">·{row.resourceId.slice(0, 8)}</span>
+              <span className="text-ink-500">·{row.resourceId.slice(0, 8)}</span>
             )}
           </>
         ) : (
@@ -413,7 +413,7 @@ function metadataSnippet(metadata: unknown): React.ReactNode {
         </span>
       ))}
       {Object.keys(obj).length > 4 && (
-        <span className="text-ink-400">
+        <span className="text-ink-500">
           {" "}
           (+{Object.keys(obj).length - 4} more)
         </span>
@@ -494,7 +494,7 @@ function PermissionDenied({ reason }: { reason: string }) {
       <CardContent className="px-6 py-10 text-center">
         <h2 className="text-base font-semibold text-ink-900">Admin only</h2>
         <p className="mt-1 text-sm text-ink-500">{reason}</p>
-        <p className="mt-3 text-xs text-ink-400">
+        <p className="mt-3 text-xs text-ink-500">
           Audit-log access requires the admin role. Pick an admin user from
           the switcher in the header.
         </p>

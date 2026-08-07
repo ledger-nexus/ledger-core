@@ -271,14 +271,14 @@ export default async function CloseTaskDetailPage({
               ) : task.owner?.displayName ? (
                 task.owner.displayName
               ) : (
-                <span className="text-ink-400">unassigned</span>
+                <span className="text-ink-500">unassigned</span>
               )}
             </dd>
             <dt className="text-ink-500">Due</dt>
             <dd className={overdue ? "text-red-700 font-medium" : "text-ink-700"}>
               {task.dueAt ? formatDate(task.dueAt) : "—"}
               {task.dueOffsetDays != null && (
-                <span className="ml-2 text-xs text-ink-400">
+                <span className="ml-2 text-xs text-ink-500">
                   ({task.dueOffsetDays >= 0 ? "+" : ""}
                   {task.dueOffsetDays}d from period end)
                 </span>

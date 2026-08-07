@@ -60,7 +60,7 @@ export default async function M3DetailPage({
             {scope.entityCode} · {bookFrom} (book) vs {bookTo} (tax) · {formatDate(new Date(from))} →{" "}
             {formatDate(new Date(to))}
           </p>
-          <p className="mt-1 text-xs text-ink-400">
+          <p className="mt-1 text-xs text-ink-500">
             Groups book-tax differences by IRS Form 1120 Schedule M-3 line for tax-provision input.
           </p>
         </div>
@@ -217,7 +217,7 @@ function SummaryCard({
         <div className={`mt-1 amount-cell text-xl font-semibold ${moneyClass(value as any)}`}>
           {formatMoney(value as any)}
         </div>
-        {hint && <div className="mt-1 text-[11px] text-ink-400">{hint}</div>}
+        {hint && <div className="mt-1 text-[11px] text-ink-500">{hint}</div>}
       </CardContent>
     </Card>
   );

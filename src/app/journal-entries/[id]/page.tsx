@@ -313,7 +313,7 @@ export default async function JournalEntryDetailPage({
             <TBody>
               {entry.lines.map((line) => (
                 <TR key={line.id}>
-                  <TD className="text-ink-400">{line.lineNo}</TD>
+                  <TD className="text-ink-500">{line.lineNo}</TD>
                   <TD>
                     <span className="font-mono text-xs text-ink-700">{line.account.code}</span>
                     <span className="ml-2 text-ink-500">{line.account.name}</span>
@@ -325,7 +325,7 @@ export default async function JournalEntryDetailPage({
                         <span className="ml-1 text-ink-500">— {line.party.displayName}</span>
                       </span>
                     ) : (
-                      <span className="text-ink-400">—</span>
+                      <span className="text-ink-500">—</span>
                     )}
                   </TD>
                   <TD className="text-ink-700">{line.description ?? "—"}</TD>

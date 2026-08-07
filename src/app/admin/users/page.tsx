@@ -145,7 +145,7 @@ export default async function UsersPage() {
                     <TD className="text-ink-900">
                       {u.displayName}
                       {isCurrent ? (
-                        <span className="ml-1 text-[10px] text-ink-400">(you)</span>
+                        <span className="ml-1 text-[11px] text-ink-500">(you)</span>
                       ) : null}
                     </TD>
                     <TD className="font-mono text-xs text-ink-600">{u.email}</TD>
@@ -166,7 +166,7 @@ export default async function UsersPage() {
                     </TD>
                     <TD>
                       {isCurrent ? (
-                        <span className="text-[11px] text-ink-400">
+                        <span className="text-[11px] text-ink-500">
                           can't act on self
                         </span>
                       ) : u.isActive ? (
@@ -231,7 +231,7 @@ function PermissionDenied({ reason }: { reason: string }) {
       <CardContent className="px-6 py-10 text-center">
         <h2 className="text-base font-semibold text-ink-900">Admin only</h2>
         <p className="mt-1 text-sm text-ink-500">{reason}</p>
-        <p className="mt-3 text-xs text-ink-400">
+        <p className="mt-3 text-xs text-ink-500">
           Pick the <span className="font-medium">Carla Controller</span> user
           from the switcher in the header to view this page (interim email
           allowlist).

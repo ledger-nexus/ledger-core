@@ -26,7 +26,12 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session design-system-contrast · started 2026-08-06 18:20 · heartbeat 18:45
+- **Scope**: implementing impeccable.style's lessons as an enforced visual contract. `ink-400` (2.41:1) carried text in 120 places; `ink-500` failed on `bg-ink-100`; 45 sizes below 11px incl. 6 validation errors; `warning` used as a colour utility but absent from the config; 2 side-tab accent borders.
+- **Files / globs**: `tailwind.config.ts`, `docs/design-system.md`, `tests/design-system.test.ts`, `src/app/reports/consolidation/page.tsx`, plus className-only edits across `src/**/*.tsx`
+- **Branch**: a11y/muted-text-contrast
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
+
 
 ---
 

@@ -134,7 +134,7 @@ export default async function BookTaxDifferencePage({
             <div className={`mt-1 amount-cell text-xl font-semibold ${moneyClass(btd.totalDelta)}`}>
               {formatMoney(btd.totalDelta)}
             </div>
-            <div className="mt-1 text-[11px] text-ink-400">Feeds ASC 740 deferred tax</div>
+            <div className="mt-1 text-[11px] text-ink-500">Feeds ASC 740 deferred tax</div>
           </CardContent>
         </Card>
       </div>
@@ -213,7 +213,7 @@ function BtdTable({
               >
                 {r.classification}
               </Badge>
-              <div className="mt-0.5 text-[11px] text-ink-400">{r.rationale}</div>
+              <div className="mt-0.5 text-[11px] text-ink-500">{r.rationale}</div>
             </TD>
           </TR>
         ))}

@@ -196,7 +196,7 @@ function HierarchicalTable({
               <TD>
                 <span style={{ paddingLeft: indentPx }}>{node.name}</span>
                 {isGroup && (
-                  <span className="ml-2 text-[10px] uppercase tracking-wide text-ink-400">
+                  <span className="ml-2 text-[11px] uppercase tracking-wide text-ink-500">
                     subtotal
                   </span>
                 )}

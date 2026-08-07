@@ -252,7 +252,7 @@ export default function PasteForm({
                   <TBody>
                     {preview.lines.map((l) => (
                       <TR key={l.rowNumber}>
-                        <TD className="tabular-nums text-ink-400">{l.rowNumber}</TD>
+                        <TD className="tabular-nums text-ink-500">{l.rowNumber}</TD>
                         <TD className="font-mono text-xs">{l.accountCode}</TD>
                         <TD className="max-w-xs truncate" title={l.description}>
                           {l.description || "—"}

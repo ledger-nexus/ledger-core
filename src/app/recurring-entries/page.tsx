@@ -160,7 +160,7 @@ export default async function RecurringEntriesPage() {
                       {r.dueCount > 0 ? (
                         <span className="text-amber-700">{r.dueCount}</span>
                       ) : (
-                        <span className="text-ink-400">0</span>
+                        <span className="text-ink-500">0</span>
                       )}
                     </TD>
                     <TD>

@@ -75,7 +75,7 @@ export default function WaiveButton({ reconId, accountCode }: Props) {
           onChange={(e) => setReason(e.target.value)}
           rows={3}
           placeholder="Account has zero activity for the period; recon not applicable..."
-          className="mt-1 block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+          className="mt-1 block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-500 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
           disabled={pending}
           maxLength={2000}
           autoFocus

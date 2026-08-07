@@ -101,12 +101,12 @@ export default function ReviewerActions({ reconId }: Props) {
                 ? "Preparer needs to attach the bank statement screenshot..."
                 : "Diff is a known timing issue from the September close..."
             }
-            className="mt-1 block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+            className="mt-1 block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-500 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
             disabled={pending}
             maxLength={2000}
             autoFocus
           />
-          <div className="mt-1 text-xs text-ink-400">
+          <div className="mt-1 text-xs text-ink-500">
             {comment.length}/2000 characters · persists to the audit log
           </div>
         </div>

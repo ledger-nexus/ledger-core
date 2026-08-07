@@ -112,7 +112,7 @@ export function DataSubjectActions({
               >
                 {pending ? "Erasing..." : "Confirm erase"}
               </button>
-              <p className="text-[10px] text-red-700">
+              <p className="text-xs text-red-700">
                 Irreversible. Audit-logged. Financial records keep the
                 user_id pointer; only the User row + email deliveries
                 get redacted.
@@ -128,7 +128,7 @@ export function DataSubjectActions({
       {error && <div className="text-[11px] text-red-700">{error}</div>}
 
       {!canErase && !isSelf && !isOwnerRole && (
-        <p className="text-[10px] text-ink-500">
+        <p className="text-[11px] text-ink-500">
           Erasure requires OWNER. You can still export.
         </p>
       )}

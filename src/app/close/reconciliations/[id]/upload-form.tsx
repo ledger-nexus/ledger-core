@@ -105,7 +105,7 @@ export default function UploadForm({ reconId }: Props) {
           disabled={pending}
           className="mt-1 block w-full text-sm text-ink-700 file:mr-3 file:rounded-md file:border-0 file:bg-ink-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-ink-800 disabled:opacity-50"
         />
-        <div className="mt-1 text-xs text-ink-400">
+        <div className="mt-1 text-xs text-ink-500">
           {ATTACHMENT_ACCEPT_HINT} · stored in Postgres with audit trail
         </div>
       </div>

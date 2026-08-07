@@ -160,7 +160,7 @@ export default async function PendingApprovalPage() {
                         {submitter ? (
                           <span title={submitter.email}>{submitter.displayName}</span>
                         ) : (
-                          <span className="text-ink-400">—</span>
+                          <span className="text-ink-500">—</span>
                         )}
                       </TD>
                       <TD className="text-xs text-ink-500">

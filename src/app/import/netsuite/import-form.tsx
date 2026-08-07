@@ -177,7 +177,7 @@ export default function ImportForm({
                 }
               >
                 Multi-subsidiary
-                <span className="ml-2 text-[10px] uppercase opacity-70">
+                <span className="ml-2 text-[11px] uppercase opacity-70">
                   one entity per NS sub
                 </span>
               </button>
@@ -192,7 +192,7 @@ export default function ImportForm({
                 }
               >
                 Single entity
-                <span className="ml-2 text-[10px] uppercase opacity-70">
+                <span className="ml-2 text-[11px] uppercase opacity-70">
                   collapse subs
                 </span>
               </button>
@@ -259,7 +259,7 @@ export default function ImportForm({
                 }
               >
                 Single book
-                <span className="ml-2 text-[10px] uppercase opacity-70">
+                <span className="ml-2 text-[11px] uppercase opacity-70">
                   collapse to one
                 </span>
               </button>
@@ -274,7 +274,7 @@ export default function ImportForm({
                 }
               >
                 Multi-book
-                <span className="ml-2 text-[10px] uppercase opacity-70">
+                <span className="ml-2 text-[11px] uppercase opacity-70">
                   per NS AccountingBook
                 </span>
               </button>
@@ -335,7 +335,7 @@ export default function ImportForm({
               onChange={(e) => setExportJson(e.target.value)}
               placeholder={SAMPLE_HINT}
               rows={12}
-              className="w-full rounded-md border border-ink-200 bg-white p-3 font-mono text-xs text-ink-900 placeholder:text-ink-400 focus:border-ink-400 focus:outline-none"
+              className="w-full rounded-md border border-ink-200 bg-white p-3 font-mono text-xs text-ink-900 placeholder:text-ink-500 focus:border-ink-400 focus:outline-none"
             />
             <div className="text-xs text-ink-500">
               {(exportJson.length / 1024).toFixed(1)} KB
@@ -556,11 +556,11 @@ function BookMappingEditor({
           >
             <div className="min-w-0">
               <div className="truncate text-sm text-ink-900">{b.name}</div>
-              <div className="text-[10px] uppercase tracking-wide text-ink-500">
+              <div className="text-[11px] uppercase tracking-wide text-ink-500">
                 NS internalid {b.internalid}
               </div>
             </div>
-            <div className="text-ink-400">→</div>
+            <div className="text-ink-500">→</div>
             <div>
               <Select
                 value={bookMapping[b.internalid] ?? ""}

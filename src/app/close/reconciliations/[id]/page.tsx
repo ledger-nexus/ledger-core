@@ -247,7 +247,7 @@ export default async function ReconciliationDetailPage({
               <div className="amount-cell mt-1 text-lg text-ink-900">
                 {formatMoney(gl)}
               </div>
-              <div className="mt-1 text-xs text-ink-400">
+              <div className="mt-1 text-xs text-ink-500">
                 from trial balance for {recon.account.code}
               </div>
             </div>
@@ -259,10 +259,10 @@ export default async function ReconciliationDetailPage({
                 {supporting ? (
                   formatMoney(supporting)
                 ) : (
-                  <span className="text-ink-400">—</span>
+                  <span className="text-ink-500">—</span>
                 )}
               </div>
-              <div className="mt-1 text-xs text-ink-400">
+              <div className="mt-1 text-xs text-ink-500">
                 {supporting
                   ? "preparer's certified number"
                   : "not yet filed"}
@@ -282,10 +282,10 @@ export default async function ReconciliationDetailPage({
                 {diff ? (
                   formatMoney(diff)
                 ) : (
-                  <span className="text-ink-400">—</span>
+                  <span className="text-ink-500">—</span>
                 )}
               </div>
-              <div className="mt-1 text-xs text-ink-400">
+              <div className="mt-1 text-xs text-ink-500">
                 {diff
                   ? overTolerance
                     ? "outside tolerance → EXCEPTION on sign"
@@ -326,7 +326,7 @@ export default async function ReconciliationDetailPage({
                       >
                         <span>
                           {m.gl.description}
-                          <span className="text-ink-400">
+                          <span className="text-ink-500">
                             {" "}
                             ↔ {m.support.description} · {m.manual!.decidedBy}
                             {m.manual!.note ? ` — ${m.manual!.note}` : ""}
@@ -353,7 +353,7 @@ export default async function ReconciliationDetailPage({
                 <div className="text-sm">
                   <span className="text-ink-500">Unmatched, net </span>
                   <span className="font-mono">{formatMoney(match.netUnmatched)}</span>
-                  <span className="text-ink-400">
+                  <span className="text-ink-500">
                     {" "}
                     — the books less the statement, itemized below
                   </span>
@@ -363,19 +363,19 @@ export default async function ReconciliationDetailPage({
                     <div className="text-xs uppercase tracking-wide text-ink-500 mb-1">
                       In the books, not on the statement
                     </div>
-                    <div className="text-xs text-ink-400 mb-2">
+                    <div className="text-xs text-ink-500 mb-2">
                       Outstanding cheques and deposits in transit.
                     </div>
                     <ul className="flex flex-col gap-1">
                       {match.unmatchedGl.map((i) => (
                         <li key={i.id} className="text-sm flex justify-between gap-4">
                           <span>
-                            <span className="font-mono text-xs text-ink-400">
+                            <span className="font-mono text-xs text-ink-500">
                               {formatDate(i.date)}
                             </span>{" "}
                             {i.description}
                             {i.reference ? (
-                              <span className="text-ink-400"> · {i.reference}</span>
+                              <span className="text-ink-500"> · {i.reference}</span>
                             ) : null}
                           </span>
                           <span className="font-mono">{formatMoney(i.amount)}</span>
@@ -389,14 +389,14 @@ export default async function ReconciliationDetailPage({
                     <div className="text-xs uppercase tracking-wide text-ink-500 mb-1">
                       On the statement, not in the books
                     </div>
-                    <div className="text-xs text-ink-400 mb-2">
+                    <div className="text-xs text-ink-500 mb-2">
                       Bank fees, interest, anything not yet recorded.
                     </div>
                     <ul className="flex flex-col gap-1">
                       {match.unmatchedSupport.map((i) => (
                         <li key={i.id} className="text-sm flex justify-between gap-4">
                           <span>
-                            <span className="font-mono text-xs text-ink-400">
+                            <span className="font-mono text-xs text-ink-500">
                               {formatDate(i.date)}
                             </span>{" "}
                             {i.description}

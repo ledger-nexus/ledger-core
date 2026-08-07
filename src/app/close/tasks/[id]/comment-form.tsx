@@ -49,13 +49,13 @@ export default function CommentForm({ taskId }: Props) {
         placeholder="Add a comment..."
         disabled={pending}
         maxLength={4000}
-        className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+        className="block w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-500 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
       />
       <div className="flex items-center gap-2">
         <Button type="submit" disabled={pending || !body.trim()}>
           {pending ? "Posting..." : "Post comment"}
         </Button>
-        <span className="text-xs text-ink-400">
+        <span className="text-xs text-ink-500">
           {body.length}/4000
         </span>
         {error && <span className="text-xs text-red-600">{error}</span>}

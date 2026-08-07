@@ -251,7 +251,7 @@ function PlanCard({ plan }: { plan: Plan }) {
         {plan.priceId ? (
           <CheckoutButton plan={plan.key} />
         ) : (
-          <p className="text-[11px] text-ink-400">
+          <p className="text-[11px] text-ink-500">
             Not available — no Stripe price configured for this tier.
           </p>
         )}

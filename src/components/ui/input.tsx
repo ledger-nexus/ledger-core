@@ -12,7 +12,7 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   ({ className, ...props }, ref) => (
     <input
       ref={ref}
-      className={cn(fieldClasses, "placeholder:text-ink-400", className)}
+      className={cn(fieldClasses, "placeholder:text-ink-500", className)}
       {...props}
     />
   )

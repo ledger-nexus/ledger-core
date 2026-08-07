@@ -513,7 +513,7 @@ export default async function CloseTasksListPage({
                                   {t.owner.displayName}
                                 </span>
                               ) : (
-                                <span className="text-ink-400">—</span>
+                                <span className="text-ink-500">—</span>
                               )}
                             </TD>
                             <TD className="text-xs">
@@ -527,13 +527,13 @@ export default async function CloseTasksListPage({
                                 >
                                   {formatDate(t.dueAt)}
                                   {overdue && (
-                                    <span className="ml-1 text-[10px] uppercase tracking-wide">
+                                    <span className="ml-1 text-[11px] uppercase tracking-wide">
                                       overdue
                                     </span>
                                   )}
                                 </span>
                               ) : (
-                                <span className="text-ink-400">—</span>
+                                <span className="text-ink-500">—</span>
                               )}
                             </TD>
                             <TD className="text-xs">
@@ -542,7 +542,7 @@ export default async function CloseTasksListPage({
                                   {t.dependsOnIds.length}
                                 </Badge>
                               ) : (
-                                <span className="text-ink-400">—</span>
+                                <span className="text-ink-500">—</span>
                               )}
                             </TD>
                             <TD className="text-xs">
@@ -556,7 +556,7 @@ export default async function CloseTasksListPage({
                                   link
                                 </a>
                               ) : (
-                                <span className="text-ink-400">—</span>
+                                <span className="text-ink-500">—</span>
                               )}
                             </TD>
                           </TR>

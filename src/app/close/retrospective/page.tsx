@@ -328,7 +328,7 @@ export default async function CloseRetrospectivePage({
                 {retro.exceptionRateTrend.map((p) => {
                   if (p.totalRecons === 0) {
                     return (
-                      <tr key={p.periodId} className="border-t border-ink-100 text-ink-400">
+                      <tr key={p.periodId} className="border-t border-ink-100 text-ink-500">
                         <td className="py-1 font-mono">{p.periodCode}</td>
                         <td className="py-1 text-right">—</td>
                         <td className="py-1 text-right">—</td>

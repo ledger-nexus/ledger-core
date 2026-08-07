@@ -56,7 +56,7 @@ export default function CommentaryForm({
         maxLength={4000}
         placeholder={placeholder ?? "Explain this variance..."}
         disabled={pending}
-        className="block w-full rounded-md border border-ink-200 bg-white px-2 py-1 text-xs text-ink-900 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+        className="block w-full rounded-md border border-ink-200 bg-white px-2 py-1 text-xs text-ink-900 placeholder:text-ink-500 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
       />
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={pending || !value.trim()}>

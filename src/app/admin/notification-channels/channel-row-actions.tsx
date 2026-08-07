@@ -145,8 +145,8 @@ export default function ChannelRowActions({
         <div
           className={
             message.kind === "ok"
-              ? "text-[10px] text-emerald-700"
-              : "text-[10px] text-red-700"
+              ? "text-xs text-emerald-700"
+              : "text-xs text-red-700"
           }
         >
           {message.text}
@@ -156,7 +156,7 @@ export default function ChannelRowActions({
       {editOpen && (
         <div className="mt-2 flex w-[460px] flex-col gap-2 rounded-md border border-ink-200 bg-ink-50/40 p-3 text-left">
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] uppercase tracking-wide text-ink-500">
+            <label className="text-[11px] uppercase tracking-wide text-ink-500">
               Name
             </label>
             <Input
@@ -167,7 +167,7 @@ export default function ChannelRowActions({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] uppercase tracking-wide text-ink-500">
+            <label className="text-[11px] uppercase tracking-wide text-ink-500">
               New webhook URL (optional — leave blank to keep existing)
             </label>
             <Input
@@ -180,7 +180,7 @@ export default function ChannelRowActions({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] uppercase tracking-wide text-ink-500">
+            <label className="text-[11px] uppercase tracking-wide text-ink-500">
               Severity filter
             </label>
             <div className="flex gap-1.5">
@@ -205,7 +205,7 @@ export default function ChannelRowActions({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] uppercase tracking-wide text-ink-500">
+            <label className="text-[11px] uppercase tracking-wide text-ink-500">
               Cadence
             </label>
             <div className="flex gap-1.5">

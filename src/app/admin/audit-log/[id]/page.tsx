@@ -256,7 +256,7 @@ export default async function AuditLogDetailPage({
                         <span className="text-ink-500">by {r.actorEmail}</span>
                       )}
                     </span>
-                    <span className="text-[11px] text-ink-400 whitespace-nowrap">
+                    <span className="text-[11px] text-ink-500 whitespace-nowrap">
                       {formatDate(r.occurredAt)}{" "}
                       {r.occurredAt.toISOString().slice(11, 19)}
                     </span>
