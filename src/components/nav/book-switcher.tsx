@@ -60,7 +60,7 @@ export async function BookSwitcher({ scope }: { scope: LedgerScope }) {
   if (!canSwitchEntity && !canSwitchBook) return null;
 
   return (
-    <div className="w-64">
+    <div className="w-64 min-w-0">
       <Card className="shadow-none">
         <CardContent className="px-3 py-3">
     <form action={setScopeAction} className="flex flex-col gap-3">

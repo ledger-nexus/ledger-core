@@ -97,7 +97,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const tree = (
     <html lang="en" className={outfit.variable}>
       <body>
-        <div className="grid min-h-screen grid-cols-[260px_1fr] bg-ink-50">
+        <div className="grid min-h-screen grid-cols-[260px_minmax(0,1fr)] bg-ink-50">
           <aside className="border-r border-ink-200 bg-white">
             <Sidebar isAdmin={canViewAdminPages(currentTenant?.role)} reviewCount={reviewCount} />
           </aside>
@@ -117,12 +117,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <span className="text-ink-700">{scope.bookCode}</span>
                 </h1>
               </div>
-              <div className="flex items-center gap-2">
+              {/* min-w-0 so this row can give ground; the small fixed
+                  controls below opt out with shrink-0 so the loss lands on
+                  the switchers, which have slack, rather than on the Ask
+                  button, which does not. */}
+              <div className="flex min-w-0 items-center gap-2">
                 <CommandPaletteHint />
                 <Link
                   href="/ask"
                   title="Ask your ledger — plain-English questions, read-only"
-                  className="flex h-9 items-center gap-1.5 rounded-full border border-ink-300 bg-white px-3.5 text-sm font-medium text-ink-900 hover:border-ink-900 hover:bg-ink-50"
+                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-ink-300 bg-white px-3.5 text-sm font-medium text-ink-900 hover:border-ink-900 hover:bg-ink-50"
                 >
                   <span aria-hidden="true">✦</span>
                   <span>Ask</span>
@@ -146,7 +150,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     full RevRec recapture. Set HIDE_DEV_CHROME=1 in .env only
                     for a capture run. */}
                 {!clerkOn && process.env.HIDE_DEV_CHROME !== "1" && (
-                  <div className="w-56">
+                  <div className="w-56 min-w-0">
                     <Card className="shadow-none">
                       <CardContent className="px-3 py-2">
                         <UserSwitcher currentUserId={currentUser?.id ?? null} options={users} />
