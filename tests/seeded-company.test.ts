@@ -48,7 +48,7 @@ beforeAll(async () => {
 
   let looksComplete = false;
   if (northwind) {
-    const [jeCount, arCount, faCount, rcRecognized] = await Promise.all([
+    const [jeCount, arCount, faCount, rcRecognized, foreignEntries] = await Promise.all([
       prisma.journalEntry.count({ where: { entityId: northwind.id } }),
       prisma.arOpenItem.count({ where: { entityId: northwind.id } }),
       prisma.fixedAsset.count({ where: { entityId: northwind.id } }),
@@ -56,17 +56,42 @@ beforeAll(async () => {
         where: { contract: { entityId: northwind.id } },
         select: { recognizedToDate: true },
       }),
+      // Anything on Northwind that the seed did not put there. Every entry
+      // seedNorthwind posts carries source: "SEED", so a non-SEED row is by
+      // definition somebody else's.
+      prisma.journalEntry.count({
+        where: { entityId: northwind.id, source: { not: "SEED" } },
+      }),
     ]);
     // A fully-seeded Northwind has ~180 JEs, 21 AR open items, 1 FA,
     // and a non-zero recognizedToDate on the Globex revenue contract.
     // Conservative thresholds — anything substantially below triggers
     // a re-seed.
+    // ⚠️ EVERY THRESHOLD ABOVE IS A LOWER BOUND, which is only half a check.
+    // They catch a dataset that is too SMALL — a partial or wiped seed — and
+    // are blind to one that is too BIG. This suite asserts exact totals
+    // (75000.00 / 115000.00 / 40_000), so a complete Northwind PLUS one extra
+    // posting still read `looksComplete === true`, skipped the re-seed, and
+    // let the extra amount land in the assertion.
+    //
+    // Not hypothetical: nine rls-* suites post journal entries into
+    // NORTHWIND/US_GAAP and none of them clean up — `rls-journal-entry-actions`
+    // alone adds $10 of revenue dated 2026-06-15, inside the Jan-Jun window
+    // these totals cover. Measured 7 leaked entries on the shared dev database.
+    // It has stayed green only because something else keeps emptying Northwind
+    // and forcing a full re-seed, which is luck, not isolation.
+    //
+    // `foreignEntries` closes it: any entry the seed did not post means the
+    // dataset is no longer the one these numbers were written against, so
+    // re-seed. One extra count keeps the fast path for the common clean case
+    // rather than paying ~2 minutes of unconditional re-seed every run.
     looksComplete =
       jeCount > 50 &&
       arCount > 5 &&
       faCount >= 1 &&
       !!rcRecognized &&
-      rcRecognized.recognizedToDate.toString() !== "0";
+      rcRecognized.recognizedToDate.toString() !== "0" &&
+      foreignEntries === 0;
   }
 
   if (!looksComplete) {
