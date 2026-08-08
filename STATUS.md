@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session rls-route-suites · started 2026-08-08 18:58 · heartbeat 18:58
+- **Scope**: the three `rls-*` suites #368 deliberately left alone — `rls-internal-je-route`, `rls-recurring-entries`, `rls-run-recurring`. Measure what each actually leaves behind in shared NORTHWIND, then close whatever the measurement shows.
+- **Files / globs**: `tests/rls-internal-je-route.test.ts`, `tests/rls-recurring-entries.test.ts`, `tests/rls-run-recurring.test.ts`, `tests/helpers/ledger-cleanup.ts`, `STATUS.md`, `PROJECT_STATUS.md`
+- **Branch**: fix/rls-route-suites-stop-leaking
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
 
 ---
 
