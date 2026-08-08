@@ -32,6 +32,14 @@ _No active claims._
 
 ## Recent completions
 
+### Session rls-suites-stop-leaking · 2026-08-07
+- **Scope**: the polluters behind #367. Six of the nine `rls-*` suites that post JEs into shared NORTHWIND now capture the ids they create and remove exactly those in `afterAll`, via `deleteEntries` from #366.
+- **⚠️ The first pass leaked 2 of 15 and the MEASUREMENT caught it, not the code review.** Both were posted as `return postJournalEntry(tx, …)` INSIDE a `withTenantContext` callback, so the entry lands on the OUTER variable — a `const X = await postJournalEntry(` capture misses them entirely. Shipping on "15 sites captured, tsc clean" would have claimed a closed leak that still dripped 2 per run. Each site now carries a comment saying why the obvious pattern misses it.
+- **⚠️ Two cleanup approaches REJECTED, both of which look right**: (1) `deleteMany` by `sourceRecordType` — these suites stamp generic domain types (`VendorBill`, `CustomerInvoice`, `Payment`) that the Northwind seed also uses, so it would delete seed rows; (2) stamping a distinctive `sourceSystem` marker — `postJournalEntry` dedupes on `(sourceSystem, sourceRecordType, sourceRecordId)` and several of these use FIXED record ids, so the marker would make the SECOND run silently skip the post instead of creating it. Delete-by-captured-id is the only safe option.
+- **Verified by measurement, not inspection**: foreign (non-SEED) entries on NORTHWIND before/after a full run of the six — 2 → 2, unchanged. First pass measured 0 → 2, which is how the miss was found. 13 tests green across the six.
+- **Still open**: `rls-internal-je-route`, `rls-recurring-entries`, `rls-run-recurring` post through routes with no returned id and need a different capture. Deliberately untouched rather than half-fixed.
+- **Branch**: fix/rls-suites-stop-leaking. PR #368.
+
 ### Session seeded-company-pollution-detect · 2026-08-07
 - **Scope**: the Gauntlet's finding #2. `seeded-company` asserts exact totals over shared NORTHWIND while **nine `rls-*` suites post journal entries there and none clean up** (7 leaked entries measured at rest).
 - **⚠️ The bug is that EVERY threshold in its self-heal is a LOWER bound** (`jeCount > 50 && arCount > 5 && faCount >= 1 && recognized != 0`). They catch a dataset that is too SMALL — a partial or wiped seed — and are structurally blind to one that is too BIG. A complete Northwind PLUS one extra posting still read `looksComplete === true`, skipped the re-seed, and let the amount land in an exact-total assertion. The comment above it reads like it defends against exactly this.

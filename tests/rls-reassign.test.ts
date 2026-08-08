@@ -26,8 +26,15 @@ import {
 } from "../src/lib/ownership/reassign";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
 import { openApItem } from "../src/lib/accounting/sub-ledgers/ap";
+import { deleteEntries } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
+// Every entry this suite posts, so afterAll can remove exactly those.
+// Delete-by-id is the only precise option here: these suites stamp
+// generic domain sourceRecordTypes (VendorBill, CustomerInvoice,
+// Payment) that the Northwind seed also uses, so a marker sweep would
+// take seed rows with it.
+const createdEntryIds: string[] = [];
 
 let tenantId: string;
 let entityCode: string;
@@ -62,6 +69,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // This suite writes into the SHARED Northwind entity. Leaving entries
+  // behind drifts every exact-total assertion downstream of it.
+  await deleteEntries(prisma, createdEntryIds).catch(() => {});
   await prisma.$disconnect();
 });
 
@@ -83,6 +93,7 @@ async function seedOpenApItem(): Promise<{ id: string }> {
       { accountCode: "2000", credit: "10.00", partyCode, description: "Bill" },
     ],
   });
+  createdEntryIds.push(bill.id);
   const item = await openApItem(prisma, {
     entityCode,
     bookCode,

@@ -19,8 +19,15 @@ import {
   currentTenantId,
 } from "../src/lib/tenant-context";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
+import { deleteEntries } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
+// Every entry this suite posts, so afterAll can remove exactly those.
+// Delete-by-id is the only precise option here: these suites stamp
+// generic domain sourceRecordTypes (VendorBill, CustomerInvoice,
+// Payment) that the Northwind seed also uses, so a marker sweep would
+// take seed rows with it.
+const createdEntryIds: string[] = [];
 
 let tenantId: string;
 let entityCode: string;
@@ -44,6 +51,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // This suite writes into the SHARED Northwind entity. Leaving entries
+  // behind drifts every exact-total assertion downstream of it.
+  await deleteEntries(prisma, createdEntryIds).catch(() => {});
   await prisma.$disconnect();
 });
 
@@ -69,6 +79,11 @@ describe("create-journal-entry RLS plumbing", () => {
         ],
       });
     });
+    // Posted via `return postJournalEntry(tx, …)` INSIDE the withTenantContext
+    // callback, so the id lands on the outer variable — the plain
+    // `const x = await postJournalEntry(` capture misses it entirely. This is
+    // the one that kept leaking after the first pass.
+    createdEntryIds.push(entry.id);
     expect(observedGuc).toBe(tenantId);
     expect(entry.id).toMatch(/^[0-9a-f-]{36}$/i);
 
@@ -101,6 +116,7 @@ describe("reverse-journal-entry RLS plumbing", () => {
         { accountCode: "4000", credit: "20.00", description: "Revenue" },
       ],
     });
+    createdEntryIds.push(source.id);
 
     // Mimic the action's tx body — read the source, post the reversal,
     // flip status, link reversalOfId. All inside one withTenantContext.
@@ -142,6 +158,8 @@ describe("reverse-journal-entry RLS plumbing", () => {
           credit: l.debit.toString(),
         })),
       });
+
+      createdEntryIds.push(reversal.id);
 
       await tx.journalEntry.update({
         where: { id: src.id },

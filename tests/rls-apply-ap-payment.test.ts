@@ -25,8 +25,15 @@ import {
   openApItem,
 } from "../src/lib/accounting/sub-ledgers/ap";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
+import { deleteEntries } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
+// Every entry this suite posts, so afterAll can remove exactly those.
+// Delete-by-id is the only precise option here: these suites stamp
+// generic domain sourceRecordTypes (VendorBill, CustomerInvoice,
+// Payment) that the Northwind seed also uses, so a marker sweep would
+// take seed rows with it.
+const createdEntryIds: string[] = [];
 
 // Tests bind to the seeded default tenant + an existing entity/book set
 // that the AP control account (2000) is mapped against — same fixtures
@@ -68,6 +75,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // This suite writes into the SHARED Northwind entity. Leaving entries
+  // behind drifts every exact-total assertion downstream of it.
+  await deleteEntries(prisma, createdEntryIds).catch(() => {});
   await prisma.$disconnect();
 });
 
@@ -98,6 +108,7 @@ describe("applyApPayment Class T — RLS plumbing", () => {
         },
       ],
     });
+    createdEntryIds.push(openingEntry.id);
     const opened = await openApItem(prisma, {
       entityCode,
       bookCode,
@@ -139,6 +150,8 @@ describe("applyApPayment Class T — RLS plumbing", () => {
         ],
       });
 
+      createdEntryIds.push(paymentEntry.id);
+
       return applyApPaymentInTx(tx, {
         openItemId: opened.id,
         appliedByEntryId: paymentEntry.id,
@@ -177,6 +190,7 @@ describe("applyApPayment Class T — RLS plumbing", () => {
         },
       ],
     });
+    createdEntryIds.push(openingEntry.id);
     const opened = await openApItem(prisma, {
       entityCode,
       bookCode,
@@ -210,6 +224,8 @@ describe("applyApPayment Class T — RLS plumbing", () => {
         { accountCode: "1000", credit: "50.00", description: "Cash" },
       ],
     });
+
+    createdEntryIds.push(paymentEntry.id);
 
     const result = await applyApPayment(prisma, {
       openItemId: opened.id,
