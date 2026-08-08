@@ -40,6 +40,14 @@ _No active claims._
 - **⚠️ PROJECT_STATUS.md had a hole**: #366, #367 and #368 never got entries. All three added here alongside #369.
 - **Left alone on purpose**: the two older `RlsPlumbing` entries at rest predate this session, and `seedNorthwind` deletes every entry on the entity (`src/lib/seed/northwind.ts:708`), so `seeded-company`'s next re-seed clears them. No manual DB surgery on the shared dev database.
 - **Branch**: fix/rls-route-suites-stop-leaking. PR #369.
+### Session latent-survey-findings · 2026-08-08
+- **Scope**: the three "query is wider than the claim" findings left from the earlier survey — `fx-translation-category`, `netsuite-mapping`, `flux-rollup`.
+- **⚠️ THE HEADLINE IS NOT A TEST FIX.** Scoping `netsuite-mapping`'s global `dimension.deleteMany()` exposed a **cross-tenant read in `exportToNs`**: that file never filtered on tenant in ANY query, and its two `Dimension` reads were bounded by nothing at all, so another tenant's custom segments — names and values — were exported as this tenant's. It stayed invisible because the unscoped TEST CLEANUP was standing in for the production tenant filter: with only one tenant able to hold a dimension at assert time, the leak could not show. All 11 queries over tenant-scoped models now filter on a resolved `tenantId`, defaulting the way `importFromNs` already does.
+- **⚠️ For the next session**: the sibling NS suites (`netsuite-accounting-books-roundtrip`, `netsuite-roundtrip-multi-sub`) delete accounts by `tenantId` + NetSuite internal id with **no entity scope**, and they share fixture ids. Not touched here; same defect family.
+- **Demonstrated, each by planting on a throwaway tenant**: one ASSET account turns `fx-translation-category` red (`expected 1 to be +0`); a NetSuite account and a Dimension go 1 → 0 from one `netsuite-mapping` run, and survive after the fix; one FluxStatement takes `getFluxRollup` on flux-rollup's old scope from null to NOT NULL.
+- **⚠️ A correction made mid-session**: I concluded a transient 2-test red in `ns-sub-ledger-reverse-export` was caused by my own new test file, on the strength of ONE passing run without it. It did not reproduce across four further runs, and the same batch is green on clean main. Retracted in the PR body rather than quietly dropped.
+- **Also found**: `fx-translation-category`'s one *scoped* test was under-scoped in the other direction — 37 shared (`entityId = null`) canonical accounts were skipped. Now covered; all 37 already pass.
+- **Branch**: fix/latent-survey-findings. PR #370.
 
 ### Session rls-suites-stop-leaking · 2026-08-07
 - **Scope**: the polluters behind #367. Six of the nine `rls-*` suites that post JEs into shared NORTHWIND now capture the ids they create and remove exactly those in `afterAll`, via `deleteEntries` from #366.
