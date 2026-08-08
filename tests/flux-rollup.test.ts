@@ -24,17 +24,39 @@ let bookId: string;
 let fromPeriodId: string;
 let toPeriodId: string;
 let altFromPeriodId: string;
+let calendarId: string;
 let accountIds: string[] = [];
 const createdStatements: string[] = [];
 
-beforeAll(async () => {
-  tenantId = await getDefaultTenantId(prisma);
-  const entity = await prisma.legalEntity.findFirst({
-    where: { tenantId, code: "NORTHWIND" },
+/** Cascade-delete this suite's fixtures, by the stable `fxr` code prefix. */
+async function scrubOrphans() {
+  const stale = await prisma.legalEntity.findMany({
+    where: { tenantId, code: { startsWith: "fxr" } },
     select: { id: true },
   });
-  if (!entity) throw new Error("Run Northwind seed first.");
-  entityId = entity.id;
+  const entityIds = stale.map((e) => e.id);
+  if (entityIds.length) {
+    const stmts = await prisma.fluxStatement.findMany({
+      where: { entityId: { in: entityIds } },
+      select: { id: true },
+    });
+    const stmtIds = stmts.map((s) => s.id);
+    await prisma.fluxLine.deleteMany({ where: { statementId: { in: stmtIds } } });
+    await prisma.fluxStatement.deleteMany({ where: { id: { in: stmtIds } } });
+    await prisma.period.deleteMany({ where: { calendar: { entityId: { in: entityIds } } } });
+    await prisma.fiscalCalendar.deleteMany({ where: { entityId: { in: entityIds } } });
+    await prisma.legalEntity.deleteMany({ where: { id: { in: entityIds } } });
+  }
+  await prisma.account.deleteMany({ where: { tenantId, code: { startsWith: "fxr" } } });
+}
+
+beforeAll(async () => {
+  tenantId = await getDefaultTenantId(prisma);
+
+  // Self-healing per CLAUDE.md — a killed run skips afterAll, and a leaked
+  // entity of this prefix would sit in the scope the rollup reads.
+  await scrubOrphans();
+
   const book = await prisma.book.findUnique({
     where: { code: "US_GAAP" },
     select: { id: true },
@@ -42,20 +64,69 @@ beforeAll(async () => {
   if (!book) throw new Error("Missing US_GAAP book.");
   bookId = book.id;
 
-  // Use any three distinct seeded periods. fromPeriod = oldest,
-  // altFromPeriod = middle, toPeriod = newest. The "latest-by-
-  // updatedAt" test creates statements against both (from, to)
-  // combinations.
-  const periods = await prisma.period.findMany({
-    where: { calendar: { entityId } },
-    orderBy: { startsOn: "asc" },
-    take: 3,
+  // ⚠️ THIS SUITE USED TO BORROW NORTHWIND AND ITS THREE OLDEST SEEDED
+  // PERIODS, which it did not create and does not own.
+  //
+  // `getFluxRollup` is scoped on `(tenantId, entityId, bookId, toPeriodId)`,
+  // and three suites write FluxStatements against NORTHWIND: this one,
+  // `flux-schema` (which takes the oldest TWO periods of the same calendar)
+  // and `close-alerts` (which picks its period with an unordered `findFirst`,
+  // so it can land on any of them). Under vitest's parallel file execution
+  // that is a live collision, and the first test here is the one that gives:
+  // "returns null when no statement exists for the scope" is an EMPTINESS
+  // assertion over a scope two other files write to.
+  //
+  // Same fix as #360 took for close-retrospective: own the axis the query
+  // actually scopes on. A dedicated entity carries its own calendar and its
+  // own periods, so no other suite can reach them.
+  const entity = await prisma.legalEntity.create({
+    data: {
+      tenantId,
+      code: `${SUFFIX}-E`.slice(0, 24),
+      name: "Flux Rollup Test Co",
+      functionalCurrencyId: "USD",
+    },
     select: { id: true },
   });
-  if (periods.length < 3) throw new Error("Need ≥3 periods seeded.");
-  fromPeriodId = periods[0].id;
-  altFromPeriodId = periods[1].id;
-  toPeriodId = periods[2].id;
+  entityId = entity.id;
+
+  const cal = await prisma.fiscalCalendar.create({
+    data: {
+      tenantId,
+      entityId,
+      code: `${SUFFIX}-CAL`.slice(0, 32),
+      name: "Flux Rollup Test Calendar",
+      periodFrequency: "MONTHLY",
+    },
+    select: { id: true },
+  });
+  calendarId = cal.id;
+
+  // fromPeriod = oldest, altFromPeriod = middle, toPeriod = newest. The
+  // "latest-by-updatedAt" test creates statements against both (from, to)
+  // combinations.
+  const periodSpecs = [
+    { code: `${SUFFIX}-P1`.slice(0, 30), starts: "2026-04-01", ends: "2026-04-30" },
+    { code: `${SUFFIX}-P2`.slice(0, 30), starts: "2026-05-01", ends: "2026-05-31" },
+    { code: `${SUFFIX}-P3`.slice(0, 30), starts: "2026-06-01", ends: "2026-06-30" },
+  ];
+  const minted: string[] = [];
+  for (let i = 0; i < periodSpecs.length; i++) {
+    const spec = periodSpecs[i];
+    const p = await prisma.period.create({
+      data: {
+        tenantId,
+        calendarId,
+        code: spec.code,
+        ordinal: i + 1,
+        startsOn: new Date(spec.starts),
+        endsOn: new Date(spec.ends),
+      },
+      select: { id: true },
+    });
+    minted.push(p.id);
+  }
+  [fromPeriodId, altFromPeriodId, toPeriodId] = minted;
 
   // Mint 5 accounts with a known status distribution.
   for (let i = 0; i < 5; i++) {
@@ -83,6 +154,10 @@ afterAll(async () => {
   await prisma.account.deleteMany({
     where: { id: { in: accountIds } },
   });
+  // The minted entity carries the calendar and periods with it.
+  await prisma.period.deleteMany({ where: { calendarId } });
+  await prisma.fiscalCalendar.deleteMany({ where: { id: calendarId } });
+  await prisma.legalEntity.deleteMany({ where: { id: entityId } });
   await prisma.$disconnect();
 });
 

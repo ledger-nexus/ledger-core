@@ -54,22 +54,45 @@ async function clearAll() {
     });
     await prisma.journalEntry.deleteMany({ where: { entityId } });
   }
-  // Dimension data — fully owned by the NS mapper (it's the only
-  // mapper that uses dimensions in v1.x). Wholesale clear is fine.
-  await prisma.dimensionSetValue.deleteMany();
-  await prisma.dimensionSet.deleteMany();
-  await prisma.dimensionValue.deleteMany();
-  await prisma.dimension.deleteMany();
+  // ⚠️ EVERYTHING BELOW USED TO BE UNSCOPED, three lines under a comment
+  // promising to "never wipe Northwind / other tests' data".
+  //
+  // `dimensionSet.deleteMany()` with no argument deletes every dimension set
+  // belonging to every tenant on the database — 293 of them on the shared dev
+  // instance — and `account.deleteMany({ sourceSystem: "NETSUITE" })` does the
+  // same for accounts. DEMONSTRATED, not theorised: a NetSuite-sourced account
+  // and a Dimension planted on a throwaway tenant both went 1 -> 0 from a
+  // single run of this file.
+  //
+  // The justification given was that the NS mapper is the only dimension
+  // consumer in v1.x. That is true and still does not license a global
+  // delete: ELEVEN other suites write `sourceSystem: "NETSUITE"` rows, and
+  // vitest runs files in parallel, so this beforeAll can fire while one of
+  // them is mid-import. A suite that deletes another suite's rows produces a
+  // failure in the OTHER file, which is the hardest kind of red to trace.
+  const tenantId = await getDefaultTenantId(prisma);
+
+  // Dimension catalogs are tenant-level, not entity-level, so tenant is the
+  // narrowest scope available here. Within the tenant this file is the only
+  // direct dimension consumer; the assertions below no longer depend on that
+  // being true, because they count through this entity's own lines.
+  await prisma.dimensionSetValue.deleteMany({ where: { dimensionSet: { tenantId } } });
+  await prisma.dimensionSet.deleteMany({ where: { tenantId } });
+  await prisma.dimensionValue.deleteMany({ where: { tenantId } });
+  await prisma.dimension.deleteMany({ where: { tenantId } });
   await prisma.customFieldDefinition.deleteMany({
-    where: { sourceErpField: { startsWith: "cust" } },
+    where: { tenantId, sourceErpField: { startsWith: "cust" } },
   });
-  // NETSUITE-sourced items / parties / accounts — scope by sourceSystem.
-  await prisma.item.deleteMany({ where: { sourceSystem: "NETSUITE" } });
-  await prisma.partyRole.deleteMany({
-    where: { party: { sourceSystem: "NETSUITE" } },
-  });
-  await prisma.party.deleteMany({ where: { sourceSystem: "NETSUITE" } });
-  await prisma.account.deleteMany({ where: { sourceSystem: "NETSUITE" } });
+  // NETSUITE-sourced items / parties / accounts — scoped to THIS suite's
+  // entity, not to every entity that has ever seen a NetSuite import.
+  if (entityId) {
+    await prisma.item.deleteMany({ where: { tenantId, entityId, sourceSystem: "NETSUITE" } });
+    await prisma.partyRole.deleteMany({
+      where: { party: { tenantId, entityId, sourceSystem: "NETSUITE" } },
+    });
+    await prisma.party.deleteMany({ where: { tenantId, entityId, sourceSystem: "NETSUITE" } });
+    await prisma.account.deleteMany({ where: { tenantId, entityId, sourceSystem: "NETSUITE" } });
+  }
 }
 
 async function seedMasterData() {
@@ -245,7 +268,10 @@ describe("NS import: dimension engine populated", () => {
     const fixture = loadFixture();
     await importFromNs(prisma, { entityCode: ENTITY, export: fixture });
 
-    const dimensions = await prisma.dimension.findMany({ orderBy: { code: "asc" } });
+    const dimensions = await prisma.dimension.findMany({
+      where: { tenantId: await getDefaultTenantId(prisma) },
+      orderBy: { code: "asc" },
+    });
     expect(dimensions.map((d) => d.code).sort()).toEqual(
       ["CLASS", "CUSTCOL_REGION", "DEPARTMENT", "LOCATION"].sort()
     );
@@ -264,14 +290,25 @@ describe("NS import: dimension engine populated", () => {
     //   JE      50001 line 1: DEPT=22, LOC=30  (no class — partial set)
     //   JE      50001 line 2: DEPT=22, LOC=30  (same as line 1 → shares set)
     // → 5 distinct DimensionSets.
-    const sets = await prisma.dimensionSet.count();
-    expect(sets).toBe(5);
+    // Counted through THIS entity's lines rather than as a table total.
+    // `dimensionSet.count()` with no filter answers "how many dimension sets
+    // exist anywhere", which is only the same number as long as nothing else
+    // on the database has ever imported one — and the multi-subsidiary NS
+    // suites import into the same tenant. The claim being tested is that this
+    // fixture dedups to 5 distinct sets, so count the distinct sets its own
+    // lines point at.
+    const setIds = await prisma.journalLine.findMany({
+      where: { entry: { entity: { code: ENTITY }, sourceSystem: "NETSUITE" }, dimensionSetId: { not: null } },
+      select: { dimensionSetId: true },
+      distinct: ["dimensionSetId"],
+    });
+    expect(setIds).toHaveLength(5);
 
     // Identical assignments dedup: line 1 and line 2 of the JE should
     // share one DimensionSet, not two.
     const jeLines = await prisma.journalLine.findMany({
       where: {
-        entry: { sourceSystem: "NETSUITE", sourceRecordType: "JournalEntry" },
+        entry: { entity: { code: ENTITY }, sourceSystem: "NETSUITE", sourceRecordType: "JournalEntry" },
       },
       select: { dimensionSetId: true },
       orderBy: { lineNo: "asc" },
@@ -286,7 +323,12 @@ describe("NS import: dimension engine populated", () => {
 
     const inv10001Lines = await prisma.journalLine.findMany({
       where: {
-        entry: { sourceSystem: "NETSUITE", sourceRecordType: "Invoice", sourceRecordId: "10001" },
+        entry: {
+          entity: { code: ENTITY },
+          sourceSystem: "NETSUITE",
+          sourceRecordType: "Invoice",
+          sourceRecordId: "10001",
+        },
       },
       include: {
         dimensionSet: {
@@ -363,7 +405,7 @@ describe("NS import: custom fields populate extensions + CustomFieldDefinition",
     await importFromNs(prisma, { entityCode: ENTITY, export: fixture });
 
     const defs = await prisma.customFieldDefinition.findMany({
-      where: { sourceErpField: { startsWith: "cust" } },
+      where: { tenantId: await getDefaultTenantId(prisma), sourceErpField: { startsWith: "cust" } },
       orderBy: { fieldKey: "asc" },
     });
     expect(defs.map((d) => d.fieldKey)).toEqual([

@@ -7,6 +7,7 @@
 // reconstruct the original.
 
 import { PrismaClient } from "@prisma/client";
+import { getDefaultTenantId } from "../../seed/default-tenant";
 import type {
   NsAccount,
   NsCustomer,
@@ -30,6 +31,24 @@ import type {
 } from "./types";
 
 export interface ExportToNsInput {
+  /**
+   * The tenant whose data this export may read. Defaults to the dev/default
+   * tenant, matching what `importFromNs` already does on the way in.
+   *
+   * ⚠️ Before this existed, NOTHING in this file filtered on tenant. Entities
+   * are unique on `(tenantId, code)`, not on `code`, so every query here was
+   * bounded only by an entity code that another tenant may also use — and the
+   * two `Dimension` reads below were bounded by nothing at all. A single
+   * dimension row planted on an unrelated tenant showed up in this exporter's
+   * output (`CustomSegment: count differs (a=1, b=2)`), which is a
+   * cross-tenant read of customer data.
+   *
+   * It went unnoticed because `netsuite-mapping.test.ts` deleted every
+   * dimension row on the database in its `beforeAll` — so at assert time only
+   * one tenant could possibly have any. Scoping that cleanup is what exposed
+   * this.
+   */
+  tenantId?: string;
   /**
    * Single-sub backward compat. Reconstructs the NS export from a single
    * ledger-core entity. Equivalent to `entityResolution: { mode: "single",
@@ -73,6 +92,7 @@ export async function exportToNs(
   prisma: PrismaClient,
   input: ExportToNsInput
 ): Promise<NsExport> {
+  const tenantId = input.tenantId ?? (await getDefaultTenantId(prisma));
   const bookCode = input.bookCode ?? "US_GAAP";
 
   // v0.9 NS Books Phase 4 — resolve book strategy. Single mode (default,
@@ -165,6 +185,11 @@ export async function exportToNs(
     // path() helps the Postgres planner use the GIN index on extensions.
     const candidates = await prisma.legalEntity.findMany({
       where: {
+        // The prefix was doing this job on its own — see the comment above,
+        // which says the quiet part out loud ("so we don't drag in another
+        // tenant's NS-imported entities"). A naming convention is not a
+        // tenant boundary; this is.
+        tenantId,
         code: { startsWith: prefix },
         extensions: { path: ["nsIsImported"], equals: true },
       },
@@ -192,10 +217,13 @@ export async function exportToNs(
   // Accounts/Parties/Items: in multi mode they're on the global chart
   // (entityId: null per Phase 3 chart-of-accounts decision). In single
   // mode they're scoped to the entity. Build the right `where` for each.
+  // ⚠️ `tenantId` is the load-bearing addition here. In multi mode the filter
+  // is `entityId: null` — the global chart — which without a tenant is EVERY
+  // tenant's global chart, not ours.
   const masterRowEntityFilter =
     resolution.mode === "single"
-      ? ({ entity: { code: resolution.entityCode } } as const)
-      : ({ entityId: null } as const);
+      ? ({ tenantId, entity: { code: resolution.entityCode } } as const)
+      : ({ tenantId, entityId: null } as const);
 
   const accounts = await prisma.account.findMany({
     where: {
@@ -241,6 +269,7 @@ export async function exportToNs(
   // reading any).
   const rawEntries = await prisma.journalEntry.findMany({
     where: {
+      tenantId,
       sourceSystem: "NETSUITE",
       entity: { code: { in: entityCodes } },
       book: { code: { in: bookCodesToQuery } },
@@ -297,7 +326,7 @@ export async function exportToNs(
   // from the engine tables. Names persist; original NS internalids are
   // the dimension value codes.
   const dimensionsByCode = await prisma.dimension.findMany({
-    where: { code: { in: ["CLASS", "DEPARTMENT", "LOCATION"] } },
+    where: { tenantId, code: { in: ["CLASS", "DEPARTMENT", "LOCATION"] } },
     include: { values: { orderBy: { code: "asc" } } },
   });
   const classes: NsClassification[] =
@@ -320,8 +349,11 @@ export async function exportToNs(
     })) ?? [];
 
   // Custom segments — anything not in the built-in three is custom.
+  // ⚠️ THE QUERY THAT LEAKED. "Anything not in the built-in three is custom"
+  // was true of the whole database, so any dimension any tenant had ever
+  // created was exported here as one of this tenant's custom segments.
   const customDimensions = await prisma.dimension.findMany({
-    where: { code: { notIn: ["CLASS", "DEPARTMENT", "LOCATION"] } },
+    where: { tenantId, code: { notIn: ["CLASS", "DEPARTMENT", "LOCATION"] } },
     include: { values: { orderBy: { code: "asc" } } },
   });
   const customSegments: NsCustomSegment[] = customDimensions.map((d) => {
@@ -356,6 +388,7 @@ export async function exportToNs(
   if (bookResolution.mode === "multi") {
     const arRows = await prisma.arOpenItem.findMany({
       where: {
+        tenantId,
         sourceSystem: "NETSUITE",
         sourceRecordType: "Invoice",
         entity: { code: { in: entityCodes } },
@@ -373,6 +406,7 @@ export async function exportToNs(
     });
     const apRows = await prisma.apOpenItem.findMany({
       where: {
+        tenantId,
         sourceSystem: "NETSUITE",
         sourceRecordType: "VendorBill",
         entity: { code: { in: entityCodes } },
@@ -423,7 +457,7 @@ export async function exportToNs(
   }
 
   const customFieldDefs = await prisma.customFieldDefinition.findMany({
-    where: { sourceErpField: { startsWith: "cust" } },
+    where: { tenantId, sourceErpField: { startsWith: "cust" } },
     orderBy: { fieldKey: "asc" },
   });
   const customFieldDefinitions: NsCustomFieldDefinition[] = customFieldDefs.map((f) => ({
