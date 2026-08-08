@@ -20,6 +20,7 @@ import { getTrialBalance, getBalanceSheet } from "../src/lib/accounting/reports"
 import { UnbalancedEntryError } from "../src/lib/accounting/types";
 import { openArItem, applyArPayment, openArBalance } from "../src/lib/accounting/sub-ledgers/ar";
 import { CHART_OF_ACCOUNTS } from "../src/lib/db/chart-of-accounts";
+import { clearEntityLedger } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
 const ENTITY = "PROP_TEST";
@@ -37,19 +38,10 @@ async function clearLedger() {
     select: { id: true },
   });
   if (!testEntity) return;
-  const entityId = testEntity.id;
-  await prisma.arApplication.deleteMany({
-    where: { openItem: { entityId } },
-  });
-  await prisma.apApplication.deleteMany({
-    where: { openItem: { entityId } },
-  });
-  await prisma.arOpenItem.deleteMany({ where: { entityId } });
-  await prisma.apOpenItem.deleteMany({ where: { entityId } });
-  await prisma.journalLine.deleteMany({
-    where: { entry: { entityId } },
-  });
-  await prisma.journalEntry.deleteMany({ where: { entityId } });
+  // Was a hand-rolled delete chain scoped entirely on entityId, which misses
+  // ArOpenItem/ApOpenItem.openedByEntryId — a NON-NULL fk to JournalEntry that
+  // an open item of ANOTHER entity can hold against this entity's entries.
+  await clearEntityLedger(prisma, testEntity.id);
 }
 
 async function seedMasterData() {
