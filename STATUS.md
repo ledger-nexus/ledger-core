@@ -26,15 +26,20 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session rls-route-suites · started 2026-08-08 18:58 · heartbeat 18:58
-- **Scope**: the three `rls-*` suites #368 deliberately left alone — `rls-internal-je-route`, `rls-recurring-entries`, `rls-run-recurring`. Measure what each actually leaves behind in shared NORTHWIND, then close whatever the measurement shows.
-- **Files / globs**: `tests/rls-internal-je-route.test.ts`, `tests/rls-recurring-entries.test.ts`, `tests/rls-run-recurring.test.ts`, `tests/helpers/ledger-cleanup.ts`, `STATUS.md`, `PROJECT_STATUS.md`
-- **Branch**: fix/rls-route-suites-stop-leaking
-- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session rls-route-suites · 2026-08-08
+- **Scope**: the three `rls-*` suites #368 deliberately left alone. Measured what each actually leaves in shared NORTHWIND rather than trusting #368's note about them.
+- **⚠️ #368's stated reason for skipping them was wrong in BOTH directions.** `rls-internal-je-route` leaks 1 JE per run and its id was available all along (`withTenantContext` returns whatever its callback returns). `rls-recurring-entries` posts no JEs at all — it leaks a `RecurringEntry` template, and only on the FAILURE path, because cleanup was the last statement of each `it`. `rls-run-recurring` does not leak: its cleanup is already in a `finally` and deletes by `sourceRecordId startsWith <template uuid>`, which cannot match a seed row. It is deliberately unchanged and now carries a comment saying why, so nobody "fixes" it into consistency later.
+- **Demonstrated, not argued**: flipping one assertion to a wrong value against the unfixed suite left `RLS-ACT-1786215627756` behind permanently; the identical break post-fix leaves nothing.
+- **Verified**: 5 tests green; foreign entries on NORTHWIND 2 → 2, total 184 → 184, 0 `RLS-` templates, across a full run of all three; `tsc --noEmit` exit 0.
+- **⚠️ PROJECT_STATUS.md had a hole**: #366, #367 and #368 never got entries. All three added here alongside #369.
+- **Left alone on purpose**: the two older `RlsPlumbing` entries at rest predate this session, and `seedNorthwind` deletes every entry on the entity (`src/lib/seed/northwind.ts:708`), so `seeded-company`'s next re-seed clears them. No manual DB surgery on the shared dev database.
+- **Branch**: fix/rls-route-suites-stop-leaking. PR #369.
 
 ### Session rls-suites-stop-leaking · 2026-08-07
 - **Scope**: the polluters behind #367. Six of the nine `rls-*` suites that post JEs into shared NORTHWIND now capture the ids they create and remove exactly those in `afterAll`, via `deleteEntries` from #366.
