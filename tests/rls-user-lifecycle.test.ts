@@ -19,8 +19,15 @@ import {
 import { reassignRecordInTx } from "../src/lib/ownership/reassign";
 import { previewOrphansForUserChange } from "../src/lib/ownership/orphan-detection";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
+import { deleteEntries } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
+// Every entry this suite posts, so afterAll can remove exactly those.
+// Delete-by-id is the only precise option here: these suites stamp
+// generic domain sourceRecordTypes (VendorBill, CustomerInvoice,
+// Payment) that the Northwind seed also uses, so a marker sweep would
+// take seed rows with it.
+const createdEntryIds: string[] = [];
 
 let tenantId: string;
 let entityCode: string;
@@ -74,6 +81,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // This suite writes into the SHARED Northwind entity. Leaving entries
+  // behind drifts every exact-total assertion downstream of it.
+  await deleteEntries(prisma, createdEntryIds).catch(() => {});
   await prisma.$disconnect();
 });
 
@@ -99,6 +109,7 @@ describe("user-lifecycle bulk-reassign — RLS plumbing", () => {
         { accountCode: "4000", credit: "1.00", description: "Revenue" },
       ],
     });
+    createdEntryIds.push(seeded.id);
     await prisma.journalEntry.update({
       where: { id: seeded.id },
       data: { ownerId: candidateUserId, ownerType: "USER" },
@@ -138,6 +149,7 @@ describe("user-lifecycle bulk-reassign — RLS plumbing", () => {
         { accountCode: "4000", credit: "1.00", description: "Revenue" },
       ],
     });
+    createdEntryIds.push(seeded.id);
     await prisma.journalEntry.update({
       where: { id: seeded.id },
       data: { ownerId: candidateUserId, ownerType: "USER" },

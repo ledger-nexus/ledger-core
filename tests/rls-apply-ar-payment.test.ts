@@ -20,8 +20,15 @@ import {
   openArItem,
 } from "../src/lib/accounting/sub-ledgers/ar";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
+import { deleteEntries } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
+// Every entry this suite posts, so afterAll can remove exactly those.
+// Delete-by-id is the only precise option here: these suites stamp
+// generic domain sourceRecordTypes (VendorBill, CustomerInvoice,
+// Payment) that the Northwind seed also uses, so a marker sweep would
+// take seed rows with it.
+const createdEntryIds: string[] = [];
 
 let tenantId: string;
 let entityCode: string;
@@ -59,6 +66,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // This suite writes into the SHARED Northwind entity. Leaving entries
+  // behind drifts every exact-total assertion downstream of it.
+  await deleteEntries(prisma, createdEntryIds).catch(() => {});
   await prisma.$disconnect();
 });
 
@@ -85,6 +95,7 @@ describe("applyArPayment Class T — RLS plumbing", () => {
         { accountCode: "4000", credit: "75.00", description: "Revenue" },
       ],
     });
+    createdEntryIds.push(openingEntry.id);
     const opened = await openArItem(prisma, {
       entityCode,
       bookCode,
@@ -123,6 +134,8 @@ describe("applyArPayment Class T — RLS plumbing", () => {
         ],
       });
 
+      createdEntryIds.push(paymentEntry.id);
+
       return applyArPaymentInTx(tx, {
         openItemId: opened.id,
         appliedByEntryId: paymentEntry.id,
@@ -159,6 +172,7 @@ describe("applyArPayment Class T — RLS plumbing", () => {
         { accountCode: "4000", credit: "40.00", description: "Revenue" },
       ],
     });
+    createdEntryIds.push(openingEntry.id);
     const opened = await openArItem(prisma, {
       entityCode,
       bookCode,
@@ -192,6 +206,8 @@ describe("applyArPayment Class T — RLS plumbing", () => {
         },
       ],
     });
+
+    createdEntryIds.push(paymentEntry.id);
 
     const result = await applyArPayment(prisma, {
       openItemId: opened.id,
