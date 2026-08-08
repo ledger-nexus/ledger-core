@@ -32,6 +32,15 @@ _No active claims._
 
 ## Recent completions
 
+### Session test-ledger-cleanup · 2026-08-07
+- **Scope**: output of a Gauntlet run on shared-DB test contamination. One FK-correct teardown helper (`tests/helpers/ledger-cleanup.ts`) replaces two hand-rolled `clearLedger`s.
+- **⚠️ The bug**: `ArOpenItem.openedByEntryId` and `ApOpenItem.openedByEntryId` are **NON-NULL** fks to `JournalEntry` (relations "ArOpenedBy"/"ApOpenedBy"), and `Lot.openedByEntryId` is a third. NONE is covered by scoping on the open item's own `entityId`. "References this entry" and "belongs to this entity" are different sets — an open item owned by entity B can be opened by an entry in entity A (intercompany parcels are exactly that shape). Both property suites cleared open items `where entityId = A` then deleted entries `where entityId = A`, and Postgres refused with `ar_open_item_openedByEntryId_fkey`. Green on a clean DB, red once such a row exists, and it fails in CLEANUP so the error points at the wrong place.
+- **⚠️ Rejected approach — deleting by `sourceRecordType` is UNSAFE here**: the RLS suites stamp generic domain types (`VendorBill`, `CustomerInvoice`, `Payment`, `RecurringEntry`) that the Northwind seed also uses, so a marker sweep deletes legitimate seed rows; two of them stamp nothing at all. Delete by captured id only.
+- **Verification**: `tests/ledger-cleanup-helper.test.ts` builds the cross-entity parcel deliberately and pins BOTH halves — the naive order genuinely throws and leaves the entry behind, and the helper clears the same state. Harness (alone, twice): property-fuzz-substrate OK, property-based OK, helper OK. tsc 0.
+- **⚠️ NOT the cause of the battery's run-2 failures** — those are whole-battery load (each suite passes alone twice, and the two pass together; only the full 192-file run trips them). Remedy there is operational (testTimeout / file parallelism) and is Chris's call.
+- **⚠️ Left open, documented**: NINE `rls-*` suites post JEs into NORTHWIND with zero cleanup (7 leaked JEs measured at rest); `seeded-company` asserts exact totals over that entity and is green only because NORTHWIND keeps getting re-seeded. Its self-heal cannot catch drift — every threshold is a LOWER bound.
+- **Branch**: fix/test-ledger-cleanup. PR #366.
+
 ### Session migration-down-sql · 2026-08-07
 - **Scope**: the reversibility gap found while preparing the prod runbook — **0 of 42 migrations had a `down.sql`**, against the global standard's "always include a down() migration". Prisma Migrate has no built-in down, so the convention is a sibling `down.sql` applied with `prisma db execute`.
 - **⚠️ Deliberately NOT back-filling the other 40.** Several are irreversible in principle (data backfills that discard the prior value; enum additions Postgres cannot undo), and a `down.sql` that looks authoritative but is wrong is more dangerous than none — it invites someone mid-incident to run destructive SQL confidently. Cutoff is a NUMBER (`REVERSIBLE_FROM = 41`), not a 40-entry grandfather list that would silently stop covering anything.

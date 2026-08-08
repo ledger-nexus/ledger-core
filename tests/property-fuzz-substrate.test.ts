@@ -34,8 +34,10 @@ import {
   openArBalance,
 } from "@/lib/accounting/sub-ledgers/ar";
 import { CHART_OF_ACCOUNTS } from "@/lib/db/chart-of-accounts";
+import { clearEntityLedger } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
+
 const ENTITY = "FUZZ_TEST";
 
 // Accounts we'll use. Pick from a finite set so the chart is bounded.
@@ -48,11 +50,11 @@ async function clearLedger() {
     select: { id: true },
   });
   if (!ent) return;
-  const eid = ent.id;
-  await prisma.arApplication.deleteMany({ where: { openItem: { entityId: eid } } });
-  await prisma.arOpenItem.deleteMany({ where: { entityId: eid } });
-  await prisma.journalLine.deleteMany({ where: { entry: { entityId: eid } } });
-  await prisma.journalEntry.deleteMany({ where: { entityId: eid } });
+  // Was a hand-rolled delete chain scoped entirely on entityId, which misses
+  // ArOpenItem/ApOpenItem.openedByEntryId — a NON-NULL fk to JournalEntry that
+  // an open item of ANOTHER entity can hold against this entity's entries.
+  // It then failed on `ar_open_item_openedByEntryId_fkey`. See the helper.
+  await clearEntityLedger(prisma, ent.id);
 }
 
 async function seedMasterData() {
