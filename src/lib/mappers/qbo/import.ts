@@ -8,6 +8,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { Decimal } from "@/lib/utils/decimal";
+import { getDefaultTenantId } from "../../seed/default-tenant";
 import { postJournalEntry } from "../../accounting/post-journal";
 import { openArItem, applyArPayment } from "../../accounting/sub-ledgers/ar";
 import { openApItem, applyApPayment } from "../../accounting/sub-ledgers/ap";
@@ -24,6 +25,20 @@ import {
 import type { QboExport } from "./types";
 
 export interface ImportFromQboInput {
+  /**
+   * The tenant this import belongs to. Defaults to the dev/default tenant.
+   *
+   * ⚠️ NOTHING HERE USED TO CARRY A TENANT, and `entityCode` cannot stand in
+   * for one: LegalEntity is unique on `(tenantId, code)`, so `ACME` — or
+   * `MAIN`, or `HQ` — is a code many customers will use. The entity lookup
+   * below acknowledged that in a comment and then resolved with `findFirst`
+   * anyway, which picks an arbitrary tenant's entity and writes journal
+   * entries into it. The idempotency lookups were bounded by QBO's own record
+   * ids, which are small integers ("1" is a Checking account for practically
+   * everyone), so the second tenant to import a given id was told the row
+   * already existed and silently got nothing.
+   */
+  tenantId?: string;
   entityCode: string;          // ledger-core LegalEntity to load into
   bookCode?: string;           // default "US_GAAP"
   export: QboExport;
@@ -52,9 +67,15 @@ export async function importFromQbo(
   const mappingVersion = input.mappingVersion ?? "qbo-v1";
   const source = input.source ?? "IMPORT";
 
-  // Phase 4b: entity code unique per [tenantId, code]; use findFirst.
+  const tenantId = input.tenantId ?? (await getDefaultTenantId(prisma));
+
+  // Entity code is unique per [tenantId, code]. The previous version of this
+  // comment drew the right conclusion and then used `findFirst` on the code
+  // ALONE — which resolves to whichever tenant's row the planner happens to
+  // return. Scoping the lookup means an entity code that exists only in
+  // another tenant now throws instead of silently retargeting the write.
   const entity = await prisma.legalEntity.findFirstOrThrow({
-    where: { code: input.entityCode },
+    where: { tenantId, code: input.entityCode },
     select: { id: true, code: true, tenantId: true },
   });
 
@@ -77,6 +98,7 @@ export async function importFromQbo(
     const m = mapAccount(qboAcct, mappingVersion);
     const existing = await prisma.account.findFirst({
       where: {
+        tenantId,
         sourceSystem: "QBO",
         sourceRecordType: "Account",
         sourceRecordId: m.sourceRecordId,
@@ -116,6 +138,7 @@ export async function importFromQbo(
     const m = mapCustomer(qboCust, mappingVersion);
     const existing = await prisma.party.findFirst({
       where: {
+        tenantId,
         sourceSystem: "QBO",
         sourceRecordType: "Customer",
         sourceRecordId: m.sourceRecordId,
@@ -151,6 +174,7 @@ export async function importFromQbo(
     const m = mapVendor(qboVend, mappingVersion);
     const existing = await prisma.party.findFirst({
       where: {
+        tenantId,
         sourceSystem: "QBO",
         sourceRecordType: "Vendor",
         sourceRecordId: m.sourceRecordId,
@@ -186,6 +210,7 @@ export async function importFromQbo(
   async function alreadyImported(sourceRecordType: string, sourceRecordId: string): Promise<string | null> {
     const existing = await prisma.journalEntry.findFirst({
       where: {
+        tenantId,
         sourceSystem: "QBO",
         sourceRecordType,
         sourceRecordId,
@@ -229,7 +254,7 @@ export async function importFromQbo(
       result.journalEntriesSkipped += 1;
       // Look up the existing AR open item so payments can apply.
       const existing = await prisma.arOpenItem.findFirst({
-        where: { sourceSystem: "QBO", sourceRecordType: "Invoice", sourceRecordId: qboInv.Id },
+        where: { tenantId, sourceSystem: "QBO", sourceRecordType: "Invoice", sourceRecordId: qboInv.Id },
         select: { id: true },
       });
       if (existing) arOpenByQboInvoiceId.set(qboInv.Id, existing.id);
@@ -279,7 +304,7 @@ export async function importFromQbo(
     if (await alreadyImported("Bill", qboBill.Id)) {
       result.journalEntriesSkipped += 1;
       const existing = await prisma.apOpenItem.findFirst({
-        where: { sourceSystem: "QBO", sourceRecordType: "Bill", sourceRecordId: qboBill.Id },
+        where: { tenantId, sourceSystem: "QBO", sourceRecordType: "Bill", sourceRecordId: qboBill.Id },
         select: { id: true },
       });
       if (existing) apOpenByQboBillId.set(qboBill.Id, existing.id);

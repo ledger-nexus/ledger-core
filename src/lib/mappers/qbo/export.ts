@@ -15,6 +15,7 @@
 // imported from QBO, no more.
 
 import { PrismaClient } from "@prisma/client";
+import { getDefaultTenantId } from "../../seed/default-tenant";
 import type {
   QboAccount,
   QboCustomer,
@@ -28,6 +29,16 @@ import type {
 } from "./types";
 
 export interface ExportToQboInput {
+  /**
+   * The tenant whose data this export may read. Defaults to the dev/default
+   * tenant, matching what `importFromQbo` now does on the way in.
+   *
+   * ⚠️ Every query below was bounded by `entity: { code }` and nothing else.
+   * LegalEntity is unique on `(tenantId, code)`, so two customers with an
+   * entity coded `ACME` exported each other's accounts, customers, vendors
+   * and journal entries.
+   */
+  tenantId?: string;
   entityCode: string;
   bookCode?: string;          // default "US_GAAP"
   exportedAt?: Date;
@@ -37,6 +48,7 @@ export async function exportToQbo(
   prisma: PrismaClient,
   input: ExportToQboInput
 ): Promise<QboExport> {
+  const tenantId = input.tenantId ?? (await getDefaultTenantId(prisma));
   const bookCode = input.bookCode ?? "US_GAAP";
 
   // Master data lives at entity scope — sourceSystem=QBO rows scoped to the entity.
@@ -44,6 +56,7 @@ export async function exportToQbo(
     where: {
       sourceSystem: "QBO",
       sourceRecordType: "Account",
+      tenantId,
       entity: { code: input.entityCode },
     },
     select: { sourcePayload: true },
@@ -54,6 +67,7 @@ export async function exportToQbo(
     where: {
       sourceSystem: "QBO",
       sourceRecordType: "Customer",
+      tenantId,
       entity: { code: input.entityCode },
     },
     select: { sourcePayload: true },
@@ -64,6 +78,7 @@ export async function exportToQbo(
     where: {
       sourceSystem: "QBO",
       sourceRecordType: "Vendor",
+      tenantId,
       entity: { code: input.entityCode },
     },
     select: { sourcePayload: true },
@@ -74,6 +89,7 @@ export async function exportToQbo(
   const entries = await prisma.journalEntry.findMany({
     where: {
       sourceSystem: "QBO",
+      tenantId,
       entity: { code: input.entityCode },
       book: { code: bookCode },
     },
