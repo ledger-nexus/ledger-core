@@ -32,6 +32,15 @@ _No active claims._
 
 ## Recent completions
 
+### Session seeded-company-pollution-detect · 2026-08-07
+- **Scope**: the Gauntlet's finding #2. `seeded-company` asserts exact totals over shared NORTHWIND while **nine `rls-*` suites post journal entries there and none clean up** (7 leaked entries measured at rest).
+- **⚠️ The bug is that EVERY threshold in its self-heal is a LOWER bound** (`jeCount > 50 && arCount > 5 && faCount >= 1 && recognized != 0`). They catch a dataset that is too SMALL — a partial or wiped seed — and are structurally blind to one that is too BIG. A complete Northwind PLUS one extra posting still read `looksComplete === true`, skipped the re-seed, and let the amount land in an exact-total assertion. The comment above it reads like it defends against exactly this.
+- **Fix**: `seedNorthwind` stamps `source: "SEED"` on all 18 of its entries, so a non-SEED row on NORTHWIND is by definition someone else's. The heal now counts those and re-seeds when any exist. Chosen over an unconditional re-seed because the file's own `hookTimeout` says a full seed is ~2 min against remote Neon — one extra `count` keeps the fast path and fires only when it matters. Fixes the VICTIM, so it does not matter how many polluters appear later.
+- **Verified end to end**: exposure — one leaked entry moved the asserted total by exactly $10; detection — `foreignEntries = 1`; recovery — suite re-seeded and passed **27/27** including the exact $40k deferred-revenue and $40k AR assertions.
+- **⚠️ I reproduced the bug on myself while testing it**: a probe was SIGTERM'd mid-seed and left NORTHWIND partially seeded but still ABOVE `jeCount > 50`, so the retry skipped re-seeding and measured partial data (55000 instead of 75000). Exactly the "threshold only catches too-small" failure. The suite run restored the DB.
+- **Still open**: the nine leaking `rls-*` suites themselves (6 of 9 assign the posted entry to a variable, so `deleteEntries` from #366 makes their cleanup trivial; 3 post via routes and need id capture another way).
+- **Branch**: fix/seeded-company-detects-pollution. PR #367.
+
 ### Session test-ledger-cleanup · 2026-08-07
 - **Scope**: output of a Gauntlet run on shared-DB test contamination. One FK-correct teardown helper (`tests/helpers/ledger-cleanup.ts`) replaces two hand-rolled `clearLedger`s.
 - **⚠️ The bug**: `ArOpenItem.openedByEntryId` and `ApOpenItem.openedByEntryId` are **NON-NULL** fks to `JournalEntry` (relations "ArOpenedBy"/"ApOpenedBy"), and `Lot.openedByEntryId` is a third. NONE is covered by scoping on the open item's own `entityId`. "References this entry" and "belongs to this entity" are different sets — an open item owned by entity B can be opened by an entry in entity A (intercompany parcels are exactly that shape). Both property suites cleared open items `where entityId = A` then deleted entries `where entityId = A`, and Postgres refused with `ar_open_item_openedByEntryId_fkey`. Green on a clean DB, red once such a row exists, and it fails in CLEANUP so the error points at the wrong place.
