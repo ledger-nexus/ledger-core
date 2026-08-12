@@ -19,6 +19,42 @@ import { CHART_OF_ACCOUNTS, defaultTranslationCategory } from "@/lib/db/chart-of
 
 const prisma = new PrismaClient();
 
+/**
+ * The rows the migration backfill + chart defaults actually own.
+ *
+ * ⚠️ THREE OF THE FOUR DB TESTS BELOW USED TO COUNT OVER THE WHOLE `account`
+ * TABLE — no tenant, no entity, no sourceSystem filter — while the fourth was
+ * scoped and carried a comment explaining exactly why it had to be. On the
+ * shared dev database that means every one of the ~293 tenants is in range,
+ * so any fixture anywhere that creates an ASSET with a non-CURRENT_RATE
+ * category fails this suite, and the failure names a file that has nothing to
+ * do with the account. Demonstrated: one planted account on a throwaway
+ * tenant turned "ASSET + LIABILITY are all CURRENT_RATE" red with
+ * `expected 1 to be +0`.
+ *
+ * The invariant these tests exist for is "the backfill and the chart defaults
+ * agree with defaultTranslationCategory", and that is a claim about the
+ * canonical chart on the seed entities — NOT about every row any test has
+ * ever written. NS-imported rows and ad-hoc fixtures are nullable by design
+ * (the consolidation translator defaults null to CURRENT_RATE).
+ *
+ * ⚠️ It also WIDENS in one direction: `entityId: null` shared accounts were
+ * being skipped by the one scoped test, and there are 37 of them. Measured
+ * before changing it — all 37 already carry a category, so this closes a
+ * silent hole rather than opening a failure.
+ */
+async function seedChartScope() {
+  const seedEntities = await prisma.legalEntity.findMany({
+    where: { OR: [{ code: "NORTHWIND" }, { code: { startsWith: "ACME" } }] },
+    select: { id: true },
+  });
+  return {
+    sourceSystem: null,
+    code: { in: CHART_OF_ACCOUNTS.map((a) => a.code) },
+    OR: [{ entityId: null }, { entityId: { in: seedEntities.map((e) => e.id) } }],
+  };
+}
+
 describe("defaultTranslationCategory (pure)", () => {
   it("maps ASSET + LIABILITY to CURRENT_RATE", () => {
     expect(defaultTranslationCategory({ type: "ASSET" })).toBe("CURRENT_RATE");
@@ -54,28 +90,8 @@ describe("migration backfill (vs dev DB)", () => {
   });
 
   it("every CANONICAL-CHART account has translationCategory populated", async () => {
-    // Scope to the canonical chart's codes: NS-imported rows and
-    // ad-hoc test-fixture accounts are nullable BY DESIGN (the
-    // consolidation translator defaults null to CURRENT_RATE), and
-    // other suites create such rows mid-battery on the shared DB.
-    // The migration backfill + chart defaults own exactly the
-    // canonical chart, so that is the invariant asserted here.
-    // Scope to the SEED entities' chart: test fixtures legitimately
-    // create accounts with canonical codes on their own throwaway
-    // entities (nullable category by design). The seed + migration
-    // backfill own exactly the Northwind/Acme chart.
-    const chartCodes = CHART_OF_ACCOUNTS.map((a) => a.code);
-    const seedEntities = await prisma.legalEntity.findMany({
-      where: { OR: [{ code: "NORTHWIND" }, { code: { startsWith: "ACME" } }] },
-      select: { id: true },
-    });
     const unmapped = await prisma.account.count({
-      where: {
-        translationCategory: null,
-        sourceSystem: null,
-        code: { in: chartCodes },
-        entityId: { in: seedEntities.map((e) => e.id) },
-      },
+      where: { ...(await seedChartScope()), translationCategory: null },
     });
     expect(unmapped).toBe(0);
   });
@@ -83,6 +99,7 @@ describe("migration backfill (vs dev DB)", () => {
   it("ASSET + LIABILITY accounts are all CURRENT_RATE", async () => {
     const wrong = await prisma.account.count({
       where: {
+        ...(await seedChartScope()),
         type: { in: ["ASSET", "LIABILITY"] },
         NOT: { translationCategory: "CURRENT_RATE" },
       },
@@ -93,6 +110,7 @@ describe("migration backfill (vs dev DB)", () => {
   it("EQUITY accounts are all HISTORICAL", async () => {
     const wrong = await prisma.account.count({
       where: {
+        ...(await seedChartScope()),
         type: "EQUITY",
         NOT: { translationCategory: "HISTORICAL" },
       },
@@ -125,6 +143,7 @@ describe("migration backfill (vs dev DB)", () => {
   it("REVENUE + EXPENSE accounts (excluding FX_GAIN_LOSS) are WEIGHTED_AVG", async () => {
     const wrong = await prisma.account.count({
       where: {
+        ...(await seedChartScope()),
         type: { in: ["REVENUE", "EXPENSE"] },
         NOT: [
           { translationCategory: "WEIGHTED_AVG" },
