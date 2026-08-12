@@ -4,6 +4,19 @@
 // PR: create / setActive / delete. (runRecurringEntriesAction is a
 // separate batch-helper migration — its per-iteration postJournalEntry
 // calls each need independent tx boundaries by design.)
+//
+// CLEANUP IS IN afterAll, NOT AFTER THE ASSERTIONS. This suite posts no
+// journal entries, so it was not part of #368 — but it creates
+// RecurringEntry templates in shared NORTHWIND, and the templates are
+// residue in exactly the same way. The original cleanup was the last
+// statement of each `it`, which means it only ran when the test PASSED.
+//
+// Demonstrated, not assumed: flipping `expect(updated.count).toBe(1)` to
+// `toBe(99)` and running the suite left `RLS-ACT-1786215627756` behind
+// permanently. A leaked template is not inert — the recurring cron
+// enumerates every active template in the tenant, and /automations lists
+// them — so the failure mode is a test failure that quietly adds a
+// scheduled posting to a shared dataset.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
@@ -17,6 +30,9 @@ const prisma = new PrismaClient();
 let tenantId: string;
 let entityId: string;
 let bookId: string;
+
+/** Every template this suite creates, cleaned up in afterAll regardless of outcome. */
+const createdTemplateIds: string[] = [];
 
 beforeAll(async () => {
   const entity = await prisma.legalEntity.findFirstOrThrow({
@@ -33,6 +49,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // deleteMany, not delete: the third test deletes its own template as the
+  // thing under test, so by the time we get here some of these ids are
+  // already gone. `delete` would throw on the first missing one and abandon
+  // the rest.
+  await prisma.recurringEntry.deleteMany({ where: { id: { in: createdTemplateIds } } });
   await prisma.$disconnect();
 });
 
@@ -74,11 +95,10 @@ describe("recurring-entries RLS plumbing", () => {
       });
     });
 
+    createdTemplateIds.push(created.id);
+
     expect(observedGuc).toBe(tenantId);
     expect(created.id).toMatch(/^[0-9a-f-]{36}$/i);
-
-    // Cleanup.
-    await prisma.recurringEntry.delete({ where: { id: created.id } });
   });
 
   it("setActive: updateMany runs inside withTenantContext", async () => {
@@ -103,6 +123,7 @@ describe("recurring-entries RLS plumbing", () => {
       },
       select: { id: true },
     });
+    createdTemplateIds.push(template.id);
 
     let observedGuc: string | null = null;
     const updated = await withTenantContext(prisma, tenantId, async (tx) => {
@@ -114,9 +135,6 @@ describe("recurring-entries RLS plumbing", () => {
     });
     expect(observedGuc).toBe(tenantId);
     expect(updated.count).toBe(1);
-
-    // Cleanup.
-    await prisma.recurringEntry.delete({ where: { id: template.id } });
   });
 
   it("delete: findFirst + delete inside one withTenantContext tx", async () => {
@@ -140,6 +158,9 @@ describe("recurring-entries RLS plumbing", () => {
       },
       select: { id: true },
     });
+    // Tracked even though deleting it IS the test: if the delete under test
+    // fails, the template is exactly the residue we are here to prevent.
+    createdTemplateIds.push(template.id);
 
     let observedGuc: string | null = null;
     const result = await withTenantContext(prisma, tenantId, async (tx) => {

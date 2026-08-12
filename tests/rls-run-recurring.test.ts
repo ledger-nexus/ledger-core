@@ -13,6 +13,15 @@
 //   3. The runner's per-iteration tx wrap doesn't break the
 //      "batch advances lastPostedDate only past the last successful
 //      period" contract.
+//
+// DELIBERATELY NOT CHANGED by the afterAll sweep that fixed
+// rls-internal-je-route and rls-recurring-entries. #368 listed this suite
+// as a suspected leaker; measurement says otherwise. Its cleanup is already
+// in a `finally`, so it runs on the failure path too — which is the whole
+// property the other two were missing — and it deletes by
+// `sourceRecordId startsWith <template uuid>`, which cannot match a seed row.
+// It posts 4 entries and removes 4. Rewriting it to match the others would
+// be churn against a suite that already holds the invariant.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";

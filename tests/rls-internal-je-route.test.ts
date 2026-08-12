@@ -5,6 +5,18 @@
 // We don't drive the route through HTTP here — we exercise the same primitive
 // shape (findByLineage as widened helper + postJournalEntry inside
 // withTenantContext) so a regression on either side would catch.
+//
+// THE ONE OF THE THREE THAT ACTUALLY LEAKED. #368 closed six rls-* suites and
+// left this one plus rls-recurring-entries and rls-run-recurring, on the
+// assumption that all three posted through paths with no returned id.
+// Measured: running the three against a NORTHWIND holding 2 foreign entries
+// left 3, and the new one was this suite's. The id was available the whole
+// time — `withTenantContext` returns whatever its callback returns, so the
+// post's result comes straight back out of the await.
+//
+// The entry is dated 2026-06-01 with $1 of revenue on 4000, which lands
+// inside the Jan–Jun window seeded-company asserts exact totals over. That
+// is the same shape of pollution as #367, one dollar instead of ten.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
@@ -13,12 +25,16 @@ import {
   currentTenantId,
 } from "../src/lib/tenant-context";
 import { postJournalEntry } from "../src/lib/accounting/post-journal";
+import { deleteEntries } from "./helpers/ledger-cleanup";
 
 const prisma = new PrismaClient();
 
 let tenantId: string;
 let entityCode: string;
 let bookCode: string;
+
+/** Entries this suite posts into shared NORTHWIND, removed in afterAll. */
+const createdEntryIds: string[] = [];
 
 beforeAll(async () => {
   const entity = await prisma.legalEntity.findFirstOrThrow({
@@ -31,6 +47,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // deleteEntries, not journalEntry.deleteMany — see tests/helpers/ledger-cleanup.ts
+  // for why the delete order matters even when this suite's own lines are
+  // plain GL accounts.
+  await deleteEntries(prisma, createdEntryIds);
   await prisma.$disconnect();
 });
 
@@ -74,6 +94,9 @@ describe("/api/internal/journal-entries RLS plumbing", () => {
         ],
       });
     });
+    // Before the assertions: a failing expect below must not strand the entry.
+    createdEntryIds.push(result.id);
+
     expect(observedGucPost).toBe(tenantId);
     expect(result.id).toMatch(/^[0-9a-f-]{36}$/i);
 
