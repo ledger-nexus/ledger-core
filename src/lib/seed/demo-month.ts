@@ -127,6 +127,7 @@ export async function seedDemoMonth(prisma: PrismaClient): Promise<SeedResult> {
   jeCount += acmeResults.length;
   for (const r of acmeResults) {
     await openArItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY_CODE,
       bookCode: r.bookCode,
       partyCode: "ACME",
@@ -178,6 +179,7 @@ export async function seedDemoMonth(prisma: PrismaClient): Promise<SeedResult> {
   jeCount += hostingResults.length;
   for (const r of hostingResults) {
     await openApItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY_CODE,
       bookCode: r.bookCode,
       partyCode: "AWS",
@@ -207,6 +209,7 @@ export async function seedDemoMonth(prisma: PrismaClient): Promise<SeedResult> {
   jeCount += datadogResults.length;
   for (const r of datadogResults) {
     await openApItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY_CODE,
       bookCode: r.bookCode,
       partyCode: "DATADOG",
@@ -307,6 +310,7 @@ export async function seedDemoMonth(prisma: PrismaClient): Promise<SeedResult> {
   jeCount += globexResults.length;
   for (const r of globexResults) {
     await openArItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY_CODE,
       bookCode: r.bookCode,
       partyCode: "GLOBEX",
@@ -654,6 +658,7 @@ async function seedRevenueContract(
 ): Promise<{ contractCode: string }> {
   const code = "DEMO-GLOBEX-2026";
   await createRevenueContract(prisma, {
+    tenantId: await getDefaultTenantId(prisma),
     entityCode: ENTITY_CODE,
     code,
     description: "Globex annual subscription",

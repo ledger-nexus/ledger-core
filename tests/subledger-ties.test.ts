@@ -197,6 +197,7 @@ describe("checkSubledgerTies — happy path (matched)", () => {
     });
     // Open the AR open item matching that JE.
     await openArItem(prisma, {
+      tenantId,
       entityCode: ENTITY_CODE,
       bookCode: "US_GAAP",
       partyCode: "CUST-A",

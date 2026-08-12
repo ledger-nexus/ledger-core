@@ -1112,6 +1112,7 @@ export async function importFromNs(
       });
 
       const openItem = await openArItem(prisma, {
+        tenantId: importTenantId,
         entityCode: invEntityCode,
         bookCode: perBookCode,
         partyCode: arOpening.customerCode,
@@ -1218,6 +1219,7 @@ export async function importFromNs(
       });
 
       const openItem = await openApItem(prisma, {
+        tenantId: importTenantId,
         entityCode: billEntityCode,
         bookCode: perBookCode,
         partyCode: apOpening.vendorCode,

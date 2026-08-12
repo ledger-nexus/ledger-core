@@ -110,6 +110,7 @@ describe("applyApPayment Class T — RLS plumbing", () => {
     });
     createdEntryIds.push(openingEntry.id);
     const opened = await openApItem(prisma, {
+      tenantId,
       entityCode,
       bookCode,
       partyCode,
@@ -192,6 +193,7 @@ describe("applyApPayment Class T — RLS plumbing", () => {
     });
     createdEntryIds.push(openingEntry.id);
     const opened = await openApItem(prisma, {
+      tenantId,
       entityCode,
       bookCode,
       partyCode,

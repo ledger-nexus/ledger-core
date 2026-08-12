@@ -182,6 +182,7 @@ beforeAll(async () => {
   });
   arItemA = (
     await openArItem(prisma, {
+      tenantId: tenantA.id,
       entityCode: "ACME",
       bookCode: "US_GAAP",
       partyCode: "PARTY",
@@ -206,6 +207,7 @@ beforeAll(async () => {
   });
   apItemA = (
     await openApItem(prisma, {
+      tenantId: tenantA.id,
       entityCode: "ACME",
       bookCode: "US_GAAP",
       partyCode: "PARTY",

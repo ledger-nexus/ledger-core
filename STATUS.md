@@ -32,6 +32,16 @@ _No active claims._
 
 ## Recent completions
 
+### Session subledger-entity-resolution · 2026-08-08
+- **Scope**: the sub-ledger cluster the tenant-scope guard surfaced, plus the PROJECT_STATUS entry #371 shipped without.
+- **⚠️ THIS IS NOT A NEW FINDING — IT IS AN INCOMPLETE REMEDIATION.** Deficiency log **#28** (High, CC6.1, "Cross-tenant write via unscoped `createFixedAsset` entity lookup") was recorded **Closed** on 2026-06-12. Its fix landed in `createFixedAsset` ONLY; the identical `findFirstOrThrow({ where: { code } })` survived in `openApItem` / `openArItem` / `createLease` / `createRevenueContract` for two months, under comments that named the hazard and deferred it. New log row **#32**; #28 keeps its Closed status (audit history is not rewritten) and gains a forward reference.
+- **Demonstrated for all four**: with the lookups reverted, `tenantId=B` + tenant A's entity code returned `promise resolved instead of rejecting` on every one, and rows landed in tenant A. Post-fix all four refuse.
+- **⚠️ The first draft of that test proved less than it looked like.** A nil-UUID `openedByEntryId` made AR and AP throw on a downstream FK violation rather than the entity lookup, so they "failed" pre-fix for the wrong reason — a bare `.rejects.toThrow()` would have called that proof. An `isEntityRefusal` regex caught it; a real opening entry then let the unscoped version complete a genuine cross-tenant write.
+- **⚠️ Two self-inflicted near-misses, both caught by reading the diff**: a `^\s*tenantId,$` regex rewrote 8 pre-existing shorthand lines in the seeds and 3 more in `property-fuzz-substrate` that had nothing to do with this change. Restored; final diff is 4 deletions, all intended.
+- **`tenantId` is REQUIRED, not optional**, matching #28's precedent — `tsc` then enumerates all 42 call sites instead of leaving silent gaps.
+- **Guard baseline 56 → 52.** Left for next time: 52 remain, the largest clusters in `src/lib/mappers` (13) and `src/lib/external` (8).
+- **Branch**: fix/subledger-entity-resolution.
+
 ### Session rls-route-suites · 2026-08-08
 - **Scope**: the three `rls-*` suites #368 deliberately left alone. Measured what each actually leaves in shared NORTHWIND rather than trusting #368's note about them.
 - **⚠️ #368's stated reason for skipping them was wrong in BOTH directions.** `rls-internal-je-route` leaks 1 JE per run and its id was available all along (`withTenantContext` returns whatever its callback returns). `rls-recurring-entries` posts no JEs at all — it leaks a `RecurringEntry` template, and only on the FAILURE path, because cleanup was the last statement of each `it`. `rls-run-recurring` does not leak: its cleanup is already in a `finally` and deletes by `sourceRecordId startsWith <template uuid>`, which cannot match a seed row. It is deliberately unchanged and now carries a comment saying why, so nobody "fixes" it into consistency later.

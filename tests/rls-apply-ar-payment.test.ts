@@ -97,6 +97,7 @@ describe("applyArPayment Class T — RLS plumbing", () => {
     });
     createdEntryIds.push(openingEntry.id);
     const opened = await openArItem(prisma, {
+      tenantId,
       entityCode,
       bookCode,
       partyCode,
@@ -174,6 +175,7 @@ describe("applyArPayment Class T — RLS plumbing", () => {
     });
     createdEntryIds.push(openingEntry.id);
     const opened = await openArItem(prisma, {
+      tenantId,
       entityCode,
       bookCode,
       partyCode,

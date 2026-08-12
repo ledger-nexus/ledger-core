@@ -95,6 +95,7 @@ async function seedOpenApItem(): Promise<{ id: string }> {
   });
   createdEntryIds.push(bill.id);
   const item = await openApItem(prisma, {
+    tenantId,
     entityCode,
     bookCode,
     partyCode,

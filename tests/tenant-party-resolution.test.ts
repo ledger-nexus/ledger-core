@@ -168,6 +168,7 @@ describe("openArItem: cross-tenant party leakage", () => {
 
     // Now open the AR item.
     const result = await openArItem(prisma, {
+      tenantId: tenantA.id,
       entityCode: entityA.code,
       bookCode: "US_GAAP",
       partyCode: `CUSTOMER_X_${SUFFIX}`,

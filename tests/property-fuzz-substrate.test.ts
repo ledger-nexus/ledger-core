@@ -350,6 +350,7 @@ describe("property: AR over-application boundary holds for arbitrary sequences",
         const originalAmt = new Decimal(input.originalCents).dividedBy(100);
         const openerEntryId = await postOpeningJE(originalAmt.toFixed(4));
         const open = await openArItem(prisma, {
+          tenantId: await getDefaultTenantId(prisma),
           entityCode: ENTITY,
           bookCode: "US_GAAP",
           partyCode: "FUZZ_CUSTOMER",
@@ -417,6 +418,7 @@ describe("property: AR over-application boundary holds for arbitrary sequences",
     const original = "100.0000";
     const openerEntryId = await postOpeningJE(original);
     const open = await openArItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "FUZZ_CUSTOMER",

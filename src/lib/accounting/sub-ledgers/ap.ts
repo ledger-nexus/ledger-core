@@ -19,6 +19,19 @@ import { isUuid } from "../../utils/uuid";
 
 
 export interface OpenApItemInput {
+  /**
+   * Authoritative tenant scope. The entity lookup is scoped by this
+   * tenantId so cross-tenant code collisions return "entity not found"
+   * instead of mutating the wrong tenant's data.
+   *
+   * ⚠️ This is deficiency log #28, which was recorded as CLOSED on
+   * 2026-06-12 having been fixed in `createFixedAsset` ONLY. The
+   * identical unscoped lookup survived in four sibling sub-ledgers,
+   * including this one, for two months. Required, not optional, exactly
+   * as #28's remediation made it — an optional tenantId that callers may
+   * omit reproduces the defect for every caller that omits it.
+   */
+  tenantId: string;
   entityCode: string;
   bookCode: string;
   partyCode: string;
@@ -59,7 +72,7 @@ export async function openApItem(
   // ar.ts; cross-tenant party leakage on shared (entityId=null) parties.
   // Phase 4b: code is unique per [tenantId, code], so findFirst.
   const entity = await prisma.legalEntity.findFirstOrThrow({
-    where: { code: input.entityCode },
+    where: { tenantId: input.tenantId, code: input.entityCode },
     select: { id: true, tenantId: true },
   });
   const [book, party] = await Promise.all([

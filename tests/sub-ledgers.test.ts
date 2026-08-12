@@ -341,6 +341,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
       ],
     });
     const item = await openArItem(prisma, {
+      tenantId,
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "CUSTOMER_X",
@@ -375,6 +376,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
       ],
     });
     const item = await openArItem(prisma, {
+      tenantId,
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "CUSTOMER_X",
@@ -423,6 +425,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
       ],
     });
     const item = await openArItem(prisma, {
+      tenantId,
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "CUSTOMER_X",
@@ -467,6 +470,7 @@ describe("AR sub-ledger: open-item lifecycle", () => {
       ],
     });
     const item = await openArItem(prisma, {
+      tenantId,
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "CUSTOMER_X",
@@ -514,6 +518,7 @@ describe("AP sub-ledger: open-item lifecycle", () => {
       ],
     });
     const item = await openApItem(prisma, {
+      tenantId,
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "VENDOR_Y",
@@ -545,6 +550,7 @@ describe("AP sub-ledger: open-item lifecycle", () => {
       ],
     });
     const item = await openApItem(prisma, {
+      tenantId,
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "VENDOR_Y",

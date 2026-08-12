@@ -301,6 +301,7 @@ async function setupFixedAssets(prisma: PrismaClient) {
 
 async function setupRevenueContract(prisma: PrismaClient) {
   await createRevenueContract(prisma, {
+    tenantId: await getDefaultTenantId(prisma),
     entityCode: ENTITY_CODE,
     code: "GLOBEX-2026-A1",
     description: "Globex annual subscription",
@@ -331,6 +332,7 @@ async function setupRevenueContract(prisma: PrismaClient) {
 
 async function setupLease(prisma: PrismaClient) {
   await createLease(prisma, {
+    tenantId: await getDefaultTenantId(prisma),
     entityCode: ENTITY_CODE,
     code: "NYC-2026",
     description: "NYC office, 50 Hudson Yards",
@@ -489,6 +491,7 @@ async function seedAcmeArCycle(prisma: PrismaClient) {
     acmeInvoices[m.label] = { entryId: "", openItemIds: {} };
     for (const r of results) {
       const item = await openArItem(prisma, {
+        tenantId: await getDefaultTenantId(prisma),
         entityCode: ENTITY_CODE,
         bookCode: r.bookCode,
         partyCode: "ACME",
@@ -559,6 +562,7 @@ async function seedSmithCoApCycle(prisma: PrismaClient) {
   const apItemIdsByBook: Record<string, string> = {};
   for (const r of billResults) {
     const item = await openApItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY_CODE,
       bookCode: r.bookCode,
       partyCode: "SMITH_CO",
@@ -1045,6 +1049,7 @@ async function seedGlobexUnpaidArInvoice(prisma: PrismaClient): Promise<void> {
 
   for (const r of results) {
     await openArItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY_CODE,
       bookCode: r.bookCode,
       partyCode: "GLOBEX",

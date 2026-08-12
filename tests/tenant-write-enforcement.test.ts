@@ -301,6 +301,7 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
 
   it("openArItem denormalizes tenantId from the entity", async () => {
     const result = await openArItem(prisma, {
+      tenantId: tenantA.id,
       entityCode: entityA.code,
       bookCode: "US_GAAP",
       partyCode: `CUST-${SUFFIX}`,
@@ -331,6 +332,7 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
       ],
     });
     const result = await openApItem(prisma, {
+      tenantId: tenantA.id,
       entityCode: entityA.code,
       bookCode: "US_GAAP",
       partyCode: `VEND-${SUFFIX}`,
@@ -377,6 +379,7 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
 
   it("createLease denormalizes tenantId from the entity", async () => {
     const result = await createLease(prisma, {
+      tenantId: tenantA.id,
       entityCode: entityA.code,
       code: `LEASE-${SUFFIX}`,
       description: "Test office lease",
@@ -406,6 +409,7 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
 
   it("createRevenueContract denormalizes tenantId from the entity", async () => {
     const result = await createRevenueContract(prisma, {
+      tenantId: tenantA.id,
       entityCode: entityA.code,
       code: `RC-${SUFFIX}`,
       description: "Test SaaS contract",
@@ -433,5 +437,149 @@ describe("Sub-ledger writes: tenantId denormalization", () => {
       select: { tenantId: true },
     });
     expect(row!.tenantId).toBe(tenantA.id);
+  });
+});
+
+// ===========================================================================
+// The half of deficiency #28 that was never written.
+//
+// #28 (High, CC6.1, "Cross-tenant write via unscoped createFixedAsset entity
+// lookup") was recorded CLOSED on 2026-06-12. Its remediation added a
+// required `tenantId` to CreateFixedAssetInput and scoped the lookup — for
+// `createFixedAsset` ONLY. The identical `findFirstOrThrow({ where: { code }
+// })` survived in openApItem, openArItem, createLease and createRevenueContract
+// for two months, under comments that described the hazard and deferred it
+// ("Single-tenant world today... Multi-tenant callers should ensure they only
+// pass codes they own").
+//
+// The tests above prove the happy path denormalizes tenantId correctly. They
+// pass just as well when the entity lookup is unscoped, because they only
+// ever pass a code their own tenant owns. THIS block is the part that fails
+// against the unscoped version: a caller in tenant B naming an entity code
+// that only tenant A owns must be refused, not silently retargeted.
+// ===========================================================================
+
+describe("sub-ledger writes refuse a cross-tenant entity code", () => {
+  // Every case is the same shape: tenantId = B, entityCode = A's. Under the
+  // old lookup the entity resolved by code alone, so the write landed in
+  // tenant A's books and reported success.
+  const wrongTenant = () => ({ tenantId: tenantB.id, entityCode: entityA.code });
+  /** Pins that the refusal is the ENTITY lookup, not an incidental FK error. */
+  const isEntityRefusal = /LegalEntity|No .*found/i;
+
+  // ⚠️ THIS OPENER IS LOAD-BEARING, and the first draft did without it.
+  //
+  // Passing a nil-UUID `openedByEntryId` let AR and AP "pass" against the
+  // UNSCOPED lookup — they threw, but on a downstream FK violation in
+  // `arOpenItem.create`, not on the entity. `isEntityRefusal` is what caught
+  // that; a bare `.rejects.toThrow()` would have called it proof. With a real
+  // opening entry the unscoped version gets all the way to a successful
+  // cross-tenant write, which is the thing actually being prevented.
+  let openerEntryId: string;
+
+  beforeAll(async () => {
+    const opener = await postJournalEntry(prisma, {
+      tenantId: tenantA.id,
+      entityCode: entityA.code,
+      bookCode: "US_GAAP",
+      documentDate: new Date("2026-02-01"),
+      memo: "cross-tenant refusal fixture",
+      lines: [
+        { accountCode: "1200", debit: "100", partyCode: `CUST-${SUFFIX}` },
+        { accountCode: "4000", credit: "100" },
+      ],
+    });
+    openerEntryId = opener.id;
+  });
+
+  it("openArItem", async () => {
+    await expect(
+      openArItem(prisma, {
+        ...wrongTenant(),
+        bookCode: "US_GAAP",
+        partyCode: `CUST-${SUFFIX}`,
+        openedByEntryId: openerEntryId,
+        openedDate: new Date("2026-02-01"),
+        amount: 100,
+        currencyCode: "USD",
+        controlAccountCode: "1200",
+      })
+    ).rejects.toThrow(isEntityRefusal);
+  });
+
+  it("openApItem", async () => {
+    await expect(
+      openApItem(prisma, {
+        ...wrongTenant(),
+        bookCode: "US_GAAP",
+        partyCode: `VEND-${SUFFIX}`,
+        openedByEntryId: openerEntryId,
+        openedDate: new Date("2026-02-01"),
+        amount: 100,
+        currencyCode: "USD",
+        controlAccountCode: "2000",
+      })
+    ).rejects.toThrow(isEntityRefusal);
+  });
+
+  it("createLease", async () => {
+    await expect(
+      createLease(prisma, {
+        ...wrongTenant(),
+        code: `LEASE-X-${SUFFIX}`,
+        description: "cross-tenant attempt",
+        lessorPartyCode: `VEND-${SUFFIX}`,
+        leaseStartDate: new Date("2026-06-01"),
+        leaseEndDate: new Date("2029-05-31"),
+        paymentFrequency: "MONTHLY",
+        paymentAmount: 1000,
+        currencyCode: "USD",
+        books: [{ bookCode: "US_GAAP", classification: "OPERATING", discountRate: 0.05 }],
+      })
+    ).rejects.toThrow(isEntityRefusal);
+  });
+
+  it("createRevenueContract", async () => {
+    await expect(
+      createRevenueContract(prisma, {
+        ...wrongTenant(),
+        code: `RC-X-${SUFFIX}`,
+        description: "cross-tenant attempt",
+        customerPartyCode: `CUST-${SUFFIX}`,
+        contractStartDate: new Date("2026-05-01"),
+        contractEndDate: new Date("2027-04-30"),
+        totalContractValue: 12000,
+        currencyCode: "USD",
+        performanceObligations: [
+          {
+            sequenceNo: 1,
+            description: "Monthly SaaS access",
+            ssp: 12000,
+            recognitionPattern: "OVER_TIME_STRAIGHT",
+            startDate: new Date("2026-05-01"),
+            endDate: new Date("2027-04-30"),
+            revenueAccountCode: "4000",
+            deferredAccountCode: "2000",
+          },
+        ],
+        books: [{ bookCode: "US_GAAP", recognitionBasis: "ACCRUAL" }],
+      })
+    ).rejects.toThrow(isEntityRefusal);
+  });
+
+  it("and nothing of tenant B's landed in tenant A's entity", async () => {
+    // `.rejects.toThrow()` alone would pass if the call threw AFTER writing.
+    // These four create rows in four different tables; the cheap universal
+    // check is that none of the cross-tenant codes exist anywhere.
+    const [leases, contracts, arItems, apItems] = await Promise.all([
+      prisma.lease.count({ where: { code: `LEASE-X-${SUFFIX}` } }),
+      prisma.revenueContract.count({ where: { code: `RC-X-${SUFFIX}` } }),
+      prisma.arOpenItem.count({ where: { openedByEntryId: openerEntryId } }),
+      prisma.apOpenItem.count({ where: { openedByEntryId: openerEntryId } }),
+    ]);
+    expect(leases).toBe(0);
+    expect(contracts).toBe(0);
+    expect(arItems).toBe(0);
+    expect(apItems).toBe(0);
   });
 });
