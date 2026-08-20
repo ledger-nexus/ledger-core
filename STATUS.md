@@ -32,6 +32,15 @@ _No active claims._
 
 ## Recent completions
 
+### Session reports-catalog · 2026-08-08
+- **Scope**: phase 2 — a front door for twelve report routes that had none. Category tabs, cards with a real one-line description, and a provenance badge separating built-in from a tenant's own `ReportTemplate` definitions.
+- **⚠️ This is a SECOND list of routes the nav already names**, and second lists drift. Neither can be derived from the other — the nav has nowhere for a description, the catalog has no business owning sidebar order — so `tests/reports-catalog.test.ts` asserts they agree in BOTH directions, plus that every slug resolves to a real `page.tsx`. Both directions proved failing: removing a catalog entry names it as "in the nav, missing from the catalog"; a typo'd slug fails twice, as a 404-ing card and as a missing nav entry.
+- **⚠️ No empty tabs.** Campfire ships an `Expenses` tab; ours would be empty, and a tab opening onto nothing reads as broken rather than as an honest gap. `populatedCategories()` derives the strip from the entries, so it grows by itself.
+- **⚠️ Favorites deferred deliberately** — it needs a per-user favourite model, and a ★ that does not persist is worse than no ★. Stated, not silently dropped.
+- **A description test**: descriptions must not restate the title ("Trial balance for the selected period" earns nothing). Reports are described by the QUESTION they answer.
+- **Verified at runtime over HTTP**: `/reports` → 12 cards, tab "All reports" current; `?category=tax` → 2 (Book-tax difference, M-3 detail); `?category=receivables` → 1 (AR aging); `?category=custom` → 0 built-ins + the empty state. ⚠️ My first count read 12 for every tab — the regex was counting the SIDEBAR's report links too. Measured again inside the grid.
+- **Branch**: feat/reports-catalog.
+
 ### Session line-level-transactions · 2026-08-08
 - **Scope**: phase 2b — the line-level `/transactions` list, and drill-down from an income-statement cell into it.
 - **The payoff phase 0 was built for**: because the surface keeps its state in the URL, "show me the lines behind this number" is an `<a href>`. No modal, no shared client store, no endpoint. `src/lib/surfaces/transactions.ts` owns the parameter names so the report and the destination cannot disagree.
