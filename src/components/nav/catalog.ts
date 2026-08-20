@@ -43,6 +43,11 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Transactions",
     items: [
       { href: "/journal-entries", label: "Journal entries" },
+      // Line-level companion to the entry list above. Two destinations, not
+      // one with a toggle: "what did we post" and "what is in this account"
+      // are different questions with different columns, and this one is where
+      // a report cell's drill-down lands.
+      { href: "/transactions", label: "Transactions", hint: "by line" },
       { href: "/journal-entries/pending", label: "Pending approval", hint: "queue" },
       { href: "/banking", label: "Bank transactions" },
       { href: "/recurring-entries", label: "Recurring", hint: "templates" },

@@ -96,6 +96,16 @@ function scan(): { unbounded: Site[]; scanned: number; models: number } {
         unbounded.push(site); // no arguments at all
         continue;
       }
+      // ⚠️ SHORTHAND COUNTS AS INDIRECT, NOT AS "no where clause".
+      // `findMany({ where, take })` is idiomatic and the object it names is
+      // built above with its tenant filter — exactly the `where: whereClause`
+      // case already excluded below. An earlier version only matched
+      // `where:` and reported two correctly-scoped queries in
+      // src/app/transactions as unbounded. Same absent-signal failure as the
+      // quoted/unquoted table names in tests/rls-policy-coverage.test.ts:
+      // the pattern was narrower than the language.
+      if (/[{,]\s*where\s*[,}]/.test(args)) continue;
+
       const wIdx = args.search(/\bwhere\s*:/);
       if (wIdx === -1) {
         unbounded.push(site); // no where clause
