@@ -42,13 +42,17 @@ export function SavedViews({
           {views.map((v) => {
             const href = v.query ? `${basePath}?${v.query}` : basePath;
             const isActive = v.query === currentQuery;
+            // Only the owner gets a delete cap, so only the owner's chip is
+            // squared off on the right.
+            const canDelete = v.ownerId === currentUserId;
             return (
               <span key={v.id} className="inline-flex items-center">
                 <Link
                   href={href}
                   aria-current={isActive ? "true" : undefined}
                   className={[
-                    "rounded-l-md border px-2 py-1 text-xs transition-colors duration-150 ease-snap",
+                    canDelete ? "rounded-l-md" : "rounded-md",
+                    "border px-2 py-1 text-xs transition-colors duration-150 ease-snap",
                     isActive
                       ? "border-ink-300 bg-ink-100 text-ink-900"
                       : "border-ink-200 text-ink-700 hover:bg-ink-50",
@@ -63,8 +67,15 @@ export function SavedViews({
                   )}
                 </Link>
                 {/* Only the owner may delete. A shared view others depend on
-                    is not something a passer-by should be able to remove. */}
-                {v.ownerId === currentUserId ? (
+                    is not something a passer-by should be able to remove.
+                    ⚠️ A non-owner gets NOTHING here, not a greyed-out stub. The
+                    first version rendered a `·` in text-ink-300 as a spacer and
+                    the contrast guard (#359) failed it at 1.37:1. Recolouring
+                    it would have satisfied the guard while keeping a character
+                    that says nothing; the rule is that 400-and-lighter is for
+                    borders and inert separators, and this was neither — it was
+                    text pretending to be furniture. */}
+                {canDelete && (
                   <form action={deleteViewFormAction}>
                     <input type="hidden" name="id" value={v.id} />
                     <button
@@ -75,10 +86,6 @@ export function SavedViews({
                       ×<span className="sr-only">Delete view {v.name}</span>
                     </button>
                   </form>
-                ) : (
-                  <span className="rounded-r-md border border-l-0 border-ink-200 px-1.5 py-1 text-xs text-ink-300">
-                    ·
-                  </span>
                 )}
               </span>
             );
