@@ -19,13 +19,40 @@ import { SourceBadge } from "@/components/ui/source-badge";
 import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate, formatMoney } from "@/lib/utils/format";
+import { FilterChips } from "@/components/ui/filter-chips";
+import {
+  buildUrl,
+  defaultsOf,
+  filterChips,
+  int,
+  isoDate,
+  parseUrlState,
+  str,
+  type RawParams,
+  type SurfaceSpec,
+} from "@/lib/url-state";
 
 const PAGE_SIZE = 50;
+
+/**
+ * This surface's URL contract — see `src/lib/url-state.ts` and
+ * docs/design/campfire-product-surface.md §3.
+ *
+ * Declared once. Parsing, href building and the filter chips all read this
+ * list, so a filter cannot be applied without a chip and a chip's clear link
+ * cannot forget a sibling parameter.
+ */
+const SPEC = {
+  from: isoDate("2026-01-01", { chip: (v) => (v === "2026-01-01" ? null : `From ${v}`) }),
+  to: isoDate("2026-12-31", { chip: (v) => (v === "2026-12-31" ? null : `To ${v}`) }),
+  q: str("", { chip: (v) => (v ? `Search: ${v}` : null) }),
+  page: int(1, { min: 1 }),
+} satisfies SurfaceSpec;
 
 export default async function JournalEntriesPage({
   searchParams,
 }: {
-  searchParams: { from?: string; to?: string; q?: string; page?: string };
+  searchParams: RawParams;
 }) {
   const scope = await getCurrentScope();
   if (!scope) {
@@ -36,13 +63,13 @@ export default async function JournalEntriesPage({
       />
     );
   }
-  const from = searchParams.from ?? "2026-01-01";
-  const to = searchParams.to ?? "2026-12-31";
-  const q = (searchParams.q ?? "").trim();
   // Page is 1-indexed for the URL (CPAs read "page 1 of 12" naturally);
-  // we'll convert to offset for the query.
-  const pageRaw = Number.parseInt(searchParams.page ?? "1", 10);
-  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+  // we convert to offset for the query. Coercion, defaults and the
+  // garbage-tolerance that keeps `?page=abc` out of a database query all live
+  // in the spec now rather than being re-derived here.
+  const state = parseUrlState(SPEC, searchParams);
+  const { from, to, q, page } = state;
+  const chips = filterChips("/journal-entries", SPEC, state, defaultsOf(SPEC));
   const fromDate = new Date(from);
   const toDate = new Date(to);
 
@@ -115,19 +142,20 @@ export default async function JournalEntriesPage({
   // Clamp the page so a stale URL with too-high page doesn't show empty.
   const currentPage = Math.min(page, totalPages);
 
-  // Build a query-string for the prev/next links that preserves filter
-  // params (date range + search). Just rewrite the `page` field.
-  function pageUrl(p: number): string {
-    const params = new URLSearchParams();
-    params.set("from", from);
-    params.set("to", to);
-    if (q) params.set("q", q);
-    if (p > 1) params.set("page", String(p));
-    return `?${params.toString()}`;
-  }
+  // Prev/next preserve every filter because `buildUrl` walks the spec rather
+  // than a hand-kept list. The previous version of this function had to
+  // remember `from`, `to` and `q` by name, and would have silently dropped
+  // any filter added later — which is the drift `url-state.ts` exists to stop.
+  // It also wrote `from`/`to` even at their defaults; now an unfiltered page 2
+  // is just `?page=2`.
+  const pageUrl = (p: number) => buildUrl("/journal-entries", SPEC, state, { page: p });
 
   return (
     <div className="flex flex-col gap-6">
+      <FilterChips
+        chips={chips}
+        clearAllHref={buildUrl("/journal-entries", SPEC, defaultsOf(SPEC))}
+      />
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-ink-900">Journal entries</h2>
