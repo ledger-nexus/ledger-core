@@ -32,6 +32,17 @@ _No active claims._
 
 ## Recent completions
 
+### Session rls-policy-coverage · 2026-08-08
+- **Scope**: started phase 1 of the Campfire build order, and stopped on the way — adding `SavedView` needs an RLS policy, which surfaced that **six existing tenant-scoped tables have none**.
+- **The finding**: `balance_assertion`, `commodity`, `commodity_price`, `lot`, `period_reopen_log`, `report_template` reached the schema with RLS never enabled and no policy. Confirmed BOTH in the DDL and against the live dev database — `relrowsecurity = false`, 0 policies, on all six.
+- **⚠️ No live exposure, and that is the point.** Phase 1 FORCEs nothing, so behaviour is identical with or without them. The risk was entirely that Phase 3 would flip FORCE, report success, and leave those six unprotected — **partial enforcement that reads as complete**. Migration 0042 predicted exactly this in a comment: "a new table that skipped this would be the one gap when Phase 3 flips the switch."
+- **⚠️ My first measurement said "53 of 53 MISSING" and was WRONG** — the policy file writes table names UNQUOTED (`ALTER TABLE tenant …`) while migration 0042 writes them QUOTED, and my pattern only accepted quotes. Publishing that would have been a spectacular false alarm. Both spellings are live and the guard now accepts both; the note is in the test file.
+- **Verified without touching the shared DB**: the new SQL was executed inside `BEGIN … ROLLBACK`, then `pg_class.relrowsecurity` re-queried to confirm the rollback actually took. Both halves checked, not assumed.
+- **`tests/rls-policy-coverage.test.ts`** derives the tenant-scoped table set AND each model's `@@map`'d name from the schema, so the hand-written 55-entry list in the policy file cannot silently drift again. Seen failing against the pre-fix tree, naming all six by model and table.
+- **Deficiency #12** annotated with the finding; not logged as a new row, since a control that is not yet enforcing has no current exposure and claiming a new High would be inflation.
+- **Still to do**: the `SavedView` work this interrupted.
+- **Branch**: feat/saved-views (misnamed — it carries the RLS fix).
+
 ### Session subledger-entity-resolution · 2026-08-08
 - **Scope**: the sub-ledger cluster the tenant-scope guard surfaced, plus the PROJECT_STATUS entry #371 shipped without.
 - **⚠️ THIS IS NOT A NEW FINDING — IT IS AN INCOMPLETE REMEDIATION.** Deficiency log **#28** (High, CC6.1, "Cross-tenant write via unscoped `createFixedAsset` entity lookup") was recorded **Closed** on 2026-06-12. Its fix landed in `createFixedAsset` ONLY; the identical `findFirstOrThrow({ where: { code } })` survived in `openApItem` / `openArItem` / `createLease` / `createRevenueContract` for two months, under comments that named the hazard and deferred it. New log row **#32**; #28 keeps its Closed status (audit history is not rewritten) and gains a forward reference.
