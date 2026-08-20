@@ -32,6 +32,16 @@ _No active claims._
 
 ## Recent completions
 
+### Session line-level-transactions · 2026-08-08
+- **Scope**: phase 2b — the line-level `/transactions` list, and drill-down from an income-statement cell into it.
+- **The payoff phase 0 was built for**: because the surface keeps its state in the URL, "show me the lines behind this number" is an `<a href>`. No modal, no shared client store, no endpoint. `src/lib/surfaces/transactions.ts` owns the parameter names so the report and the destination cannot disagree.
+- **⚠️ SUBTOTAL ROWS DO NOT DRILL.** A group row's amount is the sum of its children, so a link filtered to the group's own account code opens a list whose total does not match the number that was clicked — the specific way a drill-down loses trust: not by failing, by disagreeing. Only leaf rows are clickable, and `tests/drilldown-contract.test.ts` pins it.
+- **⚠️ The URL carries the account CODE and never a display name.** Campfire ships `account=2001&accountName=Usage-BasedRevenue` — two sources of truth, and the name is the half that drifts on a rename (§13). The name is resolved server-side for the chip.
+- **Both source-shape guards were proved failing**: removing the `isGroup` gate, and hand-building `/transactions?account=…` instead of calling the helper.
+- **⚠️ The contrast guard caught me a SECOND time** — `text-ink-300` on disabled Prev/Next, copied from `/journal-entries`, which is exempt. Per #359's own rule, 400-and-lighter is allowed for disabled controls, so the fix is the documented narrow `file:token` exemption, not a broader rule. Adding it is a visible edit on purpose.
+- **Not driven in a browser** — same harness blocks as #376 (httpOnly `lc-user`, the pane's fetch not carrying cookies). The drill-down href and the subtotal rule are covered as contracts, but nobody has clicked a number.
+- **Branch**: feat/line-level-transactions.
+
 ### Session saved-view-model · 2026-08-08
 - **Scope**: the `SavedView` slice of phase 1 — model, migration 0043 + `down.sql`, RLS policy, Server Actions with Zod + audit, and the picker wired into `/journal-entries`.
 - **⚠️ Stores the QUERY STRING, not `config Json`** as the design doc proposed. The doc predates `url-state.ts`; once state round-trips through the URL a view IS that string, and a string is inspectable in the row, renders straight into an href, and cannot disagree with what the surface parses — the surface's own spec reads it back.

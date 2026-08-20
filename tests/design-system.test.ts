@@ -84,6 +84,10 @@ const SURFACES = {
 const NON_TEXT_EXEMPT = new Set([
   "src/app/layout.tsx:text-ink-300",
   "src/app/journal-entries/page.tsx:text-ink-300",
+  // Disabled Prev/Next on the line-level transactions list — same pattern,
+  // same justification, added with that page rather than inherited by a path
+  // prefix. Adding the entry is deliberately a visible edit.
+  "src/app/transactions/page.tsx:text-ink-300",
   "src/app/close/tasks/page.tsx:text-ink-300",
   "src/app/close/alerts/page.tsx:text-ink-300",
   "src/app/admin/audit-log/page.tsx:text-ink-300",

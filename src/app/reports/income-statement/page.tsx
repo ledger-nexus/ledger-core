@@ -19,6 +19,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Input, Label } from "@/components/ui/input";
 import { formatMoney, formatDate, moneyClass } from "@/lib/utils/format";
+import { transactionsHref } from "@/lib/surfaces/transactions";
+import { DrilldownAmount } from "@/components/ui/drilldown-amount";
 
 export default async function IncomeStatementPage({
   searchParams,
@@ -90,10 +92,19 @@ export default async function IncomeStatementPage({
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <IsSection title="Revenue" rows={pnl.revenue} total={pnl.totalRevenue} flat={flat} />
+        <IsSection
+          title="Revenue"
+          rows={pnl.revenue}
+          total={pnl.totalRevenue}
+          flat={flat}
+          from={from}
+          to={to}
+        />
         <IsSection
           title="Expenses"
           rows={pnl.expenses}
+          from={from}
+          to={to}
           total={pnl.totalExpenses}
           flat={flat}
         />
@@ -121,6 +132,8 @@ export default async function IncomeStatementPage({
 }
 
 function IsSection({
+  from,
+  to,
   title,
   rows,
   total,
@@ -130,6 +143,8 @@ function IsSection({
   rows: FinancialStatementRow[];
   total: Decimal;
   flat: boolean;
+  from: string;
+  to: string;
 }) {
   const flatRows: FlatAccountRow[] = rows.map((r) => ({
     code: r.code,
@@ -168,12 +183,17 @@ function IsSection({
                     <TD className="font-mono text-xs text-ink-700">{r.code}</TD>
                     <TD className="text-ink-900">{r.name}</TD>
                     <TD className={`amount-cell text-right ${moneyClass(r.amount)}`}>
-                      {formatMoney(r.amount)}
+                      <DrilldownAmount
+                        href={transactionsHref({ accountCode: r.code, from, to })}
+                        label={`${r.code} ${r.name}`}
+                      >
+                        {formatMoney(r.amount)}
+                      </DrilldownAmount>
                     </TD>
                   </TR>
                 ))
               : treeDisplay.map((node) => (
-                  <HierarchyTR key={node.code} node={node} />
+                  <HierarchyTR key={node.code} node={node} from={from} to={to} />
                 ))}
           </TBody>
         </Table>
@@ -182,7 +202,15 @@ function IsSection({
   );
 }
 
-function HierarchyTR({ node }: { node: HierarchyNode }) {
+function HierarchyTR({
+  node,
+  from,
+  to,
+}: {
+  node: HierarchyNode;
+  from: string;
+  to: string;
+}) {
   const indentPx = node.depth * 16;
   const isGroup = node.hasChildren;
   const valueToShow = isGroup ? node.subtotalBalance : node.ownBalance;
@@ -198,7 +226,21 @@ function HierarchyTR({ node }: { node: HierarchyNode }) {
         )}
       </TD>
       <TD className={`amount-cell text-right ${moneyClass(valueToShow)}`}>
-        {formatMoney(valueToShow)}
+        {/* ⚠️ Subtotals do NOT drill. A group row's amount is the sum of its
+            children, so a link filtered to the group's own account code would
+            open a list whose total does not match the number that was clicked
+            — the specific way a drill-down loses a reader's trust. Only leaf
+            rows, whose amount IS one account's activity, are clickable. */}
+        {isGroup ? (
+          formatMoney(valueToShow)
+        ) : (
+          <DrilldownAmount
+            href={transactionsHref({ accountCode: node.code, from, to })}
+            label={`${node.code} ${node.name}`}
+          >
+            {formatMoney(valueToShow)}
+          </DrilldownAmount>
+        )}
       </TD>
     </TR>
   );
