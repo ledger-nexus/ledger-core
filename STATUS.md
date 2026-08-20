@@ -41,6 +41,13 @@ _No active claims._
 - **`tenantId` is REQUIRED, not optional**, matching #28's precedent — `tsc` then enumerates all 42 call sites instead of leaving silent gaps.
 - **Guard baseline 56 → 52.** Left for next time: 52 remain, the largest clusters in `src/lib/mappers` (13) and `src/lib/external` (8).
 - **Branch**: fix/subledger-entity-resolution.
+### Session campfire-product-surface · 2026-08-08
+- **Scope**: docs-only. Studied 14 screenshots of Campfire's running product and wrote `docs/design/campfire-product-surface.md` — a copy-this / don't-copy-this build spec.
+- **⚠️ Read the two prior docs FIRST — they already existed**: `competitive-landscape-campfire-rillet.md` (2026-07-16, built from marketing pages) and `automation-library.md` (the standing-approval governance thesis). The new doc is the product-surface companion and deliberately does not repeat either.
+- **The finding**: on accounting depth we are not behind (65 models, multi-book, ASC 842, M-3, consolidation). Campfire's entire lead is the **operator surface** — saved views, filter chips, column picker, bulk update, breadcrumbs, report catalog, tag-group UI, validation rules, agent console. All thin relative to a depreciation engine.
+- **⚠️ Two things that need Chris before anyone builds**: (1) Campfire's agent "auto-applied" confidence band posts cash application automatically, which as-shown violates non-negotiable #3 — two bands, or three with a standing-approval reading? (2) Their Tag Groups ARE our dimension engine; the UI must sit on `Dimension`/`DimensionValue`/`DimensionSet` and NOT introduce a parallel `Tag` model against a LOCKED schema.
+- **Every ledger-core claim in the doc was checked against `main`**, not recalled — and three were wrong on the first pass: route count (55 → 60), a deficiency reference that lives only on an open PR, and a "check whether formatMoney does parens" that it already does.
+- **Branch**: docs/campfire-product-surface.
 
 ### Session rls-route-suites · 2026-08-08
 - **Scope**: the three `rls-*` suites #368 deliberately left alone. Measured what each actually leaves in shared NORTHWIND rather than trusting #368's note about them.
