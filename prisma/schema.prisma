@@ -65,7 +65,7 @@ model Tenant {
   /// When true, non-approver journal entries land in the
   /// PENDING_APPROVAL queue instead of posting directly. Default off —
   /// solo books and small teams keep the historical behavior.
-  requireJeApproval Boolean @default(false)
+  requireJeApproval   Boolean  @default(false)
   /// Optional amount threshold. Null (or ≤ 0) with the flag on means
   /// EVERY non-approver entry queues; when > 0, only entries whose
   /// total ≥ this amount queue and smaller ones post directly. Units:
@@ -96,21 +96,21 @@ model Tenant {
   // five and resolves to FREE_TIER via getEffectivePlan().
   /// Stripe Customer id (cus_...). Unique — one Stripe customer per
   /// workspace, so a webhook can never fan out across tenants.
-  stripeCustomerId String? @unique
+  stripeCustomerId     String?   @unique
   /// Stripe Subscription id (sub_...). Null when never subscribed or
   /// after cancellation.
   stripeSubscriptionId String?
   /// Plan key from src/lib/billing/plans.ts ("starter" | "growth" |
   /// "scale"). Null = free tier. A key not in the catalog (a retired
   /// tier) also resolves to FREE_TIER rather than throwing.
-  billingPlan String?
+  billingPlan          String?
   /// Raw Stripe subscription status string ("active", "trialing",
   /// "past_due", "canceled", …). Deliberately NOT an enum: Stripe adds
   /// statuses, and a value we don't recognize must degrade to free
   /// tier, not fail a migration.
-  subscriptionStatus String?
+  subscriptionStatus   String?
   /// End of the current paid period — display only ("Renews 2026-09-01").
-  currentPeriodEnd DateTime?
+  currentPeriodEnd     DateTime?
 
   memberships TenantMembership[]
   apiTokens   TenantApiToken[]
@@ -172,14 +172,15 @@ model Tenant {
   invites                   TenantInvite[]
   reportTemplates           ReportTemplate[]
 
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  deletedAt DateTime? // soft delete
-  BankRule  BankRule[]
+  createdAt                   DateTime                    @default(now())
+  updatedAt                   DateTime                    @updatedAt
+  deletedAt                   DateTime? // soft delete
+  BankRule                    BankRule[]
+  reconciliationManualMatches ReconciliationManualMatch[]
+  savedViews                  SavedView[]
 
   @@index([ownerUserId])
   @@map("tenant")
-  reconciliationManualMatches ReconciliationManualMatch[]
 }
 
 model TenantMembership {
@@ -269,26 +270,26 @@ model LegalEntity {
   mappingVersion   String?
   extensions       Json?
 
-  fiscalCalendars  FiscalCalendar[]
-  accounts         Account[]
-  journalEntries   JournalEntry[]
-  parties          Party[]
-  items            Item[]
-  periodCloses     PeriodClose[]
+  fiscalCalendars   FiscalCalendar[]
+  accounts          Account[]
+  journalEntries    JournalEntry[]
+  parties           Party[]
+  items             Item[]
+  periodCloses      PeriodClose[]
   balanceAssertions BalanceAssertion[]
   lots              Lot[]
-  fixedAssets      FixedAsset[]
-  leases           Lease[]
-  revenueContracts RevenueContract[]
-  arOpenItems      ArOpenItem[]
-  apOpenItems      ApOpenItem[]
-  recurringEntries RecurringEntry[]
-  reconciliations  Reconciliation[]
+  fixedAssets       FixedAsset[]
+  leases            Lease[]
+  revenueContracts  RevenueContract[]
+  arOpenItems       ArOpenItem[]
+  apOpenItems       ApOpenItem[]
+  recurringEntries  RecurringEntry[]
+  reconciliations   Reconciliation[]
   // BlackLine arc Phase 2: close-task calendar.
-  closeTasks       CloseTask[]
-  bankTransactions BankTransaction[]
+  closeTasks        CloseTask[]
+  bankTransactions  BankTransaction[]
   // BlackLine arc Phase 3: flux / variance analysis.
-  fluxStatements   FluxStatement[]
+  fluxStatements    FluxStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -468,15 +469,15 @@ model PeriodReopenLog {
 // TrialBalanceRow.balance. tolerance null => derived from Currency.decimals
 // (one unit of the last decimal place: 0.01 USD, 1 JPY).
 model BalanceAssertion {
-  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId String      @db.Uuid
-  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  entityId String      @db.Uuid
-  entity   LegalEntity @relation(fields: [entityId], references: [id])
-  bookId   String      @db.Uuid
-  book     Book        @relation(fields: [bookId], references: [id])
-  accountId String     @db.Uuid
-  account   Account    @relation(fields: [accountId], references: [id])
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String      @db.Uuid
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  entityId  String      @db.Uuid
+  entity    LegalEntity @relation(fields: [entityId], references: [id])
+  bookId    String      @db.Uuid
+  book      Book        @relation(fields: [bookId], references: [id])
+  accountId String      @db.Uuid
+  account   Account     @relation(fields: [accountId], references: [id])
 
   // v1 asserts in the book's reporting currency. Plain column (no relation),
   // matching ar_open_item / ap_open_item. Carried explicitly so per-commodity
@@ -560,16 +561,16 @@ model FxRate {
 // or the posting path. It establishes the seam that mark-to-market / holdings
 // valuation and per-commodity balance assertions can build on later.
 model Commodity {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId   String   @db.Uuid
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String  @db.Uuid
+  tenant     Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // Beancount-style symbol: "AAPL", "BTC", "VTSAX". Not an ISO currency.
   symbol     String
   name       String
   // Free-form for v1 ("EQUITY", "CRYPTO", "FUND", ...). A typed enum can come
   // later once the set stabilises.
   assetClass String?
-  active     Boolean  @default(true)
+  active     Boolean @default(true)
 
   prices CommodityPrice[]
   lots   Lot[]
@@ -645,7 +646,7 @@ model Lot {
   openedByEntryId String?       @db.Uuid
   openedByEntry   JournalEntry? @relation(fields: [openedByEntryId], references: [id])
 
-  label           String?  // optional user label ("RSU tranche 3", broker lot id)
+  label           String? // optional user label ("RSU tranche 3", broker lot id)
   acquisitionDate DateTime @db.Date
 
   // Units + per-unit cost. High precision for fractional shares / crypto.
@@ -874,10 +875,10 @@ model Account {
   reconciliations         Reconciliation[]
   balanceAssertions       BalanceAssertion[]
   lots                    Lot[]
-  bankFeedTransactions    BankTransaction[] @relation("BankTxnBankAccount")
-  categorizedTransactions BankTransaction[] @relation("BankTxnCategory")
-  bankRuleCategories      BankRule[]        @relation("BankRuleCategory")
-  bankRuleAccounts        BankRule[]        @relation("BankRuleBankAccount")
+  bankFeedTransactions    BankTransaction[]  @relation("BankTxnBankAccount")
+  categorizedTransactions BankTransaction[]  @relation("BankTxnCategory")
+  bankRuleCategories      BankRule[]         @relation("BankRuleCategory")
+  bankRuleAccounts        BankRule[]         @relation("BankRuleBankAccount")
   // BlackLine arc Phase 3: flux / variance analysis.
   fluxLines               FluxLine[]
 
@@ -1064,11 +1065,11 @@ model JournalEntry {
   recordEvents RecordEvent[] @relation("JournalEntryEvents")
 
   // Backref to inline notes (review comments, follow-up flags).
-  notes            JournalEntryNote[]
+  notes           JournalEntryNote[]
   // 1:1 — a posted entry is claimed by at most one bank-feed line. The
   // uniqueness is enforced on BankTransaction.postedEntryId so two feed
   // lines can't match/categorize onto the same entry (TOCTOU guard).
-  bankTransaction  BankTransaction?
+  bankTransaction BankTransaction?
 
   @@unique([tenantId, entryNumber])
   @@index([ownerId])
@@ -1157,8 +1158,9 @@ model JournalLine {
   functionalCurrencyId String?
   functionalCurrency   Currency? @relation("LineFuncCcy", fields: [functionalCurrencyId], references: [code])
 
-  description String?
-  extensions  Json?
+  description        String?
+  extensions         Json?
+  reconManualMatches ReconciliationManualMatch[]
 
   @@unique([entryId, lineNo])
   @@index([entryId])
@@ -1166,7 +1168,6 @@ model JournalLine {
   @@index([partyId])
   @@index([tenantId])
   @@map("gl_entry_line")
-  reconManualMatches ReconciliationManualMatch[]
 }
 
 // =========================================================================
@@ -1245,7 +1246,7 @@ model RecurringEntry {
   // source account's month-to-docDate activity into target lines by
   // percentage each run. STANDARD posts the lines verbatim — the
   // original behavior and the default.
-  kind RecurringEntryKind @default(STANDARD)
+  kind                        RecurringEntryKind @default(STANDARD)
   // ALLOCATION only: the account whose activity is allocated. Stored by
   // code (like line accountCodes) — resolved per run.
   allocationSourceAccountCode String?
@@ -2046,11 +2047,12 @@ model User {
   fluxStatementsFinalized     FluxStatement[]            @relation("FluxFinalizer")
   fluxLineComments            FluxLine[]                 @relation("FluxLineCommenter")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+  reconManualMatchDecisions ReconciliationManualMatch[] @relation("ReconMatchDecider")
+  savedViews                SavedView[]                 @relation("SavedViewOwner")
 
   @@map("app_user")
-  reconManualMatchDecisions ReconciliationManualMatch[] @relation("ReconMatchDecider")
 }
 
 model Queue {
@@ -2357,21 +2359,70 @@ enum NotificationCategory {
 // admins can clone but not edit the system originals).
 //
 // See docs/report-builder-design.md for the full DSL spec.
+/// A named, reusable filter state for one list or report surface.
+///
+/// ⚠️ STORES THE QUERY STRING, NOT A JSON BLOB. The design doc
+/// (docs/design/campfire-product-surface.md §6) proposed `config Json`,
+/// written before `src/lib/url-state.ts` existed. Once every surface's state
+/// round-trips through the query string, a saved view IS that string — and a
+/// string is strictly better here: it is inspectable in the row, it renders
+/// straight into an href with no serialiser to keep in sync, and it cannot
+/// disagree with what the surface actually parses, because the surface's own
+/// spec is what reads it back.
+///
+/// A view whose params no longer exist degrades to the surface defaults
+/// (`parseUrlState` never throws), so a stale view is a mild surprise, never
+/// a 500.
+model SavedView {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  /// Which surface this belongs to — the route path, e.g. "journal-entries".
+  /// Not an enum: surfaces are added by shipping a page, and a migration per
+  /// new page would be friction with no safety return.
+  surface String
+
+  name String
+
+  ownerId String @db.Uuid
+  owner   User   @relation("SavedViewOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  /// Visible to the whole tenant, not just the owner. Editing stays with the
+  /// owner either way — see the open question in the design doc about who may
+  /// edit a view other people depend on.
+  shared Boolean @default(false)
+
+  /// The serialized filter state, e.g. `from=2026-04-01&to=2026-06-30&q=acme`.
+  /// No leading "?".
+  query String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Re-saving a name replaces that view rather than making a second one with
+  /// the same label — scoped per owner so two people may each have "My Q2".
+  @@unique([tenantId, surface, ownerId, name])
+  @@index([tenantId, surface])
+  @@map("saved_view")
+}
+
 model ReportTemplate {
-  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId  String @db.Uuid
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  code      String // "IS" / "BS" / "CF" / "EQ" / "MY-CUSTOM-1"
-  name      String
-  isSystem  Boolean @default(false)
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code       String // "IS" / "BS" / "CF" / "EQ" / "MY-CUSTOM-1"
+  name       String
+  isSystem   Boolean  @default(false)
   // Serialized ReportTemplateDefinition — rows + columns + presentation.
   // Validated at write-time by the Server Action / route handler that
   // creates or updates the template.
   definition Json
-  version   Int     @default(1)
-  createdBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  version    Int      @default(1)
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -2762,7 +2813,7 @@ model Reconciliation {
   // Soft reference: RecordEvent.recordType = "Reconciliation",
   // .recordId = this id. No Prisma relation — RecordEvent is the
   // tenant-wide event journal used by ownership, JE notes, etc.
-  attachments ReconciliationAttachment[]
+  attachments   ReconciliationAttachment[]
   manualMatches ReconciliationManualMatch[]
 
   createdAt DateTime @default(now())
@@ -2803,8 +2854,8 @@ model ReconciliationManualMatch {
 
   /// Who decided. Not nullable — an unattributed manual match is the
   /// thing this table exists to prevent.
-  decidedById String @db.Uuid
-  decidedBy   User   @relation("ReconMatchDecider", fields: [decidedById], references: [id])
+  decidedById String   @db.Uuid
+  decidedBy   User     @relation("ReconMatchDecider", fields: [decidedById], references: [id])
   decidedAt   DateTime @default(now())
 
   /// Why, when the pairing isn't self-evident. Free text, shown in the
@@ -2904,7 +2955,7 @@ model NotificationChannel {
   // decrypted only at send time. Null means the receiver gets an
   // unsigned request — allowed (some endpoints sit behind their own
   // network controls) but the admin UI says what that costs.
-  signingSecret String?
+  signingSecret  String?
   // Which severities push to this channel. JSON array of values from
   // `AlertSeverity` (high / medium / low). Empty → all severities.
   severityFilter String[]
@@ -3141,15 +3192,15 @@ model BankTransaction {
   excludedBy    String?
   excludeReason String?
 
-  importedAt DateTime @default(now())
-  createdBy  String?
+  importedAt         DateTime                    @default(now())
+  createdBy          String?
+  reconManualMatches ReconciliationManualMatch[]
 
   // One row per real bank line, per tenant. Full unique (not partial) so
   // `prisma db push` creates it without a migration-mirror entry.
   @@unique([tenantId, dedupeHash])
   @@index([tenantId, entityId, bookId, bankAccountId, status])
   @@map("bank_transaction")
-  reconManualMatches ReconciliationManualMatch[]
 }
 
 enum BankTxnStatus {

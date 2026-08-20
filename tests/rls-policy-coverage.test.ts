@@ -41,7 +41,6 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = path.join(__dirname, "..");
 const POLICY_FILE = path.join(ROOT, "prisma", "sql", "2026-06-05-rls-phase-1-policies.sql");
-const MIGRATIONS = path.join(ROOT, "prisma", "migrations");
 
 /** Tenant-scoped models → their SQL table name, both read out of the schema. */
 function tenantScopedTables(): Map<string, string> {
@@ -58,14 +57,22 @@ function tenantScopedTables(): Map<string, string> {
   return out;
 }
 
-/** Every table that has RLS enabled anywhere in the applied DDL. */
+/**
+ * Every table with RLS enabled **in the policy file**.
+ *
+ * ⚠️ MIGRATIONS DO NOT COUNT, and that is the whole point. CI and
+ * `npm run db:reset` build the schema with `prisma db push`, which creates
+ * TABLES but never runs migration SQL — so a policy that exists only in a
+ * migration is absent from every freshly-built database. `db:restore-ddl`
+ * applies this file, and only this file.
+ *
+ * Migration 0042 said so in a comment and still wrote its policy in both
+ * places, which is the correct belt-and-braces. An earlier version of this
+ * guard accepted either location, and would have passed a table covered only
+ * by a migration — i.e. covered nowhere that matters.
+ */
 function tablesWithRlsEnabled(): Set<string> {
   const sources = [fs.readFileSync(POLICY_FILE, "utf8")];
-  for (const dir of fs.readdirSync(MIGRATIONS, { withFileTypes: true })) {
-    if (!dir.isDirectory()) continue;
-    const file = path.join(MIGRATIONS, dir.name, "migration.sql");
-    if (fs.existsSync(file)) sources.push(fs.readFileSync(file, "utf8"));
-  }
   // ⚠️ Optional quotes — see the header note. Both spellings are in the tree.
   const re = /ALTER TABLE\s+"?([a-z_]+)"?\s+ENABLE ROW LEVEL SECURITY/gi;
   const out = new Set<string>();
@@ -73,13 +80,9 @@ function tablesWithRlsEnabled(): Set<string> {
   return out;
 }
 
+/** Same rule as above: the policy file is the only source that ships. */
 function tablesWithPolicy(): Set<string> {
   const sources = [fs.readFileSync(POLICY_FILE, "utf8")];
-  for (const dir of fs.readdirSync(MIGRATIONS, { withFileTypes: true })) {
-    if (!dir.isDirectory()) continue;
-    const file = path.join(MIGRATIONS, dir.name, "migration.sql");
-    if (fs.existsSync(file)) sources.push(fs.readFileSync(file, "utf8"));
-  }
   const re = /CREATE POLICY\s+\w+\s+ON\s+"?([a-z_]+)"?/gi;
   const out = new Set<string>();
   for (const src of sources) for (const m of src.matchAll(re)) out.add(m[1]);

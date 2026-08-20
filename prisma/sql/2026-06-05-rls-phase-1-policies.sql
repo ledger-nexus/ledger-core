@@ -591,7 +591,7 @@ CREATE POLICY tenant_invite_tenant_isolation ON tenant_invite
 --   WHERE schemaname = 'public'
 --   ORDER BY tablename, policyname;
 --
--- Expected: 61 rows, all named <table>_tenant_isolation.
+-- Expected: 62 rows, all named <table>_tenant_isolation.
 
 -- 55. reconciliation_manual_match (added with migration 0042)
 --     CI applies schema with `prisma db push`, which creates the TABLE
@@ -669,6 +669,18 @@ CREATE POLICY period_reopen_log_tenant_isolation ON period_reopen_log
 ALTER TABLE report_template ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS report_template_tenant_isolation ON report_template;
 CREATE POLICY report_template_tenant_isolation ON report_template
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
+-- 62. saved_view (named filter states per surface; added with migration 0043)
+--     Listed HERE and not only in the migration: CI and `db:reset` build the
+--     schema with `prisma db push`, which creates the table and never runs
+--     migration SQL, so a policy that lives only in a migration is absent from
+--     every freshly-built database.
+ALTER TABLE saved_view ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS saved_view_tenant_isolation ON saved_view;
+CREATE POLICY saved_view_tenant_isolation ON saved_view
   FOR ALL
   USING ("tenantId" = app_current_tenant_id())
   WITH CHECK ("tenantId" = app_current_tenant_id());

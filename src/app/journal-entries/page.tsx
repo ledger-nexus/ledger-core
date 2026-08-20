@@ -20,6 +20,9 @@ import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { FilterChips } from "@/components/ui/filter-chips";
+import { SavedViews } from "@/components/ui/saved-views";
+import { listViews } from "@/app/actions/saved-views";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import {
   buildUrl,
   defaultsOf,
@@ -70,6 +73,14 @@ export default async function JournalEntriesPage({
   const state = parseUrlState(SPEC, searchParams);
   const { from, to, q, page } = state;
   const chips = filterChips("/journal-entries", SPEC, state, defaultsOf(SPEC));
+  // A saved view is this surface's query string plus a name, so "the current
+  // filters" is literally what buildUrl already produces — no second
+  // serializer to keep in step with the first.
+  const currentQuery = buildUrl("", SPEC, state).replace(/^\?/, "");
+  const [views, viewer] = await Promise.all([
+    listViews("journal-entries").catch(() => []),
+    getCurrentUser().catch(() => null),
+  ]);
   const fromDate = new Date(from);
   const toDate = new Date(to);
 
@@ -152,6 +163,14 @@ export default async function JournalEntriesPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {viewer && (
+        <SavedViews
+          surface="journal-entries"
+          views={views}
+          currentQuery={currentQuery}
+          currentUserId={viewer.id}
+        />
+      )}
       <FilterChips
         chips={chips}
         clearAllHref={buildUrl("/journal-entries", SPEC, defaultsOf(SPEC))}
