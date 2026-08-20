@@ -177,6 +177,7 @@ describe("applyArPayment — TOCTOU race", () => {
     });
     openItemId = (
       await openArItem(prisma, {
+        tenantId,
         entityCode: ENTITY_CODE,
         bookCode: "US_GAAP",
         partyCode: "PARTY",

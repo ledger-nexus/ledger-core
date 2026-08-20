@@ -372,6 +372,7 @@ describe("AR bad debt write-off", () => {
       ],
     });
     const item = await openArItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "TEST_CUSTOMER",
@@ -419,6 +420,7 @@ describe("AR bad debt write-off", () => {
       ],
     });
     const item = await openArItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "TEST_CUSTOMER",
@@ -476,6 +478,7 @@ describe("AR bad debt write-off", () => {
       ],
     });
     const item = await openArItem(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       bookCode: "US_GAAP",
       partyCode: "TEST_CUSTOMER",
@@ -534,6 +537,7 @@ describe("ASC 842 operating lease", () => {
     // 24-month lease, $5k/mo, 6% annual rate.
     // PV = 5000 × (1 - 1.005^-24) / 0.005 ≈ $112,814.
     await createLease(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "TEST_LEASE",
       description: "Test office lease",
@@ -592,6 +596,7 @@ describe("ASC 842 operating lease", () => {
 
   it("TAX_CASH_BASIS posts only cash-payment expense — no ROU, no liability", async () => {
     await createLease(prisma, {
+      tenantId: await getDefaultTenantId(prisma),
       entityCode: ENTITY,
       code: "TAX_LEASE",
       description: "Tax book lease",

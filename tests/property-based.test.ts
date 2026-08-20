@@ -351,6 +351,7 @@ describe("property: AR open-item sum equals AR control after arbitrary applies",
           ],
         });
         const item = await openArItem(prisma, {
+          tenantId: await getDefaultTenantId(prisma),
           entityCode: ENTITY,
           bookCode: "US_GAAP",
           partyCode: "PROP_CUSTOMER",

@@ -277,6 +277,7 @@ export async function importFromQbo(
       lines: m.lines,
     });
     const openItem = await openArItem(prisma, {
+      tenantId,
       entityCode: input.entityCode,
       bookCode,
       partyCode: arOpening.customerCode,
@@ -327,6 +328,7 @@ export async function importFromQbo(
       lines: m.lines,
     });
     const openItem = await openApItem(prisma, {
+      tenantId,
       entityCode: input.entityCode,
       bookCode,
       partyCode: apOpening.vendorCode,
