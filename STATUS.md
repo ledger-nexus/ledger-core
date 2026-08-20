@@ -32,6 +32,16 @@ _No active claims._
 
 ## Recent completions
 
+### Session saved-view-model · 2026-08-08
+- **Scope**: the `SavedView` slice of phase 1 — model, migration 0043 + `down.sql`, RLS policy, Server Actions with Zod + audit, and the picker wired into `/journal-entries`.
+- **⚠️ Stores the QUERY STRING, not `config Json`** as the design doc proposed. The doc predates `url-state.ts`; once state round-trips through the URL a view IS that string, and a string is inspectable in the row, renders straight into an href, and cannot disagree with what the surface parses — the surface's own spec reads it back.
+- **⚠️ The RLS guard from #375 caught my own new table**, but only after I TIGHTENED it: the first version accepted a policy found in a migration, and CI builds with `prisma db push`, which never runs migration SQL. A policy living only in a migration is absent from every freshly-built database. Now the policy file is the only source that counts, and `saved_view` is in it (entry 62).
+- **⚠️⚠️ THE SUITE LEAKED 2 USERS AND REPORTED 7 PASSED.** `audit_log`'s append-only RULE rewrites the referential-integrity check for `audit_log_actorUserId_fkey`, so deleting an `app_user` fails *whether or not it has audit rows* — "clear the audit rows first" does not help. CLAUDE.md says outright that `app_user` hard-deletes need the `withAuditLogMutable` window; I read it, quoted it in a comment, and then put only the auditLog delete inside the window. Found by MEASURING leaked rows after a green run, not by reading the diff.
+- **Verified**: 7/7 green with leaked users/tenants/views all measured at **0**; policy SQL executed inside `BEGIN … ROLLBACK`; tsc 0; 28 tests across five guard suites.
+- **⚠️ Known v1 cut**: the form adapters throw on validation failure, so a rejected name renders the error boundary instead of a message beside the field. Inline errors want `useFormState` + a client component. Stated in the file, not hidden.
+- **Not driven in a browser** — the picker renders server-side and is covered by the round-trip tests, but nobody has clicked Save.
+- **Branch**: feat/saved-view-model.
+
 ### Session rls-policy-coverage · 2026-08-08
 - **Scope**: started phase 1 of the Campfire build order, and stopped on the way — adding `SavedView` needs an RLS policy, which surfaced that **six existing tenant-scoped tables have none**.
 - **The finding**: `balance_assertion`, `commodity`, `commodity_price`, `lot`, `period_reopen_log`, `report_template` reached the schema with RLS never enabled and no policy. Confirmed BOTH in the DDL and against the live dev database — `relrowsecurity = false`, 0 policies, on all six.

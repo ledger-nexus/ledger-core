@@ -1,0 +1,27 @@
+-- Reverse of 0043_saved_view.
+--
+-- DROP TABLE takes the two foreign keys, both indexes and the RLS policy with
+-- it, so this is symmetric in schema terms.
+--
+-- ⚠️ IT IS NOT SYMMETRIC IN DATA, though the data is cheap. Every row is a
+-- filter someone named and expects to find again — a controller's "Q2 accruals
+-- I still owe" or an auditor's saved slice. None of it is derivable from the
+-- ledger, and none of it is material: re-creating a view costs one filter and
+-- one Save. So unlike 0042, losing these rows is an annoyance rather than a
+-- loss of judgement, and no backup step is required before rolling back.
+--
+-- Preserve them anyway if the rollback is anything other than "this feature
+-- never shipped":
+--
+--   CREATE TABLE saved_view_backup_YYYYMMDD AS SELECT * FROM "saved_view";
+--
+-- Nothing else reads this table — views are looked up only by the surface
+-- rendering them — so the drop cannot cascade into ledger data.
+--
+-- NOT exercised on a live branch, unlike 0041/0042: this is a single CREATE
+-- TABLE with no data migration and no enum change, so the round trip is the
+-- uninteresting case. Stated rather than implied.
+--
+-- Apply with:  prisma db execute --file prisma/migrations/0043_saved_view/down.sql
+
+DROP TABLE IF EXISTS "saved_view";
