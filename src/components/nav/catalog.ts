@@ -74,6 +74,9 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Lists",
     items: [
       { href: "/accounts", label: "Chart of accounts" },
+      // The Layer 3 tagging engine, visible for the first time. Campfire calls
+      // these Tag Groups; ours are Dimensions and the model is richer.
+      { href: "/dimensions", label: "Dimensions", hint: "tag groups" },
       { href: "/commodities", label: "Commodities", hint: "securities" },
     ],
   },
