@@ -32,6 +32,16 @@ _No active claims._
 
 ## Recent completions
 
+### Session dimension-admin · 2026-08-08
+- **Scope**: phase 4 — a UI over the dimension engine, the seam `CLAUDE.md` calls "empty since v0.2". It was never empty in the schema; it was invisible. `/dimensions` lists groups, their values, and how many DimensionSets reference each, plus create forms for both.
+- **⚠️⚠️ THE REAL FINDING: `Dimension.isRequired` AND `appliesToAccountTypes` ARE WRITTEN AND READ BY NOTHING.** The NetSuite mapper sets them; `postJournalEntry` contains **zero** dimension references of any kind. The NS importer attaches `dimensionSetId` to line rows AFTER the entry is written ("Attach dimensionSetId to the line rows post-creation"). So a required-dimension rule is not merely unenforced — **there is no point in the canonical write path where it could run.**
+- **⚠️ Consequence for the design doc**: `campfire-product-surface.md` §10.2 treats Validation Rules as a gap we would need to build. Half of it is already modelled here and inert. The other half — wiring dimensions into `postJournalEntry` — is a change to the canonical ledger write path (non-negotiable #2) and needs its own design, not a checkbox.
+- **So the UI deliberately does NOT expose `isRequired`.** A toggle labelled Required that changes nothing is the same failure as `bg-warning/5` emitting no CSS (#359). The page says so in a banner naming `postJournalEntry`, not just in a comment.
+- **Measured before deciding**: 4 dimensions exist, **0 with `isRequired = true`** — so nothing currently depends on the flag, and adding enforcement later is a clean change rather than a migration.
+- **The cross-tenant test carries the weight**: `DimensionValue` is unique on `(dimensionId, code)` with NO tenant term, so the database cannot stop a value being hung off another tenant's dimension — only the action's WHERE can. Proved by removing the tenant term: tenant A successfully injected into tenant B's dimension.
+- **Verified at runtime**: 4 groups render with values and set counts (DEPARTMENT 20/21/22, 6 sets), banner present, no inert badge (correct — nothing is flagged required).
+- **Branch**: feat/dimension-admin.
+
 ### Session reports-catalog · 2026-08-08
 - **Scope**: phase 2 — a front door for twelve report routes that had none. Category tabs, cards with a real one-line description, and a provenance badge separating built-in from a tenant's own `ReportTemplate` definitions.
 - **⚠️ This is a SECOND list of routes the nav already names**, and second lists drift. Neither can be derived from the other — the nav has nowhere for a description, the catalog has no business owning sidebar order — so `tests/reports-catalog.test.ts` asserts they agree in BOTH directions, plus that every slug resolves to a real `page.tsx`. Both directions proved failing: removing a catalog entry names it as "in the nav, missing from the catalog"; a typo'd slug fails twice, as a 404-ing card and as a missing nav entry.
