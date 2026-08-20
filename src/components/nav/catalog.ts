@@ -83,6 +83,10 @@ export const NAV_SECTIONS: NavSection[] = [
     // then multi-entity/FX.
     label: "Reports",
     items: [
+      // The catalog itself, first in the group — a front door for the twelve
+      // below, which until now were reachable only from this sidebar or by
+      // knowing the URL.
+      { href: "/reports", label: "All reports", hint: "catalog" },
       { href: "/reports/trial-balance", label: "Trial balance" },
       { href: "/reports/income-statement", label: "Income statement" },
       { href: "/reports/balance-sheet", label: "Balance sheet" },
