@@ -40,6 +40,8 @@ _No active claims._
 - **Both source-shape guards were proved failing**: removing the `isGroup` gate, and hand-building `/transactions?account=…` instead of calling the helper.
 - **⚠️ The contrast guard caught me a SECOND time** — `text-ink-300` on disabled Prev/Next, copied from `/journal-entries`, which is exempt. Per #359's own rule, 400-and-lighter is allowed for disabled controls, so the fix is the documented narrow `file:token` exemption, not a broader rule. Adding it is a visible edit on purpose.
 - **Not driven in a browser** — same harness blocks as #376 (httpOnly `lc-user`, the pane's fetch not carrying cookies). The drill-down href and the subtotal rule are covered as contracts, but nobody has clicked a number.
+- **⚠️ CI caught a false positive in MY OWN guard, and it had been there since #371.** `tenant-scope-guard` flagged the new page's `journalLine.findMany({ where, take })` — because its pattern matched `where:` and not the SHORTHAND `{ where }`, so an idiomatic correctly-scoped call read as "no where clause". Teaching it shorthand dropped the baseline **52 → 41**: eleven entries were false positives all along (`ns-saved-search.ts` ×8, `admin/audit-log` ×3), each verified by reading the `where` object. Over-reporting, so nothing dangerous was hidden — but a baseline padded with 21% noise is a worse list.
+- **⚠️ THIRD TIME a scanner pattern was narrower than the language**: "the next `{` after `where:`" found the `select` block (100→53, #371); quoted-only table names read 53 tables as missing RLS (→6, #375); now `where:` missing shorthand (52→41). Each over-reported, each was caught only by running it against real code.
 - **Branch**: feat/line-level-transactions.
 
 ### Session saved-view-model · 2026-08-08
