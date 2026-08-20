@@ -591,7 +591,7 @@ CREATE POLICY tenant_invite_tenant_isolation ON tenant_invite
 --   WHERE schemaname = 'public'
 --   ORDER BY tablename, policyname;
 --
--- Expected: 55 rows, all named <table>_tenant_isolation.
+-- Expected: 61 rows, all named <table>_tenant_isolation.
 
 -- 55. reconciliation_manual_match (added with migration 0042)
 --     CI applies schema with `prisma db push`, which creates the TABLE
@@ -600,6 +600,75 @@ CREATE POLICY tenant_invite_tenant_isolation ON tenant_invite
 ALTER TABLE reconciliation_manual_match ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS reconciliation_manual_match_tenant_isolation ON reconciliation_manual_match;
 CREATE POLICY reconciliation_manual_match_tenant_isolation ON reconciliation_manual_match
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
+-- =============================================================================
+-- Backfill: tables that were added WITHOUT a policy (2026-08-08)
+-- =============================================================================
+--
+-- Six tenant-scoped tables reached the schema without ever appearing in this
+-- file. Nothing detected it because the list above is hand-written and nobody
+-- counted it against the schema — `tests/rls-policy-coverage.test.ts` now does,
+-- deriving both the tenant-scoped model set and each model's @@map'd table
+-- name, so the next omission fails a test instead of waiting for Phase 3.
+--
+-- ⚠️ WHY THIS WAS NOT A LIVE BUG, AND WHY IT STILL MATTERED. Phase 1 FORCEs
+-- nothing, so the app's owning role bypasses every policy and behaviour is
+-- identical with or without these. The exposure is entirely in Phase 3: a table
+-- with RLS *enabled* begins to be enforced, while a table where RLS was never
+-- enabled is not protected by RLS at all — and the rollout would report success
+-- either way. Partial enforcement that reads as complete is the worst shape a
+-- security control can take. Migration 0042 predicted exactly this in a comment.
+--
+-- All six carry a NOT NULL tenantId, so they take the plain direct-tenant
+-- policy with no special casing.
+
+-- 56. balance_assertion (dated balance tripwires; direct NOT NULL tenantId)
+ALTER TABLE balance_assertion ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS balance_assertion_tenant_isolation ON balance_assertion;
+CREATE POLICY balance_assertion_tenant_isolation ON balance_assertion
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
+-- 57. commodity (securities/commodities master; direct NOT NULL tenantId)
+ALTER TABLE commodity ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commodity_tenant_isolation ON commodity;
+CREATE POLICY commodity_tenant_isolation ON commodity
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
+-- 58. commodity_price (commodity price observations; direct NOT NULL tenantId)
+ALTER TABLE commodity_price ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commodity_price_tenant_isolation ON commodity_price;
+CREATE POLICY commodity_price_tenant_isolation ON commodity_price
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
+-- 59. lot (cost-basis lots; direct NOT NULL tenantId)
+ALTER TABLE lot ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS lot_tenant_isolation ON lot;
+CREATE POLICY lot_tenant_isolation ON lot
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
+-- 60. period_reopen_log (append-only reopen audit trail; direct NOT NULL tenantId)
+ALTER TABLE period_reopen_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS period_reopen_log_tenant_isolation ON period_reopen_log;
+CREATE POLICY period_reopen_log_tenant_isolation ON period_reopen_log
+  FOR ALL
+  USING ("tenantId" = app_current_tenant_id())
+  WITH CHECK ("tenantId" = app_current_tenant_id());
+
+-- 61. report_template (saved report-builder definitions; direct NOT NULL tenantId)
+ALTER TABLE report_template ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS report_template_tenant_isolation ON report_template;
+CREATE POLICY report_template_tenant_isolation ON report_template
   FOR ALL
   USING ("tenantId" = app_current_tenant_id())
   WITH CHECK ("tenantId" = app_current_tenant_id());
