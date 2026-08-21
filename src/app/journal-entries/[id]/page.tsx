@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Field, FieldGrid } from "@/components/ui/field-grid";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getCurrentTenant } from "@/lib/auth/tenant";
 import {
@@ -259,29 +260,34 @@ export default async function JournalEntryDetailPage({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      {/* ⚠️ EVERY FIELD SHOWS, EVEN WHEN NULL (§5). Six of these eleven used to
+          be wrapped in `{x && …}` and simply vanished when empty, which makes
+          two different situations look identical: "this entry has not been
+          reversed" and "this screen does not show reversals". On an accounting
+          document the first is a fact a reviewer wants stated.
+
+          It costs height — an ordinary manual entry now renders eleven fields
+          where it rendered five — and that is the trade §5 argues for
+          explicitly. `<Field>` supplies the dash, so no caller needs a guard. */}
+      <FieldGrid columns={4}>
         <Field label="Entity" value={entry.entity.code} />
         <Field label="Book" value={entry.book.code} />
         <Field label="Document date" value={formatDate(entry.documentDate)} />
         <Field label="Posting date" value={formatDate(entry.postingDate)} />
         <Field label="Currency" value={`${entry.currency.code} (fx ${entry.fxRate.toString()})`} />
-        {entry.sourceRecordId && (
-          <Field label="Source record ID" value={entry.sourceRecordId} className="font-mono" />
-        )}
-        {entry.mappingVersion && <Field label="Mapping version" value={entry.mappingVersion} />}
-        {lineage?.reverses && (
-          <LineageField label="Reverses" nodes={[lineage.reverses]} />
-        )}
-        {lineage && lineage.reversedBy.length > 0 && (
-          <LineageField label="Reversed by" nodes={lineage.reversedBy} />
-        )}
-        {lineage?.corrects && (
-          <LineageField label="Corrects" nodes={[lineage.corrects]} />
-        )}
-        {lineage && lineage.correctedBy.length > 0 && (
-          <LineageField label="Corrected by" nodes={lineage.correctedBy} />
-        )}
-      </div>
+        {/* The lineage quintuple, in one place and always present. It was
+            previously split across three parts of this page — a conditional
+            header badge, two conditional fields here, and a conditional
+            payload panel below — so no single view of it existed. */}
+        <Field label="Source system" value={entry.sourceSystem} mono />
+        <Field label="Source record type" value={entry.sourceRecordType} mono />
+        <Field label="Source record ID" value={entry.sourceRecordId} mono />
+        <Field label="Mapping version" value={entry.mappingVersion} />
+        <LineageField label="Reverses" nodes={lineage?.reverses ? [lineage.reverses] : []} />
+        <LineageField label="Reversed by" nodes={lineage?.reversedBy ?? []} />
+        <LineageField label="Corrects" nodes={lineage?.corrects ? [lineage.corrects] : []} />
+        <LineageField label="Corrected by" nodes={lineage?.correctedBy ?? []} />
+      </FieldGrid>
 
       <Card>
         <CardHeader>
@@ -467,17 +473,12 @@ export default async function JournalEntryDetailPage({
   );
 }
 
-function Field({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div>
-      <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">{label}</div>
-      <div className={`mt-0.5 text-sm text-ink-800 ${className ?? ""}`}>{value}</div>
-    </div>
-  );
-}
-
 // Renders one lineage relationship (Reverses / Reversed by / Corrects /
 // Corrected by) as a labeled list of links to the related entries.
+//
+// An EMPTY list is a real answer — "this entry has not been reversed" — so it
+// is passed straight to <Field>, which renders the dash. The caller no longer
+// decides whether the row exists.
 function LineageField({
   label,
   nodes,
@@ -486,19 +487,23 @@ function LineageField({
   nodes: { id: string; entryNumber: string }[];
 }) {
   return (
-    <div>
-      <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">{label}</div>
-      <div className="mt-0.5 flex flex-col gap-0.5 text-sm">
-        {nodes.map((n) => (
-          <Link
-            key={n.id}
-            href={`/journal-entries/${n.id}`}
-            className="font-mono text-link hover:underline"
-          >
-            {n.entryNumber}
-          </Link>
-        ))}
-      </div>
-    </div>
+    <Field
+      label={label}
+      value={
+        nodes.length === 0 ? null : (
+          <span className="flex flex-col gap-0.5">
+            {nodes.map((n) => (
+              <Link
+                key={n.id}
+                href={`/journal-entries/${n.id}`}
+                className="font-mono text-link hover:underline"
+              >
+                {n.entryNumber}
+              </Link>
+            ))}
+          </span>
+        )
+      }
+    />
   );
 }

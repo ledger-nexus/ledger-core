@@ -148,9 +148,13 @@ Rules the screenshots enforce consistently:
 | **Ids carry a copy-to-clipboard icon** | `CUST-0000191 ⧉` — reference numbers exist to be pasted elsewhere |
 | **Cross-object jumps are explicit** | `View Transaction ↗` under the invoice title; `Contract: Ro Studios` as a link |
 | **Status is a pill beside the title** | `Invoice #INV-0004347` + `Not Sent` |
-| **Lineage is a visible field** | `Source: MANUAL` on the contract — ours has the full lineage quintuple and shows none of it |
+| **Lineage is a visible field** | `Source: MANUAL` on the contract — ⚠️ see the correction below |
+
+⚠️ **CORRECTION (#382): "ours shows none of it" was wrong.** The journal-entry detail page rendered four of the five lineage fields — `sourceSystem` and `sourceRecordType` in a header badge, `sourceRecordId` and `mappingVersion` in the field grid — plus the frozen `sourcePayload` in a panel below. What it did wrong was **collapse** them: all three places were behind `{x && …}`, so the lineage was invisible on a manual entry and split across three parts of the page on an imported one. No single view of the quintuple existed. Written from the screenshots without checking the page, this row overstated a real problem into a different one. The fix was the rule below, not new fields.
 
 **Copy the "every field shows, even when null" rule specifically.** A CPA reading a contract needs to know that `Auto Renew` is a field that exists and is empty, not wonder whether the screen omitted it. Collapsing empty fields is a consumer-app instinct and it is wrong here.
+
+⚠️ **We had already discovered this rule and not shared it.** Three `Field` components existed, one per detail page, with three signatures and three visual treatments — and the never-blank behaviour was built into exactly one of them (`admin/audit-log/[id]`, `{valueNode ?? value ?? "—"}`), while `recurring-entries/[id]` implemented it by hand at every call site and `journal-entries/[id]` did not implement it at all. The contract was not missing; it was written three times and agreed on nothing. `src/components/ui/field-grid.tsx` is the merge, and `tests/detail-page-contract.test.ts` fails if a page defines its own again.
 
 **Two FX fields, deliberately distinct:** `Exchange Rate Book (USD to USD)` and `Exchange Rate (USD to USD)`. Book rate vs transaction rate as separate stored values. We have the same distinction in `resolveFxRate`'s CLOSE/AVG curves and surface neither on a document.
 

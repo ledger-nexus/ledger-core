@@ -20,6 +20,7 @@ import { getCurrentTenant } from "@/lib/auth/tenant";
 import { canViewAuditLog } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Field, FieldGrid } from "@/components/ui/field-grid";
 import { formatDate } from "@/lib/utils/format";
 
 export default async function AuditLogDetailPage({
@@ -103,12 +104,12 @@ export default async function AuditLogDetailPage({
           <CardTitle>Event</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <FieldGrid columns={2} className="gap-3">
             <Field label="Event ID" value={row.id} mono />
             <Field label="Event type" value={row.eventType} />
             <Field
               label="Outcome"
-              valueNode={
+              value={
                 <Badge
                   tone={
                     row.outcome === "SUCCESS"
@@ -132,7 +133,7 @@ export default async function AuditLogDetailPage({
               value={row.tenantId ?? "(platform — pre-identity event)"}
               mono
             />
-          </dl>
+          </FieldGrid>
         </CardContent>
       </Card>
 
@@ -141,7 +142,7 @@ export default async function AuditLogDetailPage({
           <CardTitle>Actor</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <FieldGrid columns={2} className="gap-3">
             <Field
               label="Email"
               value={row.actorEmail ?? "(system / no actor)"}
@@ -149,26 +150,25 @@ export default async function AuditLogDetailPage({
             />
             <Field
               label="User ID"
-              value={row.actorUserId ?? "—"}
+              value={row.actorUserId}
               mono
             />
-            {row.actor && (
-              <>
-                <Field
-                  label="Display name"
-                  value={row.actor.displayName}
-                />
-                <Field
-                  label="User status"
-                  valueNode={
-                    <Badge tone={row.actor.isActive ? "positive" : "negative"}>
-                      {row.actor.isActive ? "Active" : "Deactivated"}
-                    </Badge>
-                  }
-                />
-              </>
-            )}
-          </dl>
+            {/* ⚠️ These two used to sit behind `{row.actor && …}` and vanish
+                for a system event, so the panel silently changed from four
+                fields to two. An audit record is the one screen where a
+                reader must be able to tell "no actor" from "not shown". */}
+            <Field label="Display name" value={row.actor?.displayName} />
+            <Field
+              label="User status"
+              value={
+                row.actor ? (
+                  <Badge tone={row.actor.isActive ? "positive" : "negative"}>
+                    {row.actor.isActive ? "Active" : "Deactivated"}
+                  </Badge>
+                ) : null
+              }
+            />
+          </FieldGrid>
         </CardContent>
       </Card>
 
@@ -177,18 +177,20 @@ export default async function AuditLogDetailPage({
           <CardTitle>Network</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-1 gap-3">
+          {/* One column at every width, on purpose: a user-agent string is
+              long enough that two columns wrap it into noise. */}
+          <FieldGrid columns={1} className="gap-3">
             <Field
               label="IP address"
-              value={row.ipAddress ?? "—"}
+              value={row.ipAddress}
               mono
             />
             <Field
               label="User agent"
-              value={row.userAgent ?? "—"}
+              value={row.userAgent}
               mono
             />
-          </dl>
+          </FieldGrid>
         </CardContent>
       </Card>
 
@@ -198,14 +200,10 @@ export default async function AuditLogDetailPage({
         </CardHeader>
         <CardContent>
           {row.resource ? (
-            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <FieldGrid columns={2} className="gap-3">
               <Field label="Type" value={row.resource} />
-              <Field
-                label="ID"
-                value={row.resourceId ?? "(none)"}
-                mono
-              />
-            </dl>
+              <Field label="ID" value={row.resourceId} mono />
+            </FieldGrid>
           ) : (
             <p className="text-sm text-ink-500">
               No resource attached. This is typically a session-level event
@@ -272,29 +270,6 @@ export default async function AuditLogDetailPage({
 }
 
 // ─── Small helpers ───────────────────────────────────────────────────────
-
-function Field({
-  label,
-  value,
-  valueNode,
-  mono,
-}: {
-  label: string;
-  value?: string;
-  valueNode?: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div>
-      <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-500">
-        {label}
-      </dt>
-      <dd className={mono ? "mt-0.5 text-sm text-ink-800 font-mono" : "mt-0.5 text-sm text-ink-800"}>
-        {valueNode ?? value ?? "—"}
-      </dd>
-    </div>
-  );
-}
 
 function PermissionDenied({ reason }: { reason: string }) {
   return (

@@ -12,6 +12,7 @@ import { canManageRecurringEntries } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Field, FieldGrid } from "@/components/ui/field-grid";
 import { Decimal } from "@/lib/utils/decimal";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { enumerateDueDates } from "@/lib/accounting/recurring";
@@ -104,15 +105,13 @@ export default async function RecurringDetail({
           <CardTitle>Schedule</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <FieldGrid columns={4} className="text-sm">
             <Field label="Cadence">
               <Badge tone="info">{t.cadence}</Badge>
             </Field>
             <Field label="Start">{formatDate(t.startDate)}</Field>
-            <Field label="End">{t.endDate ? formatDate(t.endDate) : "—"}</Field>
-            <Field label="Last posted">
-              {t.lastPostedDate ? formatDate(t.lastPostedDate) : "—"}
-            </Field>
+            <Field label="End" value={t.endDate ? formatDate(t.endDate) : null} />
+            <Field label="Last posted" value={t.lastPostedDate ? formatDate(t.lastPostedDate) : null} />
             <Field label="Currency">{t.currencyId}</Field>
             <Field label="Entries produced">{producedEntries.length}</Field>
             <Field label="Periods due">
@@ -122,8 +121,8 @@ export default async function RecurringDetail({
                 <span className="text-ink-500">0</span>
               )}
             </Field>
-            <Field label="Created by">{t.createdBy ?? "—"}</Field>
-          </dl>
+            <Field label="Created by" value={t.createdBy} />
+          </FieldGrid>
           {due.length > 0 && admin && (
             <p className="text-xs text-warning mt-3">
               Next {due.length} due date{due.length === 1 ? "" : "s"}:{" "}
@@ -230,11 +229,3 @@ export default async function RecurringDetail({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs uppercase tracking-wide text-ink-500">{label}</dt>
-      <dd className="mt-0.5 text-ink-900">{children}</dd>
-    </div>
-  );
-}
