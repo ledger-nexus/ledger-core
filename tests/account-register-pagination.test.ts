@@ -76,11 +76,24 @@ async function scrubOrphans() {
 }
 
 /**
- * Nine entries across four dates, several sharing a date, several carrying two
- * lines that both hit the register account. That produces 13 register rows
- * with ties in every position of the ordering triple.
+ * Ten entries across five dates, several sharing a date, several carrying two
+ * lines that both hit the register account — 14 register rows with ties in
+ * every position of the ordering triple.
+ *
+ * ⚠️ THE FIRST ENTRY IS DATED LAST, ON PURPOSE. Entry numbers are handed out
+ * in posting order, so a fixture that posts in date order makes `entryNumber`
+ * a perfect proxy for `documentDate` — and then an `olderThan` whose
+ * entryNumber branch forgets to pin the date is INDISTINGUISHABLE from a
+ * correct one. Found by mutating that pin and watching the suite stay green.
+ *
+ * Posting a future-dated entry first (smallest number, latest date) breaks the
+ * proxy: for any line in April, the May line has a SMALLER entry number and a
+ * LATER date, so an unpinned comparison counts it as older and the opening
+ * balance is wrong. This is also just what backdating looks like in real
+ * books — you post March's correction in April.
  */
 const PLAN: { date: string; amounts: number[] }[] = [
+  { date: "2026-05-20", amounts: [7] },
   { date: "2026-01-10", amounts: [100, 250] },
   { date: "2026-01-10", amounts: [75] },
   { date: "2026-01-10", amounts: [40, 60] },
@@ -271,7 +284,7 @@ describe("account register pagination", () => {
       orderBy: ASC,
       select: { lineNo: true, entry: { select: { documentDate: true, entryNumber: true } } },
     });
-    expect(lines.length).toBe(13);
+    expect(lines.length).toBe(14);
 
     const dates = lines.map((l) => l.entry.documentDate.toISOString().slice(0, 10));
     expect(new Set(dates).size).toBeLessThan(dates.length); // same-date ties
@@ -279,13 +292,23 @@ describe("account register pagination", () => {
     const perEntry = new Map<string, number>();
     for (const l of lines) perEntry.set(l.entry.entryNumber, (perEntry.get(l.entry.entryNumber) ?? 0) + 1);
     expect([...perEntry.values()].some((n) => n > 1)).toBe(true); // multi-line entries
+
+    // ⚠️ And entry-number order must DISAGREE with date order, or the
+    // entryNumber branch of `olderThan` is untestable — a fixture posted in
+    // date order makes a broken comparison look correct. See PLAN.
+    const byNumber = [...lines].sort((a, b) =>
+      a.entry.entryNumber < b.entry.entryNumber ? -1 : 1
+    );
+    const datesByNumber = byNumber.map((l) => l.entry.documentDate.getTime());
+    const monotonic = datesByNumber.every((d, i) => i === 0 || d >= datesByNumber[i - 1]);
+    expect(monotonic, "fixture must contain a backdated entry").toBe(false);
   });
 
   it("⚠️ pages produce the same balances as one unpaged accumulation", async () => {
     const naive = await naiveBalances();
     // 4 splits 14 rows into pages whose boundaries fall inside same-date
     // groups — which is exactly where a date-only comparison goes wrong.
-    for (const size of [1, 3, 4, 5, 14, 100]) {
+    for (const size of [1, 3, 4, 5, 13, 14, 100]) {
       const paged = await pagedBalances(size);
       expect(paged, `page size ${size}`).toEqual(naive);
     }
@@ -300,7 +323,7 @@ describe("account register pagination", () => {
     const whole = balanceFromSums(totals._sum, true);
     const naive = await naiveBalances();
     expect(naive[naive.length - 1].balance).toBe(whole.toFixed(2));
-    expect(whole.toFixed(2)).toBe("2660.00"); // 100+250+75+40+60+500+125+375+90+10+20+1000+15
+    expect(whole.toFixed(2)).toBe("2667.00"); // 7+100+250+75+40+60+500+125+375+90+10+20+1000+15
   });
 
   it("an empty register opens at zero rather than throwing", async () => {
