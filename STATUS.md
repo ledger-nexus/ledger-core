@@ -32,6 +32,18 @@ _No active claims._
 
 ## Recent completions
 
+### Session register-pagination · 2026-08-08
+- **Scope**: `/accounts/[code]` — the register's queries were unbounded and its history was unreachable. Found while surveying which build-order phase to take next.
+- **⚠️ THE LIVE DEFECT: there was no way back to line 251.** The page showed the newest 250 with an honest "newest 250 of N" note and no control to go further. Underneath, the 250 was a *display* cap over a **full fetch** — every line ever posted to the account, with joins, accumulated from zero, then `.slice(-250)`.
+- **⚠️ Paging a register is not `skip`/`take`** — a row's balance depends on every row before it. The opening balance is now one `SUM` aggregate over everything older; the page is `take`.
+- **⭐ The test is differential**: every row's balance computed the old way vs. the new way, required equal row-for-row, at page sizes 1/3/4/5/13/14/100 against a real DB.
+- **⚠️⚠️ THE MUTATION EXERCISE FOUND A HOLE IN MY OWN FIXTURE.** Entry numbers are issued in posting order, so a fixture posted in date order makes `entryNumber` a perfect proxy for `documentDate` — and an `olderThan` whose entryNumber branch forgets to pin the date is **indistinguishable from a correct one**. The mutation stayed green. Fixed the FIXTURE: post one future-dated entry first, so it carries the smallest number and the latest date (which is just what backdating looks like). Same mutation now fails at once — `expected "100.00" to be "107.00"`, May's \$7 swept into January's opening balance.
+- **⚠️ My own tenant-scope guard caught my own new query and was right.** The opening-balance aggregate named no tenant, relying on `accountId` being a tenant-resolved uuid. True transitively — and a scoping argument you have to trace through a variable is one nobody re-checks when the query moves. `JournalLine` has a denormalized `tenantId`; it is now named at the query.
+- **⚠️ SELF-INFLICTED, RECORD IT: never run a second vitest process against the shared DB while the full suite is running.** Two `withAuditLogMutable` windows overlapped (`rule "audit_log_no_delete" already exists`) and a 5000ms transaction budget blew at 8053ms in `intercompany-pairing`. Neither is a code defect.
+- **⚠️ Verified over HTTP with a STATED GAP**: balances cumulate correctly (500,000 → 505,000 → 496,500, debit-normal), the newest row's balance equals the Current-balance stat, and `?page=` of `2`/`999`/`abc`/`-4`/`1e9` all clamp without a 500. **A multi-page register was NOT observed in the browser** — the dev DB holds 25 journal lines and the page size is 250.
+- **⚠️ The shared dev DB lost its Northwind data during this session** (544 journal lines → 25) from full-suite cleanups. Not caused by this change; re-seed before any visual QA.
+- **Branch**: fix/account-register-pagination.
+
 ### Session detail-contract · 2026-08-08
 - **Scope**: phase 3 — one detail-page field contract, applied to all three pages that have one.
 - **⚠️⚠️ THE CONTRACT ALREADY EXISTED, THREE TIMES, AGREEING ON NOTHING.** Three `Field` components — `value: string` / `value + valueNode` / `children`; `<div>/<div>` vs `<dt>/<dd>`; 11px vs `text-xs` labels; `text-ink-800` vs `text-ink-900` — and §5's never-blank rule implemented in **exactly one**, `admin/audit-log/[id]`. `recurring-entries/[id]` did it by hand at every call site; `journal-entries/[id]` did not do it at all. The JE grid was also the only one that was not a `<dl>`.
