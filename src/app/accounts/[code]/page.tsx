@@ -10,28 +10,47 @@
 import { notFound } from "next/navigation";
 import { LEDGER_EFFECTIVE_STATUSES } from "@/lib/accounting/types";
 import Link from "next/link";
+import type { Prisma } from "@prisma/client";
 import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { getViewerRole } from "@/lib/auth/authorize";
 import { canEditAccounts } from "@/lib/auth/policy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { DataTable, type Column } from "@/components/ui/data-table";
+import { Pagination } from "@/components/ui/pagination";
 import { Badge } from "@/components/ui/badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatMoney, formatDate, moneyClass } from "@/lib/utils/format";
+import { balanceFromSums, olderThan, withRunningBalance } from "@/lib/accounting/register";
+import { buildUrl, int, parseUrlState, type RawParams, type SurfaceSpec } from "@/lib/url-state";
 import EditAccountForm from "./edit-account-form";
 
-// Registers get long; cap the rendered rows but keep the running balance
-// honest by computing it over EVERY line first (the newest row's balance
-// must equal the account's true balance, not the balance of a page).
-const REGISTER_DISPLAY_LIMIT = 250;
+// One page of the register.
+//
+// ⚠️ THIS USED TO BE A DISPLAY CAP OVER A FULL FETCH. The page read every line
+// ever posted to the account — with its entry and party joins — accumulated
+// the running balance from zero, rendered `.slice(-250)`, and said "newest 250
+// of N". Two things were wrong with that: the query's cost grew with the
+// account's whole history to show a fixed 250 rows, and **there was no way to
+// reach line 251**. "Show me last March" is the most ordinary request an
+// accountant has of a register, and the page could not answer it.
+//
+// Now the balance before a page comes from one aggregate (see
+// src/lib/accounting/register.ts) and the page itself is `take`. Page 1 shows
+// exactly what it showed before.
+const REGISTER_PAGE_SIZE = 250;
+
+/** The register's only parameter. Kept here — no other surface links into it. */
+const REGISTER_SPEC = { page: int(1, { min: 1 }) } satisfies SurfaceSpec;
 
 export default async function AccountDetailPage({
   params,
+  searchParams,
 }: {
   params: { code: string };
+  searchParams: RawParams;
 }) {
   const scope = await getCurrentScope();
   if (!scope) return notFound();
@@ -80,29 +99,64 @@ export default async function AccountDetailPage({
     select: { code: true, name: true },
   });
 
-  // Register: every posting to this account in the CURRENT (entity, book),
-  // oldest first so the running balance accumulates in the order the
-  // ledger actually posted. A shared account (entityId null) collects
-  // lines from many entities/books, so the scope filter is what makes the
-  // running balance match the scope the rest of the page is showing.
-  const lines = await prisma.journalLine.findMany({
-    where: {
-      accountId: account.id,
-      entry: {
-        entity: { code: scope.entityCode },
-        book: { code: scope.bookCode },
-        // Register running balance = ledger truth: pending/void entries
-        // carry lines but must not move the balance.
-        status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
-      },
+  // Register: every posting to this account in the CURRENT (entity, book).
+  // A shared account (entityId null) collects lines from many entities and
+  // books, so the scope filter is what makes the running balance match the
+  // scope the rest of the page is showing.
+  //
+  // ⚠️ THE `tenantId` TERM IS NOT REDUNDANT DECORATION. `accountId` is a uuid
+  // resolved from the tenant-scoped lookup above, so the rows are already this
+  // tenant's transitively — but the register now runs an `aggregate` as well as
+  // a `findMany`, and a scoping argument that has to be traced through a
+  // variable is one nobody re-checks when the query moves. `JournalLine`
+  // carries its own denormalized `tenantId` (this is what /transactions filters
+  // on), so naming it is free, index-friendly, and readable at the query.
+  //
+  // tests/tenant-scope-guard.test.ts flagged the new aggregate for exactly this
+  // — the guard reads the query, not the provenance of `account.id`.
+  const registerWhere: Prisma.JournalLineWhereInput = {
+    tenantId: scope.tenantId,
+    accountId: account.id,
+    entry: {
+      entity: { code: scope.entityCode },
+      book: { code: scope.bookCode },
+      // Register running balance = ledger truth: pending/void entries
+      // carry lines but must not move the balance.
+      status: { in: [...LEDGER_EFFECTIVE_STATUSES] },
     },
+  };
+
+  // Running balance on the account's NORMAL side, so a positive number
+  // always reads as "more of what this account normally holds": for a
+  // bank account (debit-normal) a deposit raises it; for a credit card
+  // (credit-normal) a charge raises it.
+  const normalIsDebit = account.normalBalance === "DEBIT";
+
+  const [totalLines, allTotals] = await Promise.all([
+    prisma.journalLine.count({ where: registerWhere }),
+    // The account's balance, without returning a single line. This is what
+    // the full fetch was really being used for.
+    prisma.journalLine.aggregate({ where: registerWhere, _sum: { debit: true, credit: true } }),
+  ]);
+  const currentBalance = balanceFromSums(allTotals._sum, normalIsDebit);
+
+  const totalPages = Math.max(1, Math.ceil(totalLines / REGISTER_PAGE_SIZE));
+  const registerPage = Math.min(parseUrlState(REGISTER_SPEC, searchParams).page, totalPages);
+
+  // Newest first, because that is how a register reads — page 1 is the most
+  // recent activity and its top row carries the account's current balance.
+  const windowDesc = await prisma.journalLine.findMany({
+    where: registerWhere,
     orderBy: [
-      { entry: { documentDate: "asc" } },
-      { entry: { entryNumber: "asc" } },
-      { lineNo: "asc" },
+      { entry: { documentDate: "desc" } },
+      { entry: { entryNumber: "desc" } },
+      { lineNo: "desc" },
     ],
+    skip: (registerPage - 1) * REGISTER_PAGE_SIZE,
+    take: REGISTER_PAGE_SIZE,
     select: {
       id: true,
+      lineNo: true,
       debit: true,
       credit: true,
       description: true,
@@ -119,23 +173,95 @@ export default async function AccountDetailPage({
     },
   });
 
-  // Running balance on the account's NORMAL side, so a positive number
-  // always reads as "more of what this account normally holds": for a
-  // bank account (debit-normal) a deposit raises it; for a credit card
-  // (credit-normal) a charge raises it. Accumulate oldest→newest, then
-  // reverse for display so the newest posting — carrying the account's
-  // current balance — sits at the top, the way a register reads.
-  const normalIsDebit = account.normalBalance === "DEBIT";
-  let running = new Decimal(0);
-  const rows = lines.map((l) => {
-    const debit = new Decimal(l.debit.toString());
-    const credit = new Decimal(l.credit.toString());
-    running = running.plus(normalIsDebit ? debit.minus(credit) : credit.minus(debit));
-    return { line: l, debit, credit, balance: running };
-  });
-  const currentBalance = running; // balance after the last (newest) line
-  const displayRows = rows.slice(-REGISTER_DISPLAY_LIMIT).reverse();
-  const truncated = rows.length > REGISTER_DISPLAY_LIMIT;
+  // The balance the page opens on: everything strictly older than its oldest
+  // row. ⚠️ The oldest row of a newest-first window is the LAST element, and
+  // the comparison is over the whole ordering triple — see `olderThan`.
+  const oldest = windowDesc[windowDesc.length - 1];
+  const opening = oldest
+    ? balanceFromSums(
+        (
+          await prisma.journalLine.aggregate({
+            where: {
+              // Named at the query, not only inside `registerWhere` — the
+              // tenant-scope guard reads the query it can see, and so does
+              // the next person to move this aggregate somewhere else.
+              tenantId: scope.tenantId,
+              AND: [
+                registerWhere,
+                olderThan({
+                  documentDate: oldest.entry.documentDate,
+                  entryNumber: oldest.entry.entryNumber,
+                  lineNo: oldest.lineNo,
+                }),
+              ],
+            },
+            _sum: { debit: true, credit: true },
+          })
+        )._sum,
+        normalIsDebit
+      )
+    : new Decimal(0);
+
+  // Accumulate oldest→newest inside the window, then reverse for display.
+  const displayRows = withRunningBalance(
+    [...windowDesc].reverse(),
+    opening,
+    normalIsDebit
+  ).reverse();
+
+  const registerUrl = (p: number) =>
+    buildUrl(`/accounts/${account.code}`, REGISTER_SPEC, { page: p });
+
+  type RegisterRow = (typeof displayRows)[number];
+  const REGISTER_COLUMNS: Column<RegisterRow>[] = [
+    {
+      key: "date",
+      label: "Date",
+      cell: (r) => formatDate(r.line.entry.documentDate),
+      cellClassName: "whitespace-nowrap text-ink-500",
+    },
+    {
+      key: "entry",
+      label: "Entry",
+      cell: (r) => (
+        <Link
+          href={`/journal-entries/${r.line.entry.id}`}
+          className="text-link hover:underline"
+        >
+          {r.line.entry.entryNumber}
+        </Link>
+      ),
+      cellClassName: "whitespace-nowrap font-mono text-xs",
+    },
+    {
+      key: "description",
+      label: "Description",
+      cell: (r) => (
+        <>
+          {r.line.description || r.line.entry.memo}
+          {r.line.party?.displayName && (
+            <span className="ml-1 text-ink-500">· {r.line.party.displayName}</span>
+          )}
+          {r.line.entry.source !== "MANUAL" && (
+            <span className="ml-2 inline-flex align-middle">
+              <SourceBadge source={r.line.entry.source} />
+            </span>
+          )}
+        </>
+      ),
+      cellClassName: "text-ink-800",
+    },
+    { key: "debit", label: "Debit", numeric: true, cell: (r) => (r.debit.isZero() ? "" : formatMoney(r.debit)) },
+    { key: "credit", label: "Credit", numeric: true, cell: (r) => (r.credit.isZero() ? "" : formatMoney(r.credit)) },
+    {
+      key: "balance",
+      label: "Balance",
+      numeric: true,
+      // ⚠️ The one column whose colour is data: a balance on the wrong side of
+      // zero for this account type reads red.
+      cell: (r) => <span className={moneyClass(r.balance)}>{formatMoney(r.balance)}</span>,
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -183,7 +309,7 @@ export default async function AccountDetailPage({
                 {formatMoney(currentBalance)}
               </div>
             </div>
-            <Stat label="Postings" value={rows.length.toString()} />
+            <Stat label="Postings" value={totalLines.toString()} />
             <Stat
               label="Parent"
               value={
@@ -210,68 +336,33 @@ export default async function AccountDetailPage({
       <Card>
         <CardHeader>
           <CardTitle>Register</CardTitle>
-          {truncated && (
+          {totalPages > 1 && (
             <span className="text-xs text-ink-500">
-              newest {REGISTER_DISPLAY_LIMIT} of {rows.length} — balance reflects all
+              page {registerPage} of {totalPages} — newest first
             </span>
           )}
         </CardHeader>
         <CardContent>
-          {displayRows.length === 0 ? (
-            <EmptyState
-              title="No activity in this account yet"
-              description={`Nothing has posted to ${account.code} in ${scope.entityCode} / ${scope.bookCode}.`}
+          <DataTable
+            columns={REGISTER_COLUMNS}
+            rows={displayRows}
+            visible={REGISTER_COLUMNS.map((c) => c.key)}
+            getRowKey={(r) => r.line.id}
+            empty={
+              <EmptyState
+                title="No activity in this account yet"
+                description={`Nothing has posted to ${account.code} in ${scope.entityCode} / ${scope.bookCode}.`}
+              />
+            }
+          />
+          {totalLines > 0 && (
+            <Pagination
+              page={registerPage}
+              totalPages={totalPages}
+              totalCount={totalLines}
+              pageSize={REGISTER_PAGE_SIZE}
+              hrefFor={registerUrl}
             />
-          ) : (
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Date</TH>
-                  <TH>Entry</TH>
-                  <TH>Description</TH>
-                  <TH className="text-right">Debit</TH>
-                  <TH className="text-right">Credit</TH>
-                  <TH className="text-right">Balance</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {displayRows.map(({ line, debit, credit, balance }) => (
-                  <TR key={line.id}>
-                    <TD className="whitespace-nowrap text-ink-500">
-                      {formatDate(line.entry.documentDate)}
-                    </TD>
-                    <TD className="whitespace-nowrap font-mono text-xs">
-                      <Link
-                        href={`/journal-entries/${line.entry.id}`}
-                        className="text-link hover:underline"
-                      >
-                        {line.entry.entryNumber}
-                      </Link>
-                    </TD>
-                    <TD className="text-ink-800">
-                      {line.description || line.entry.memo}
-                      {line.party?.displayName && (
-                        <span className="ml-1 text-ink-500">· {line.party.displayName}</span>
-                      )}
-                      {line.entry.source !== "MANUAL" && (
-                        <span className="ml-2 inline-flex align-middle">
-                          <SourceBadge source={line.entry.source} />
-                        </span>
-                      )}
-                    </TD>
-                    <TD className="amount-cell text-right">
-                      {debit.isZero() ? "" : formatMoney(debit)}
-                    </TD>
-                    <TD className="amount-cell text-right">
-                      {credit.isZero() ? "" : formatMoney(credit)}
-                    </TD>
-                    <TD className={`amount-cell text-right ${moneyClass(balance)}`}>
-                      {formatMoney(balance)}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
           )}
         </CardContent>
       </Card>
