@@ -1,5 +1,16 @@
 // Open AR list with per-item apply-payment inline forms.
+//
+// ⚠️ THE WORKLIST IS PAGED, THE TOTALS ARE NOT. `openArBalance` and the item
+// count are computed over every open item in scope; only the rows on screen are
+// fetched. Those have to stay separate — a collections worklist whose "total"
+// silently meant "total of the 50 rows you can see" is a number someone quotes
+// to a customer.
+//
+// Before this, the query had no `take` at all: every OPEN / PARTIAL / REOPENED
+// item in the scope, with its party join, on one page. Bounded by how well the
+// business collects, which is not a bound.
 
+import type { Prisma } from "@prisma/client";
 import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
@@ -9,12 +20,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
 import { MultiBookBanner } from "@/components/multi-book-banner";
 import { formatDate, formatMoney } from "@/lib/utils/format";
+import { buildUrl, int, parseUrlState, type RawParams, type SurfaceSpec } from "@/lib/url-state";
 import { ApplyArPaymentRow } from "./apply-payment-row";
 import { ReassignArRow } from "./reassign-ar-row";
 
-export default async function ArPage() {
+const PAGE_SIZE = 50;
+
+/** The worklist's only parameter. */
+const SPEC = { page: int(1, { min: 1 }) } satisfies SurfaceSpec;
+
+export default async function ArPage({
+  searchParams,
+}: {
+  searchParams: RawParams;
+}) {
   // Tenant-verified scope — raw getScope() would let a hand-edited cookie
   // name another tenant's entity code. getCurrentScope() resolves it
   // against this tenant and pre-resolves entityId/tenantId.
@@ -28,14 +50,27 @@ export default async function ArPage() {
     );
   }
   const tenantFilter = { tenantId: scope.tenantId };
+  // ⚠️ Typed, not `as const` — Prisma's generated filter wants a MUTABLE
+  // string[] and rejects a readonly tuple.
+  const itemWhere: Prisma.ArOpenItemWhereInput = {
+    ...tenantFilter,
+    entity: { code: scope.entityCode },
+    book: { code: scope.bookCode },
+    status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
+  };
+
+  // Counted before the page is resolved, so `?page=` beyond the end clamps to
+  // the last real page instead of rendering an empty worklist that reads as
+  // "nothing outstanding".
+  const totalCount = await prisma.arOpenItem.count({ where: itemWhere });
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const page = Math.min(parseUrlState(SPEC, searchParams).page, totalPages);
+
   const [openItems, total, cashAccounts, users, queues, entityBooks] = await Promise.all([
     prisma.arOpenItem.findMany({
-      where: {
-        ...tenantFilter,
-        entity: { code: scope.entityCode },
-        book: { code: scope.bookCode },
-        status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
-      },
+      where: itemWhere,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
       orderBy: [{ dueDate: "asc" }, { openedDate: "asc" }],
       select: {
         id: true,
@@ -93,7 +128,8 @@ export default async function ArPage() {
       <div>
         <h2 className="text-xl font-semibold text-ink-900">Open Accounts Receivable</h2>
         <p className="text-sm text-ink-500">
-          {scope.entityCode} / {scope.bookCode} · {openItems.length} open items · total{" "}
+          {scope.entityCode} / {scope.bookCode} · {totalCount} open item
+          {totalCount === 1 ? "" : "s"} · total{" "}
           <span className="font-mono">{formatMoney(total)}</span>
         </p>
       </div>
@@ -112,7 +148,7 @@ export default async function ArPage() {
           </span>
         </CardHeader>
         <CardContent>
-          {openItems.length === 0 ? (
+          {totalCount === 0 ? (
             <EmptyState
               title="No open AR items"
               description="All invoices in this scope have been collected, written off, or voided."
@@ -177,6 +213,15 @@ export default async function ArPage() {
                 })}
               </TBody>
             </Table>
+          )}
+          {totalCount > 0 && (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              pageSize={PAGE_SIZE}
+              hrefFor={(p) => buildUrl("/ar", SPEC, { page: p })}
+            />
           )}
         </CardContent>
       </Card>
