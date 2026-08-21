@@ -13,6 +13,39 @@ import {
   str,
   type SurfaceSpec,
 } from "@/lib/url-state";
+import { columnsParam, type ColumnMeta } from "@/lib/surfaces/columns";
+
+/**
+ * The columns this surface can show, and which of them it shows by default.
+ *
+ * ⚠️ METADATA ONLY — no React, no cell renderers. This module is imported by
+ * the income statement to build drill-down links, and it must not drag a page
+ * component into that bundle. The page supplies the cells and TypeScript
+ * requires one per key: `TransactionColumnKey` is derived from this array, so
+ * adding an entry here fails the build until the page can render it. Two lists
+ * that must agree, made into one list plus a compiler error.
+ *
+ * ⚠️ `date` and `entry` are REQUIRED. Hide both and the rows cannot be told
+ * apart — a state a shared link should not be able to put a colleague in.
+ *
+ * `party`, `source` and `lineNo` start hidden and are worth noticing: the
+ * page's query ALREADY SELECTS `source` and `lineNo` and renders neither. We
+ * were paying for two fields and dropping them on the floor; the picker gives
+ * them somewhere to go.
+ */
+export const TRANSACTION_COLUMNS = [
+  { key: "date", label: "Date", required: true },
+  { key: "entry", label: "Entry", required: true },
+  { key: "account", label: "Account" },
+  { key: "debit", label: "Debit" },
+  { key: "credit", label: "Credit" },
+  { key: "description", label: "Description" },
+  { key: "party", label: "Party", defaultHidden: true },
+  { key: "source", label: "Source", defaultHidden: true },
+  { key: "lineNo", label: "Line #", defaultHidden: true },
+] as const satisfies readonly ColumnMeta[];
+
+export type TransactionColumnKey = (typeof TRANSACTION_COLUMNS)[number]["key"];
 
 /**
  * ⚠️ `account` is the chart CODE, not the uuid.
@@ -30,6 +63,9 @@ export const TRANSACTIONS_SPEC = {
   to: isoDate("2026-12-31", { chip: (v) => (v === "2026-12-31" ? null : `To ${v}`) }),
   q: str("", { chip: (v) => (v ? `Search: ${v}` : null) }),
   page: int(1, { min: 1 }),
+  // The column choice is just another parameter, which is what makes the
+  // picker an `<a href>` and makes a saved view capture columns for free.
+  cols: columnsParam(TRANSACTION_COLUMNS),
 } satisfies SurfaceSpec;
 
 export const TRANSACTIONS_PATH = "/transactions";
