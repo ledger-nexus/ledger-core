@@ -277,7 +277,8 @@ export default async function TransactionsPage({
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
+        {/* CardHeader is already `flex items-center justify-between`. */}
+        <CardHeader className="gap-4">
           <CardTitle>Lines</CardTitle>
           <ColumnPicker
             columns={TRANSACTION_COLUMNS}
