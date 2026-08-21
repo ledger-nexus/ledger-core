@@ -5,18 +5,37 @@
 // posts a balanced journal entry) or is excluded. It's the QuickBooks
 // bank-feed loop, native to the ledger.
 
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
 import { Decimal } from "@/lib/utils/decimal";
 import { bestRuleFor, type RuleForMatching } from "@/lib/banking/rules";
 import { findMatchCandidates } from "@/lib/banking/match";
+import { buildUrl, int, parseUrlState, type RawParams, type SurfaceSpec } from "@/lib/url-state";
 import ImportForm from "./import-form";
 import ReviewRow from "./review-row";
 
-export default async function BankingPage() {
+// ⚠️ THIS BOUNDS A QUERY FAN-OUT, NOT JUST A FETCH. Every row in the review
+// queue triggers its own `findMatchCandidates` call (see the enrichment loop
+// below), all issued concurrently through one connection pool. Unpaged, a CSV
+// import of a year of bank activity turned one page render into one database
+// query per imported line. The comment on that loop already said so — "revisit
+// with a windowed batch if inboxes grow" — and this is that window.
+const PAGE_SIZE = 50;
+
+/** The review queue's only parameter. */
+const SPEC = { page: int(1, { min: 1 }) } satisfies SurfaceSpec;
+
+export default async function BankingPage({
+  searchParams,
+}: {
+  searchParams: RawParams;
+}) {
   const scope = await getCurrentScope();
 
   if (!scope) {
@@ -27,6 +46,21 @@ export default async function BankingPage() {
       </div>
     );
   }
+
+  // ⚠️ Typed, not `as const` — Prisma's generated filter wants mutable values.
+  const reviewWhere: Prisma.BankTransactionWhereInput = {
+    tenantId: scope.tenantId,
+    status: "FOR_REVIEW",
+    entity: { code: scope.entityCode },
+    book: { code: scope.bookCode },
+  };
+
+  // Counted before the page resolves, so `?page=` past the end clamps to the
+  // last real page rather than rendering "Nothing to review" at someone who
+  // has plenty to review.
+  const reviewCount = await prisma.bankTransaction.count({ where: reviewWhere });
+  const totalPages = Math.max(1, Math.ceil(reviewCount / PAGE_SIZE));
+  const page = Math.min(parseUrlState(SPEC, searchParams).page, totalPages);
 
   const [bankAccounts, categoryAccounts, forReview, categorizedCount, rules] = await Promise.all([
     // Import targets — the accounts a feed can belong to. Bank/card accounts
@@ -51,12 +85,9 @@ export default async function BankingPage() {
       select: { code: true, name: true, type: true },
     }),
     prisma.bankTransaction.findMany({
-      where: {
-        tenantId: scope.tenantId,
-        status: "FOR_REVIEW",
-        entity: { code: scope.entityCode },
-        book: { code: scope.bookCode },
-      },
+      where: reviewWhere,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
       orderBy: [{ postedDate: "desc" }, { importedAt: "desc" }],
       select: {
         id: true,
@@ -95,9 +126,11 @@ export default async function BankingPage() {
   const bankPickList = bankAccounts.map((a) => ({ code: a.code, name: a.name }));
   const categoryList = categoryAccounts.map((a) => ({ code: a.code, name: a.name }));
 
-  // Suggestions + match candidates per line. Personal-scale inboxes are
-  // small (a statement's worth), so per-line candidate queries are fine;
-  // revisit with a windowed batch if inboxes grow.
+  // Suggestions + match candidates per line — ONE `findMatchCandidates` query
+  // per row, issued concurrently. That fan-out is now bounded by PAGE_SIZE
+  // rather than by how much anyone imported, which is the windowed batch the
+  // previous version of this comment deferred. Rules match in memory (below),
+  // so they cost no query per row.
   const ruleSet: RuleForMatching[] = rules.map((r) => ({
     id: r.id,
     matchText: r.matchText,
@@ -148,12 +181,12 @@ export default async function BankingPage() {
           <div className="flex items-baseline gap-2">
             <CardTitle>For review</CardTitle>
             <span className="text-xs text-ink-500">
-              {forReview.length} in {scope.entityCode} / {scope.bookCode}
+              {reviewCount} in {scope.entityCode} / {scope.bookCode}
             </span>
           </div>
         </CardHeader>
         <CardContent>
-          {forReview.length === 0 ? (
+          {reviewCount === 0 ? (
             <EmptyState
               title="Nothing to review"
               description="Import a CSV above, or you're all caught up — every transaction has been added or excluded."
@@ -186,6 +219,15 @@ export default async function BankingPage() {
                 ))}
               </TBody>
             </Table>
+          )}
+          {reviewCount > 0 && (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={reviewCount}
+              pageSize={PAGE_SIZE}
+              hrefFor={(p) => buildUrl("/banking", SPEC, { page: p })}
+            />
           )}
         </CardContent>
       </Card>

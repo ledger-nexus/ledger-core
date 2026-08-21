@@ -16,7 +16,6 @@
   "ar/page.tsx::user.findMany",
   "banking/page.tsx::account.findMany",
   "banking/page.tsx::bankRule.findMany",
-  "banking/page.tsx::bankTransaction.findMany",
   "close/flux/page.tsx::book.findMany",
   "close/flux/page.tsx::fluxStatement.findMany",
   "close/flux/page.tsx::legalEntity.findMany",

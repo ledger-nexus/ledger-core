@@ -31,6 +31,31 @@ const BASELINE = path.join(__dirname, "fixtures", "unbounded-list-baseline.json"
 
 type Site = string; // "<page path>::<model>.findMany"
 
+/**
+ * Sites where adding `take` would silently BREAK the feature.
+ *
+ * ⚠️ These are the reason a bare baseline is dangerous. A list of unbounded
+ * queries invites someone to work down it adding `take`, and for these three
+ * that produces no error, no failing test, and a wrong answer:
+ *
+ *   - an aging report that pages has to bucket the items it never read;
+ *   - `BankRule.matchText` is an ENCRYPTED column with no search hash
+ *     (src/lib/db/encrypted-fields-extension.ts), so rule matching happens in
+ *     JS after decryption. `take: 100` does not page the rules — it turns
+ *     rules 101+ off, and the only symptom is a suggestion that stops
+ *     appearing. This is a third second-order effect of encrypting a column,
+ *     after voiding `@unique` and breaking `contains`: it removes the ability
+ *     to bound the query that reads it.
+ */
+const NEVER_PAGE: Record<Site, string> = {
+  "reports/ar-aging/page.tsx::arOpenItem.findMany":
+    "an aging report buckets every open item; a page would age only what it read",
+  "reports/ap-aging/page.tsx::apOpenItem.findMany":
+    "same — the buckets are the report",
+  "banking/page.tsx::bankRule.findMany":
+    "matchText is encrypted with no search hash, so matching is in-memory over ALL rules; a take would silently disable the rest",
+};
+
 function pageFiles(dir: string): string[] {
   const out: string[] = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -115,11 +140,22 @@ describe("unbounded list queries", () => {
     expect(stale, "baseline entries no longer present — re-run with UPDATE_UNBOUNDED_LIST_BASELINE=1").toEqual([]);
   });
 
-  it("⚠️ the AR and AP worklists are paged", () => {
-    // Named explicitly rather than left to the baseline, because these two are
-    // the reason the guard exists: they are the surfaces whose row count grows
-    // with how much the business is owed, which is not a bound.
+  it("⚠️ the operational worklists are paged", () => {
+    // Named explicitly rather than left to the baseline, because these are the
+    // surfaces the guard exists for: their row count grows with how much the
+    // business is owed, owes, or has imported — none of which is a bound.
     expect(unbounded).not.toContain("ar/page.tsx::arOpenItem.findMany");
     expect(unbounded).not.toContain("ap/page.tsx::apOpenItem.findMany");
+    expect(unbounded).not.toContain("banking/page.tsx::bankTransaction.findMany");
+  });
+
+  it("⚠️ the sites that MUST stay unbounded are still in the baseline", () => {
+    // A baseline of 41 unbounded sites reads like a to-do list, and for three
+    // of them "fixing" it would BREAK the feature silently. Recorded here with
+    // the reason, so the next person to work down the list finds the argument
+    // instead of rediscovering it after shipping.
+    for (const [site, why] of Object.entries(NEVER_PAGE)) {
+      expect(unbounded, `${site} must stay unbounded — ${why}`).toContain(site);
+    }
   });
 });
