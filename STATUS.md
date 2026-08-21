@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session banking-review · started 2026-08-21 10:05 · heartbeat 10:05
+- **Scope**: `/banking`'s FOR_REVIEW queue is the last genuinely volume-bearing unpaged list. Also recording the sites that must NEVER be paged, so the guard's baseline is not read as a to-do list.
+- **Files / globs**: `src/app/banking/**`, `tests/unbounded-list-query-guard.test.ts`, `tests/fixtures/unbounded-list-baseline.json`, `STATUS.md`, `PROJECT_STATUS.md`
+- **Branch**: fix/banking-review-pagination
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
 
 ---
 
