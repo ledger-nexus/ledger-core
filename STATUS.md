@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session data-table · started 2026-08-08 21:15 · heartbeat 21:15
+- **Scope**: phase 1 finish — a `<DataTable>` column contract (alignment declared once per column, not per cell in 183 places) plus a URL-driven column picker. Reference migration: `/transactions`.
+- **Files / globs**: `src/lib/surfaces/columns.ts`, `src/components/ui/data-table.tsx`, `src/lib/surfaces/transactions.ts`, `src/app/transactions/**`, `src/app/recurring-entries/**` (alignment fixes), `tests/data-table-columns.test.ts`, `tests/table-alignment-guard.test.ts`, `STATUS.md`, `PROJECT_STATUS.md`
+- **Branch**: feat/data-table-contract
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
 
 ---
 
