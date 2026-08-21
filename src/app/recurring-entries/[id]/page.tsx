@@ -145,7 +145,7 @@ export default async function RecurringDetail({
           <Table>
             <THead>
               <TR>
-                <TH>Line</TH>
+                <TH className="text-right">Line</TH>
                 <TH>Account</TH>
                 <TH>Description</TH>
                 <TH className="text-right">Debit</TH>

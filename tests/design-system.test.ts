@@ -83,11 +83,12 @@ const SURFACES = {
  */
 const NON_TEXT_EXEMPT = new Set([
   "src/app/layout.tsx:text-ink-300",
-  "src/app/journal-entries/page.tsx:text-ink-300",
-  // Disabled Prev/Next on the line-level transactions list — same pattern,
-  // same justification, added with that page rather than inherited by a path
-  // prefix. Adding the entry is deliberately a visible edit.
-  "src/app/transactions/page.tsx:text-ink-300",
+  // ⚠️ THIS ENTRY REPLACED TWO. `/journal-entries` and `/transactions` each
+  // carried their own exemption for the same disabled Prev/Next markup,
+  // because each had written the pager itself. Both now render
+  // <Pagination/>, so the pattern has one home and one justification instead
+  // of two copies drifting apart.
+  "src/components/ui/pagination.tsx:text-ink-300",
   "src/app/close/tasks/page.tsx:text-ink-300",
   "src/app/close/alerts/page.tsx:text-ink-300",
   "src/app/admin/audit-log/page.tsx:text-ink-300",

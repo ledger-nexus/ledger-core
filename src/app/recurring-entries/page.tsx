@@ -125,10 +125,13 @@ export default async function RecurringEntriesPage() {
                   <TH>Memo</TH>
                   <TH>Scope</TH>
                   <TH>Cadence</TH>
-                  <TH>Lines</TH>
+                  {/* Right, because the cells under them are. Both headers sat
+                      left of their own numbers until the table scan in
+                      src/lib/surfaces/columns.ts found them. */}
+                  <TH className="text-right">Lines</TH>
                   <TH>Start</TH>
                   <TH>Last posted</TH>
-                  <TH>Due</TH>
+                  <TH className="text-right">Due</TH>
                   <TH>Status</TH>
                   {admin && <TH>Actions</TH>}
                 </TR>
