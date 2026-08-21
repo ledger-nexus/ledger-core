@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session ar-ap-pagination · started 2026-08-21 08:40 · heartbeat 08:40
+- **Scope**: the AR and AP workbenches render every open item with no pagination — the volume-bearing half of the unbounded-query survey that produced #383. Also restoring the dev DB's Northwind seed (544 → 25 journal lines during the #383 session).
+- **Files / globs**: `src/app/ar/**`, `src/app/ap/**`, `tests/ar-ap-pagination.test.ts`, `STATUS.md`, `PROJECT_STATUS.md`
+- **Branch**: fix/ar-ap-pagination
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
 
 ---
 
