@@ -653,6 +653,7 @@ async function runMonthEndRunners(prisma: PrismaClient) {
       });
       if ((ACCRUAL_BOOKS as readonly string[]).includes(bookCode)) {
         await runStraightLineRecognition(prisma, {
+          tenantId: await getDefaultTenantId(prisma),
           entityCode: ENTITY_CODE,
           bookCode,
           throughDate,
