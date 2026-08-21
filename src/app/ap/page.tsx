@@ -1,5 +1,6 @@
 // Open AP list with per-item pay-bill inline forms.
 
+import type { Prisma } from "@prisma/client";
 import { Decimal } from "@/lib/utils/decimal";
 import { prisma } from "@/lib/db";
 import { getCurrentScope } from "@/lib/scope";
@@ -9,12 +10,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
 import { MultiBookBanner } from "@/components/multi-book-banner";
 import { formatDate, formatMoney } from "@/lib/utils/format";
+import { buildUrl, int, parseUrlState, type RawParams, type SurfaceSpec } from "@/lib/url-state";
 import { ApplyApPaymentRow } from "./apply-payment-row";
 import { ReassignApRow } from "./reassign-ap-row";
 
-export default async function ApPage() {
+const PAGE_SIZE = 50;
+
+/** The worklist's only parameter. */
+const SPEC = { page: int(1, { min: 1 }) } satisfies SurfaceSpec;
+
+export default async function ApPage({
+  searchParams,
+}: {
+  searchParams: RawParams;
+}) {
   // Tenant-verified scope (see AR page for the rationale).
   const scope = await getCurrentScope();
   if (!scope) {
@@ -26,14 +38,27 @@ export default async function ApPage() {
     );
   }
   const tenantFilter = { tenantId: scope.tenantId };
+  // ⚠️ Typed, not `as const` — Prisma's generated filter wants a MUTABLE
+  // string[] and rejects a readonly tuple.
+  const itemWhere: Prisma.ApOpenItemWhereInput = {
+    ...tenantFilter,
+    entity: { code: scope.entityCode },
+    book: { code: scope.bookCode },
+    status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
+  };
+
+  // Counted before the page is resolved, so `?page=` beyond the end clamps to
+  // the last real page instead of rendering an empty worklist that reads as
+  // "nothing outstanding".
+  const totalCount = await prisma.apOpenItem.count({ where: itemWhere });
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const page = Math.min(parseUrlState(SPEC, searchParams).page, totalPages);
+
   const [openItems, total, cashAccounts, users, queues, entityBooks] = await Promise.all([
     prisma.apOpenItem.findMany({
-      where: {
-        ...tenantFilter,
-        entity: { code: scope.entityCode },
-        book: { code: scope.bookCode },
-        status: { in: ["OPEN", "PARTIAL", "REOPENED"] },
-      },
+      where: itemWhere,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
       orderBy: [{ dueDate: "asc" }, { openedDate: "asc" }],
       select: {
         id: true,
@@ -88,7 +113,8 @@ export default async function ApPage() {
       <div>
         <h2 className="text-xl font-semibold text-ink-900">Open Accounts Payable</h2>
         <p className="text-sm text-ink-500">
-          {scope.entityCode} / {scope.bookCode} · {openItems.length} open bills · total{" "}
+          {scope.entityCode} / {scope.bookCode} · {totalCount} open bill
+          {totalCount === 1 ? "" : "s"} · total{" "}
           <span className="font-mono">{formatMoney(total)}</span>
         </p>
       </div>
@@ -107,7 +133,7 @@ export default async function ApPage() {
           </span>
         </CardHeader>
         <CardContent>
-          {openItems.length === 0 ? (
+          {totalCount === 0 ? (
             <EmptyState
               title="No open AP items"
               description="All vendor bills in this scope have been paid, written off, or voided."
@@ -172,6 +198,15 @@ export default async function ApPage() {
                 })}
               </TBody>
             </Table>
+          )}
+          {totalCount > 0 && (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              pageSize={PAGE_SIZE}
+              hrefFor={(p) => buildUrl("/ap", SPEC, { page: p })}
+            />
           )}
         </CardContent>
       </Card>

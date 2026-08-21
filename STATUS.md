@@ -32,6 +32,16 @@ _No active claims._
 
 ## Recent completions
 
+### Session ar-ap-pagination · 2026-08-21
+- **Scope**: `/ar` and `/ap` fetched every open item in scope with no `take` — the volume-bearing half of #383's survey. Both paged at 50.
+- **⚠️ THE TRAP WAS THE HEADER, NOT THE QUERY.** Both printed `{openItems.length} open items`; paginate naively and that silently becomes "the 50 you can see", on a collections screen, beside a total someone quotes to a customer. The count is now its own `count()`; `openArBalance` was already independent.
+- **⭐ OBSERVED, NOT ARGUED**: page size temporarily set to 2 against the four seeded Northwind invoices — page 1 `Showing 1–2 of 4`, pager `1 / 2`, refs `INV-ACME-APR, INV-ACME-MAY`; page 2 `Showing 3–4 of 4`, pager `2 / 2`, refs `INV-GLOBEX-2026-Q2, INV-ACME-JUN`. **No overlap, no gap.** `?page=3` / `?page=99` clamp to page 2; header still reads **"4 open items · total 40,000.00"** on page 1. Constant restored, tree confirmed clean.
+- **⚠️ The durable artifact is the ratchet.** `tests/unbounded-list-query-guard.test.ts` records every `findMany` with no `take` on a table-rendering page — **42 sites, down from 46** — and fails on new ones. It deliberately does NOT classify volume-bearing models: that list is not derivable from the schema, and a hand-written one never fails, it just stops covering what came later. Both directions proved (new site fails; a fixed site not removed from the baseline fails the staleness check).
+- **⚠️ Left unpaged on purpose**: the two aging REPORTS (an aging report must see every item). **Left unpaged and worth a look**: `banking/page.tsx::bankTransaction.findMany`.
+- **⚠️ `as const` on a Prisma status filter does not compile** — the generated `where` wants a mutable `string[]`, not a readonly tuple. Annotate with `Prisma.ArOpenItemWhereInput` instead.
+- **Restored the shared dev DB** (544 journal lines → 25 during the #383 session): `scripts/reseed-northwind.ts` is additive and idempotent → JE=182, AR=21, RC=1, FA=1.
+- **Branch**: fix/ar-ap-pagination.
+
 ### Session register-pagination · 2026-08-08
 - **Scope**: `/accounts/[code]` — the register's queries were unbounded and its history was unreachable. Found while surveying which build-order phase to take next.
 - **⚠️ THE LIVE DEFECT: there was no way back to line 251.** The page showed the newest 250 with an honest "newest 250 of N" note and no control to go further. Underneath, the 250 was a *display* cap over a **full fetch** — every line ever posted to the account, with joins, accumulated from zero, then `.slice(-250)`.
