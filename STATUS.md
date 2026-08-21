@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session detail-contract · started 2026-08-08 22:05 · heartbeat 22:05
+- **Scope**: phase 3 — one detail-page field contract. Three `Field` components exist, with three signatures and three visual treatments; the never-blank rule is implemented in exactly one of them.
+- **Files / globs**: `src/lib/utils/field-display.ts`, `src/components/ui/field-grid.tsx`, `src/app/journal-entries/[id]/**`, `src/app/admin/audit-log/[id]/**`, `src/app/recurring-entries/[id]/**`, `tests/field-display.test.ts`, `tests/detail-page-contract.test.ts`, `docs/design/campfire-product-surface.md`, `STATUS.md`, `PROJECT_STATUS.md`
+- **Branch**: feat/detail-page-contract
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
 
 ---
 
