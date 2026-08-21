@@ -105,7 +105,7 @@ export default async function RecurringDetail({
           <CardTitle>Schedule</CardTitle>
         </CardHeader>
         <CardContent>
-          <FieldGrid columns={4} className="md:grid-cols-4 text-sm">
+          <FieldGrid columns={4} className="text-sm">
             <Field label="Cadence">
               <Badge tone="info">{t.cadence}</Badge>
             </Field>

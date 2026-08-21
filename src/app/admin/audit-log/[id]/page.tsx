@@ -104,7 +104,7 @@ export default async function AuditLogDetailPage({
           <CardTitle>Event</CardTitle>
         </CardHeader>
         <CardContent>
-          <FieldGrid columns={2} className="grid-cols-1 gap-3">
+          <FieldGrid columns={2} className="gap-3">
             <Field label="Event ID" value={row.id} mono />
             <Field label="Event type" value={row.eventType} />
             <Field
@@ -142,7 +142,7 @@ export default async function AuditLogDetailPage({
           <CardTitle>Actor</CardTitle>
         </CardHeader>
         <CardContent>
-          <FieldGrid columns={2} className="grid-cols-1 gap-3">
+          <FieldGrid columns={2} className="gap-3">
             <Field
               label="Email"
               value={row.actorEmail ?? "(system / no actor)"}
@@ -177,7 +177,9 @@ export default async function AuditLogDetailPage({
           <CardTitle>Network</CardTitle>
         </CardHeader>
         <CardContent>
-          <FieldGrid columns={2} className="grid-cols-1 gap-3">
+          {/* One column at every width, on purpose: a user-agent string is
+              long enough that two columns wrap it into noise. */}
+          <FieldGrid columns={1} className="gap-3">
             <Field
               label="IP address"
               value={row.ipAddress}
@@ -198,13 +200,9 @@ export default async function AuditLogDetailPage({
         </CardHeader>
         <CardContent>
           {row.resource ? (
-            <FieldGrid columns={2} className="grid-cols-1 gap-3">
+            <FieldGrid columns={2} className="gap-3">
               <Field label="Type" value={row.resource} />
-              <Field
-                label="ID"
-                value={row.resourceId ?? "(none)"}
-                mono
-              />
+              <Field label="ID" value={row.resourceId} mono />
             </FieldGrid>
           ) : (
             <p className="text-sm text-ink-500">

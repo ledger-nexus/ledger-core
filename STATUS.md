@@ -26,15 +26,21 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session detail-contract · started 2026-08-08 22:05 · heartbeat 22:05
-- **Scope**: phase 3 — one detail-page field contract. Three `Field` components exist, with three signatures and three visual treatments; the never-blank rule is implemented in exactly one of them.
-- **Files / globs**: `src/lib/utils/field-display.ts`, `src/components/ui/field-grid.tsx`, `src/app/journal-entries/[id]/**`, `src/app/admin/audit-log/[id]/**`, `src/app/recurring-entries/[id]/**`, `tests/field-display.test.ts`, `tests/detail-page-contract.test.ts`, `docs/design/campfire-product-surface.md`, `STATUS.md`, `PROJECT_STATUS.md`
-- **Branch**: feat/detail-page-contract
-- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session detail-contract · 2026-08-08
+- **Scope**: phase 3 — one detail-page field contract, applied to all three pages that have one.
+- **⚠️⚠️ THE CONTRACT ALREADY EXISTED, THREE TIMES, AGREEING ON NOTHING.** Three `Field` components — `value: string` / `value + valueNode` / `children`; `<div>/<div>` vs `<dt>/<dd>`; 11px vs `text-xs` labels; `text-ink-800` vs `text-ink-900` — and §5's never-blank rule implemented in **exactly one**, `admin/audit-log/[id]`. `recurring-entries/[id]` did it by hand at every call site; `journal-entries/[id]` did not do it at all. The JE grid was also the only one that was not a `<dl>`.
+- **⚠️ Six fields collapsed when empty.** `{entry.sourceRecordId && <Field/>}` makes "this entry has not been reversed" and "this screen does not show reversals" render identically. **⭐ Now 13 fields on a journal entry whether manual or imported** (8 dashes vs 4), and **14 on an audit record with or without an actor** — the no-actor case used to drop Display name and User status silently. Verified over HTTP on one of each.
+- **⚠️ `isEmptyFieldValue` exists because the obvious versions are WRONG ON A LEDGER.** `value || "—"` turns **0** into a dash, and 0 is an answer. Same for `false` (`Auto renew: false` is not "unfilled") and `NaN` (a bug upstream that must stay visible). The falsy-shortcut mutation fails four assertions at once. Confirmed live: `Entries produced 0`, `Periods due 0` render as `0`.
+- **⚠️ A ternary is not a collapse, and the guard encodes that** rather than exempting the file: `{row.resource ? <FieldGrid/> : <p>No resource attached…</p>}` renders an explanation; `&&` renders nothing. The scanner matches on **parens** not braces (braces are everywhere in JSX, parens almost never in prose) and carries a positive control plus a known-bad sample, so green means "no collapses" not "the pattern never matches".
+- **⚠️ A regression caught by reading the RENDERED page, not the types.** The first `FieldGrid` took only the wide column count and let callers pass the narrow one via `className` — which silently made the audit log's deliberately single-column Network card (IP address, user agent) two columns, because `grid-cols-1` does not conflict with `sm:grid-cols-2` and tailwind-merge correctly kept both. The count now carries its own narrow behaviour; no caller passes a `grid-cols-*` override.
+- **⚠️ A CORRECTION TO THE DESIGN DOC.** §5 claimed "ours has the full lineage quintuple and shows none of it". **False** — four of five were rendered, across three conditional places (a header badge, two grid fields, a payload panel), so no single view existed. Written from screenshots without opening the page. The row now carries the correction inline.
+- **Branch**: feat/detail-page-contract.
 
 ### Session data-table · 2026-08-08
 - **Scope**: the last of phase 1 — a `<DataTable>` column contract, a column picker, one pagination component. Reference migration: `/transactions`.

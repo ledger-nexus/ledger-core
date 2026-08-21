@@ -69,31 +69,39 @@ export function Field({ label, value, children, mono, hint, className }: FieldPr
 
 export interface FieldGridProps {
   /** §5's shape is three columns; ours vary by page, so it is a prop. */
-  columns?: 2 | 3 | 4;
+  columns?: 1 | 2 | 3 | 4;
   children: ReactNode;
   className?: string;
 }
 
 /**
- * A `<dl>`, because that is what a list of label/value pairs is. All three
- * pre-existing grids were doing this except the journal-entry one, which used
+ * The narrow and wide layout for each column count.
+ *
+ * ⚠️ WRITTEN OUT, NOT INTERPOLATED. Tailwind scans source text, so
+ * `sm:grid-cols-${columns}` produces no CSS at all — the exact failure #359
+ * found with `bg-warning/5`, where classes were in use for a token the config
+ * did not define and the callout rendered untinted.
+ *
+ * ⚠️ THE COLUMN COUNT INCLUDES ITS OWN NARROW BEHAVIOUR, so callers never pass
+ * a `grid-cols-*` override. The first version took only the wide count and let
+ * pages supply the narrow one through `className` — which silently turned the
+ * audit log's deliberately single-column Network card (IP address, user agent:
+ * long strings) into two columns at `sm`, because `grid-cols-1` in a className
+ * does not conflict with `sm:grid-cols-2` and tailwind-merge correctly kept
+ * both. Caught by reading the rendered page, not by the types.
+ */
+const GRID = {
+  1: "grid-cols-1",
+  2: "grid-cols-1 sm:grid-cols-2",
+  3: "grid-cols-2 sm:grid-cols-3",
+  4: "grid-cols-2 sm:grid-cols-4",
+} as const;
+
+/**
+ * A `<dl>`, because that is what a list of label/value pairs is. Two of the
+ * three pre-existing grids were already doing this; the journal-entry one used
  * plain divs and therefore told a screen reader nothing about the pairing.
  */
 export function FieldGrid({ columns = 3, children, className }: FieldGridProps) {
-  return (
-    <dl
-      className={cn(
-        "grid grid-cols-2 gap-4",
-        // Written out rather than interpolated: Tailwind scans source text, so
-        // `sm:grid-cols-${columns}` produces no CSS at all — the exact failure
-        // #359 found with `bg-warning/5`.
-        columns === 2 && "sm:grid-cols-2",
-        columns === 3 && "sm:grid-cols-3",
-        columns === 4 && "sm:grid-cols-4",
-        className
-      )}
-    >
-      {children}
-    </dl>
-  );
+  return <dl className={cn("grid gap-4", GRID[columns], className)}>{children}</dl>;
 }
