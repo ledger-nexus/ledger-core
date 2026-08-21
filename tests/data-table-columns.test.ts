@@ -178,7 +178,10 @@ describe("the transactions surface's own columns", () => {
   });
 
   it("declares at least one required column", () => {
-    expect(TRANSACTION_COLUMNS.some((c) => c.required)).toBe(true);
+    // Widened, not cast: `as const` gives each entry its own literal type, and
+    // the ones without `required` genuinely lack the property.
+    const metas: readonly ColumnMeta[] = TRANSACTION_COLUMNS;
+    expect(metas.some((c) => c.required)).toBe(true);
   });
 
   it("keeps the drill-down href free of a column parameter", () => {

@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
 import { formatDate, formatMoney } from "@/lib/utils/format";
 import { FilterChips } from "@/components/ui/filter-chips";
 import { SavedViews } from "@/components/ui/saved-views";
@@ -291,42 +292,18 @@ export default async function JournalEntriesPage({
               </TBody>
             </Table>
           )}
-          {entries.length > 0 && totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-between text-sm text-ink-500">
-              <span>
-                Showing {(currentPage - 1) * PAGE_SIZE + 1}–
-                {Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount}
-              </span>
-              <div className="flex items-center gap-2">
-                {currentPage > 1 ? (
-                  <Link
-                    href={pageUrl(currentPage - 1)}
-                    className="rounded-md border border-ink-200 px-3 py-1.5 hover:bg-ink-50"
-                  >
-                    ← Prev
-                  </Link>
-                ) : (
-                  <span className="rounded-md border border-ink-200 px-3 py-1.5 text-ink-300">
-                    ← Prev
-                  </span>
-                )}
-                <span className="font-mono text-xs">
-                  {currentPage} / {totalPages}
-                </span>
-                {currentPage < totalPages ? (
-                  <Link
-                    href={pageUrl(currentPage + 1)}
-                    className="rounded-md border border-ink-200 px-3 py-1.5 hover:bg-ink-50"
-                  >
-                    Next →
-                  </Link>
-                ) : (
-                  <span className="rounded-md border border-ink-200 px-3 py-1.5 text-ink-300">
-                    Next →
-                  </span>
-                )}
-              </div>
-            </div>
+          {/* ⚠️ The "Showing 1–12 of 12" line now renders on a single page too.
+              It used to be gated behind `totalPages > 1` here and was not on
+              /transactions — one of the two divergences that came out of the
+              same block being written twice. */}
+          {entries.length > 0 && (
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              pageSize={PAGE_SIZE}
+              hrefFor={pageUrl}
+            />
           )}
         </CardContent>
       </Card>
