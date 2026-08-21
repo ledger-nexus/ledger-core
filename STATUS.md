@@ -26,15 +26,21 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-### Session banking-review · started 2026-08-21 10:05 · heartbeat 10:05
-- **Scope**: `/banking`'s FOR_REVIEW queue is the last genuinely volume-bearing unpaged list. Also recording the sites that must NEVER be paged, so the guard's baseline is not read as a to-do list.
-- **Files / globs**: `src/app/banking/**`, `tests/unbounded-list-query-guard.test.ts`, `tests/fixtures/unbounded-list-baseline.json`, `STATUS.md`, `PROJECT_STATUS.md`
-- **Branch**: fix/banking-review-pagination
-- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
+_No active claims._
 
 ---
 
 ## Recent completions
+
+### Session banking-review · 2026-08-21
+- **Scope**: `/banking`'s For-review queue — the last genuinely volume-bearing unpaged list. Paged at 50.
+- **⚠️ IT WAS A QUERY FAN-OUT, NOT JUST A LONG LIST.** Every queue row triggers its own `findMatchCandidates`, and that helper issues **two** queries (`journalLine.findMany` + `bankTransaction.findMany`), all fired concurrently by a `Promise.all` over the whole queue. Unpaged, importing a year of bank activity made one page render **2N** database queries. The loop's own comment deferred exactly this ("revisit with a windowed batch if inboxes grow"); the fan-out is now capped at `2 × PAGE_SIZE`.
+- **⭐ OBSERVED**: page size temporarily 2 against three seeded lines — page 1 `Showing 1–2 of 3`, pager `1 / 2`, `MONTHLY SERVICE FEE, LEASE PAYMENT`; page 2 `Showing 3–3 of 3`, pager `2 / 2`, `CHEQUE 1042`. No overlap, no gap; `?page=9` clamps; header still reads **"For review 3"**. Constant restored, tree clean.
+- **⚠️⚠️ A BARE BASELINE OF UNBOUNDED SITES IS DANGEROUS.** It reads as a to-do list, and for three of 41 entries "fixing" it gives no error and a wrong answer. `NEVER_PAGE` records those three with reasons, asserted still present: both aging REPORTS (a page would age only what it read), and **`bankRule.findMany` — `BankRule.matchText` is ENCRYPTED with no search hash**, so matching is in-memory over ALL rules. `take: 100` would not page them; it would turn rules 101+ **off**, symptom being a suggestion that quietly stops appearing.
+- **⚠️ A THIRD second-order effect of encrypting a column** — after voiding `@unique` and breaking `contains`: it removes the ability to BOUND the query that reads it. Proved by adding that `take` and watching the guard fail with the reason printed inline.
+- **⚠️ Guard scope limit, stated**: it scans `src/app/**/page.tsx` only, so a fan-out living in `src/lib` — exactly what this fixed — is invisible to it.
+- **Baseline 42 → 41.**
+- **Branch**: fix/banking-review-pagination.
 
 ### Session ar-ap-pagination · 2026-08-21
 - **Scope**: `/ar` and `/ap` fetched every open item in scope with no `take` — the volume-bearing half of #383's survey. Both paged at 50.
