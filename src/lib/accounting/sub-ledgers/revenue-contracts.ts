@@ -139,6 +139,22 @@ export async function createRevenueContract(
 export async function runStraightLineRecognition(
   prisma: PrismaClient,
   input: {
+    /**
+     * Authoritative tenant scope. Required, matching the precedent
+     * deficiency #28 set and #32 applied to the four sub-ledger writers.
+     *
+     * ⚠️ THIS QUERY WAS MISSED BY #32, IN A FILE #32 EDITED. That sweep
+     * fixed `legalEntity.findFirstOrThrow({ where: { code } })` in this
+     * module and four others; this runner resolves CONTRACTS directly —
+     * `revenueContract.findMany({ where: { entity: { code } } })` — so it
+     * did not match the pattern being swept and kept resolving by entity
+     * code alone. Entity codes are unique per (tenantId, code), so a code
+     * two tenants share meant recognizing revenue against the wrong
+     * tenant's contracts. Fixing the shape you searched for is not the
+     * same as fixing the defect class, which is exactly the criticism
+     * #32 made of #28's remediation.
+     */
+    tenantId: string;
     entityCode: string;
     bookCode: string;
     throughDate: Date;
@@ -152,7 +168,8 @@ export async function runStraightLineRecognition(
 
   const contracts = await prisma.revenueContract.findMany({
     where: {
-      entity: { code: input.entityCode },
+      tenantId: input.tenantId,
+      entity: { tenantId: input.tenantId, code: input.entityCode },
       status: "ACTIVE",
     },
     include: {

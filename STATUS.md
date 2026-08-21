@@ -32,6 +32,15 @@ _No active claims._
 
 ## Recent completions
 
+### Session decision-prep · 2026-08-08
+- **Scope**: "do what you can" on the three open decisions. Preparing the ASC 606 contract-fields one turned up a live defect, so that got fixed instead.
+- **⚠️⚠️ #32's REMEDIATION WAS ITSELF INCOMPLETE, in a file #32 edited.** `runStraightLineRecognition` resolved contracts by entity code alone. #32 swept `legalEntity.findFirstOrThrow({ where: { code } })`; this runner queries CONTRACTS directly, so it never matched the shape being grepped. **Same error I criticised in #28's remediation, one PR later, by me.** Logged as deficiency **#33**; #32 annotated.
+- **Demonstrated, and it is the worst finding today because it is money**: with the fix reverted, tenant A's run reported **5400.00** instead of **600.00** — sweeping in tenant B's contract — and B's performance obligation carried **4800** `recognizedToDate` from a run B never requested. Revenue recognized against the wrong tenant's books.
+- **⚠️ The tenant-scope guard cannot catch this family.** It classifies a `where` naming `entity:` as bounded and excludes it — right nearly everywhere, wrong exactly where entity codes collide across tenants. Reclassifying would flag 83 sites, most fine. Noted, not changed.
+- **⚠️ Found, NOT fixed — for the ASC 606 decision**: `RecognitionPattern` has four values and the runner implements **one**. `POINT_IN_TIME`, `OVER_TIME_USAGE` and `OVER_TIME_MILESTONE` are accepted by the model and silently `continue`d. A second silent skip: `if (!po.endDate) continue` — and `endDate` is nullable, so an **evergreen** obligation recognizes nothing, silently. Adding an `evergreen` flag before fixing that would ship a feature that appears to work and recognizes $0.
+- **So decision 3 is not "add ~10 commercial fields"**: 5 are CRM metadata, 2 are derived, 5 are dimensions we now have a UI for — and three of four recognition patterns are inert before any of them matter.
+- **Branch**: docs/decision-prep (misnamed — it carries the fix).
+
 ### Session dimension-admin · 2026-08-08
 - **Scope**: phase 4 — a UI over the dimension engine, the seam `CLAUDE.md` calls "empty since v0.2". It was never empty in the schema; it was invisible. `/dimensions` lists groups, their values, and how many DimensionSets reference each, plus create forms for both.
 - **⚠️⚠️ THE REAL FINDING: `Dimension.isRequired` AND `appliesToAccountTypes` ARE WRITTEN AND READ BY NOTHING.** The NetSuite mapper sets them; `postJournalEntry` contains **zero** dimension references of any kind. The NS importer attaches `dimensionSetId` to line rows AFTER the entry is written ("Attach dimensionSetId to the line rows post-creation"). So a required-dimension rule is not merely unenforced — **there is no point in the canonical write path where it could run.**
