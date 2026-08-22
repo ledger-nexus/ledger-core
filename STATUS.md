@@ -26,7 +26,11 @@ Update your own heartbeat every ~20 turns. If your heartbeat is older
 than 60 minutes, other sessions may consider your claim stale.
 -->
 
-_No active claims._
+### Session cash-flow-wipe · started 2026-08-21 12:10 · heartbeat 12:10
+- **Scope**: `tests/cash-flow.test.ts` deletes EVERY journal entry, line and AR/AP open item in the database in `beforeEach`. Demonstrated: running that one file alone takes Northwind from JE=182/AR=21 to 0/0.
+- **Files / globs**: `tests/cash-flow.test.ts`, `src/lib/seed/northwind.ts`, `tests/unscoped-delete-guard.test.ts`, `STATUS.md`, `PROJECT_STATUS.md`
+- **Branch**: fix/cash-flow-global-wipe
+- **Working dir**: /Users/hosungson/Code/ledger-core-je-approvals
 
 ---
 
