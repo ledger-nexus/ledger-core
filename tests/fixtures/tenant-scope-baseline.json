@@ -37,7 +37,5 @@
   "src/lib/seed/demo-month.ts::legalEntity.findFirstOrThrow",
   "src/lib/seed/northwind.ts::legalEntity.findFirst",
   "src/lib/seed/northwind.ts::legalEntity.findFirstOrThrow",
-  "src/lib/seed/northwind.ts::queue.findFirstOrThrow",
-  "src/lib/seed/northwind.ts::reassignmentRule.deleteMany",
-  "src/lib/seed/northwind.ts::recordEvent.deleteMany"
+  "src/lib/seed/northwind.ts::queue.findFirstOrThrow"
 ]

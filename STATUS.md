@@ -32,6 +32,19 @@ _No active claims._
 
 ## Recent completions
 
+### Session cash-flow-wipe · 2026-08-22
+- **Scope**: a full-surface smoke pass over all 46 nav destinations (all 200, no error digests) surfaced why the dev DB keeps losing data.
+- **⚠️⚠️ `tests/cash-flow.test.ts` reset state with SIX `deleteMany()` calls carrying NO `where`**, from a `beforeEach` — every AR/AP application, open item, journal line and journal entry in the database, once per test. **⭐ MEASURED: running that ONE file took Northwind from JE=182 / AR=21 to 0 / 0, and all five of its tests passed.** Explains the 544→25 and 182→0 drops.
+- **⚠️⚠️ THE SAME BUG WAS ALREADY FIXED ONCE** — `tests/sub-ledgers.test.ts`, 2026-07-16, whose header documents the fallout (an FK failure from the recon companion repo; all 9 tests died in cleanup). Fixed for the FILE, not the CLASS. Third instance of that pattern this session after #32/#33.
+- **⚠️ Scoped by ENTITY, not tenant**: `CF_TEST` lives in the DEFAULT tenant, which is also Northwind's — a `tenantId` filter would still have wiped the seed.
+- **Also fixed `seedNorthwind`'s own two unscoped deletes** (`recordEvent`, `reassignmentRule`) — cleared for EVERY tenant on each re-seed.
+- **⭐⭐ PAYOFF: Northwind now survives a full test run** — JE=182 / AR=21 before and after. Visual QA no longer needs a re-seed after every suite.
+- **Guard**: `tests/unscoped-delete-guard.test.ts`, with a positive control on the pattern so green means "none found" not "regex never matches". Excludes only its own file (which holds the pattern as data).
+- **⚠️ Side effect**: scoping the seed's deletes by tenant is what the tenant-scope guard wants — baseline **41 → 39**, and its staleness check is what told me, by failing.
+- **⚠️ Two failures in the verifying run, neither a regression**: the staleness above, and `entry-number-concurrency` with `Can't reach database server at …neon.tech` — transient, passes in isolation.
+- **⚠️ MY OWN MEASUREMENTS WERE WRONG TWICE**: `(no user — unauthenticated)` is the first `<option>` of the user-switcher select, not a status — the pass WAS authenticated (`CI Bootstrap` selected); and "0 accounts" was my query counting `entityId` when Northwind's accounts are shared (`entityId: null`).
+- **Branch**: fix/cash-flow-global-wipe.
+
 ### Session banking-review · 2026-08-21
 - **Scope**: `/banking`'s For-review queue — the last genuinely volume-bearing unpaged list. Paged at 50.
 - **⚠️ IT WAS A QUERY FAN-OUT, NOT JUST A LONG LIST.** Every queue row triggers its own `findMatchCandidates`, and that helper issues **two** queries (`journalLine.findMany` + `bankTransaction.findMany`), all fired concurrently by a `Promise.all` over the whole queue. Unpaged, importing a year of bank activity made one page render **2N** database queries. The loop's own comment deferred exactly this ("revisit with a windowed batch if inboxes grow"); the fan-out is now capped at `2 × PAGE_SIZE`.
