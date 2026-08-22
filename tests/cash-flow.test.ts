@@ -18,13 +18,36 @@ const prisma = new PrismaClient();
 const ENTITY = "CF_TEST";
 const GAAP = { entityCode: ENTITY, bookCode: "US_GAAP" };
 
+/** This suite's own entity, resolved in `seedMasterData`. */
+let entityId: string;
+
+/**
+ * Reset THIS SUITE'S ledger between tests.
+ *
+ * ⚠️ THESE SIX CALLS USED TO HAVE NO `where` AT ALL. On the shared, persistent
+ * dev database that deleted every journal entry, line and open item belonging
+ * to every other suite, every other tenant, and any running dev session —
+ * from a `beforeEach`, so once per test. Measured: running this file alone
+ * took the Northwind dataset from JE=182 / AR=21 to 0 / 0, while all five
+ * tests passed.
+ *
+ * ⚠️ AND THIS EXACT BUG WAS ALREADY DIAGNOSED AND FIXED ONCE, in
+ * `tests/sub-ledgers.test.ts` on 2026-07-16, whose header documents the same
+ * failure — including an FK error from the recon companion repo holding
+ * references to journal lines the global wipe tried to delete. The fix was
+ * applied to the file that was reported, not to the class. Same shape as
+ * deficiency #32 and #33.
+ *
+ * ⚠️ Scoped by ENTITY, not tenant: `CF_TEST` lives in the DEFAULT tenant,
+ * which is also Northwind's, so a `tenantId` filter would still wipe the seed.
+ */
 async function clearAll() {
-  await prisma.arApplication.deleteMany();
-  await prisma.apApplication.deleteMany();
-  await prisma.arOpenItem.deleteMany();
-  await prisma.apOpenItem.deleteMany();
-  await prisma.journalLine.deleteMany();
-  await prisma.journalEntry.deleteMany();
+  await prisma.arApplication.deleteMany({ where: { openItem: { entityId } } });
+  await prisma.apApplication.deleteMany({ where: { openItem: { entityId } } });
+  await prisma.arOpenItem.deleteMany({ where: { entityId } });
+  await prisma.apOpenItem.deleteMany({ where: { entityId } });
+  await prisma.journalLine.deleteMany({ where: { entry: { entityId } } });
+  await prisma.journalEntry.deleteMany({ where: { entityId } });
 }
 
 async function seedMasterData() {
@@ -39,6 +62,7 @@ async function seedMasterData() {
     create: { tenantId, code: ENTITY, name: "Cash Flow Test Co.", functionalCurrencyId: "USD" },
     update: { tenantId },
   });
+  entityId = entity.id;
   for (const b of [
     { code: "US_GAAP", name: "US GAAP", basis: "US_GAAP" as const },
     { code: "US_TAX", name: "US Federal Tax", basis: "US_TAX" as const },

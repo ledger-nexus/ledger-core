@@ -1078,7 +1078,7 @@ export async function resetNorthwindData(prisma: PrismaClient): Promise<void> {
   // Phase 4b: entity code unique per [tenantId, code]; findFirst.
   const entity = await prisma.legalEntity.findFirst({
     where: { code: ENTITY_CODE },
-    select: { id: true },
+    select: { id: true, tenantId: true },
   });
   if (!entity) return;
 
@@ -1129,8 +1129,14 @@ export async function resetNorthwindData(prisma: PrismaClient): Promise<void> {
 
   // Ownership audit log + reassignment rules. Users + queues survive
   // resets because they're org-level, not entity-scoped.
-  await prisma.recordEvent.deleteMany({});
-  await prisma.reassignmentRule.deleteMany({});
+  //
+  // ⚠️ SCOPED BY TENANT. These two were the only deletes in this reset with no
+  // `where` at all, so re-seeding Northwind also cleared every other tenant's
+  // record events and reassignment rules. Neither model is entity-scoped —
+  // both carry `tenantId` — so the tenant is the right boundary, and it is the
+  // one this function already resolved for everything above.
+  await prisma.recordEvent.deleteMany({ where: { tenantId: entity.tenantId } });
+  await prisma.reassignmentRule.deleteMany({ where: { tenantId: entity.tenantId } });
 }
 
 export async function resetAndReseedNorthwind(prisma: PrismaClient): Promise<{
