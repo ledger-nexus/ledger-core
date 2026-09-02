@@ -175,28 +175,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     select: { id: true, code: true },
   });
   if (!entity) {
-    // Audit cross-tenant probe attempts: if the entity exists in
-    // SOME OTHER tenant, log it as a privacy event (same pattern as
-    // /api/internal/journal-entries). Caller still sees UNKNOWN_ENTITY.
-    const elsewhere = await prisma.legalEntity.findFirst({
-      where: { code: body.entityCode },
-      select: { tenantId: true },
+    // RLS Phase 3 decision A (PR #84 design): the previous version of
+    // this branch did a GLOBAL legalEntity.findFirst probe to detect
+    // cross-tenant token misuse. Dropped — Phase 3 FORCE would block
+    // the probe anyway.
+    //
+    // 15th adversarial-pass finding (HIGH): the success-path
+    // auditTokenUse{success:true} only fires AFTER the create succeeds.
+    // For UNKNOWN_ENTITY (including the cross-tenant-collision case
+    // post-Decision-A), no audit row fires unless we emit one here.
+    // This preserves the SOC 2 CC6 audit signal for "credential
+    // targeted entity not in this token's tenant" without re-doing
+    // the probe.
+    await auditTokenUse({
+      success: false,
+      endpoint: "POST /api/internal/fixed-asset",
+      reason: "Unknown entity (code does not exist in token's tenant)",
+      tenantId: identity.tenantId,
+      metadata: {
+        tokenLabel: identity.label,
+        tokenTenantId: identity.tenantId,
+        entityCode: body.entityCode,
+      },
+      requestHeaders: reqHeaders,
     });
-    if (elsewhere && elsewhere.tenantId !== identity.tenantId) {
-      await auditTokenUse({
-        success: false,
-        endpoint: "POST /api/internal/fixed-asset",
-        reason: "Tenant scope mismatch — token does not own this entity",
-        tenantId: identity.tenantId,
-        metadata: {
-          tokenLabel: identity.label,
-          tokenTenantId: identity.tenantId,
-          entityCode: body.entityCode,
-          elsewhereTenantId: elsewhere.tenantId,
-        },
-        requestHeaders: reqHeaders,
-      });
-    }
     return err(
       "UNKNOWN_ENTITY",
       `No entity with code "${body.entityCode}"`,

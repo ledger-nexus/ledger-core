@@ -249,11 +249,22 @@ describe("/api/internal/journal-entries: tenant-scoped token enforcement", () =>
     expect(meta.tenantId).toBe(tenantA.id);
   });
 
-  it("Audit log captures cross-tenant attempts with TOKEN_REJECTED + reason", async () => {
-    // The cross-tenant test above attached identity.tenantId = A; the
-    // rejection log is therefore scoped to tenant A. Tightening the
-    // query rules out unrelated TOKEN_REJECTED logs (garbage Bearer
-    // tests etc., which have tenantId = null).
+  it("Cross-tenant attempts emit TOKEN_REJECTED 'Unknown entity' audit (Decision A + 15th-pass HIGH fix)", async () => {
+    // RLS Phase 3 decision A (PR #84 design, landed PR #86):
+    // The original cross-tenant probe was dropped because Phase 3 FORCE
+    // would block it anyway.
+    //
+    // 15th adversarial-pass HIGH finding closed in-PR: the original
+    // Decision A drop accidentally also dropped the audit signal for
+    // cross-tenant token-misuse attempts. The success-path
+    // auditTokenUse{success:true} only fires AFTER postJournalEntry
+    // succeeds; for UNKNOWN_ENTITY no audit fired at all. The fix
+    // restores the audit emit with a different (probe-free) reason:
+    // "Unknown entity (code does not exist in token's tenant)".
+    //
+    // This test pins both halves: (1) NO "tenant scope mismatch" row
+    // fires (probe is dropped), AND (2) a TOKEN_REJECTED row with the
+    // new "Unknown entity" reason DOES fire.
     const log = await prisma.auditLog.findFirst({
       where: {
         eventType: "TOKEN_REJECTED",
@@ -265,6 +276,13 @@ describe("/api/internal/journal-entries: tenant-scoped token enforcement", () =>
     });
     expect(log).not.toBeNull();
     const meta = log!.metadata as Record<string, unknown>;
-    expect(meta.reason).toMatch(/tenant scope mismatch/i);
+    // (1) probe-era reason is gone
+    expect(meta.reason).not.toMatch(/tenant scope mismatch/i);
+    // (2) new (probe-free) reason is present
+    expect(meta.reason).toMatch(/unknown entity/i);
+    // Metadata still carries the entity code attempted (load-bearing
+    // for the audit-trail to identify which tenant the probe targeted).
+    expect(meta.entityCode).toBe(entityCodeB);
+    expect(meta.tokenLabel).toBe(`scope-A-${SUFFIX}`);
   });
 });
