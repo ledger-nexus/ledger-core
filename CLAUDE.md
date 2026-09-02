@@ -104,6 +104,29 @@ Open items beyond v1.25: RLS Phases 2–4 (policies → query-path migration →
 - App Router conventions; Server Components by default; Server Actions in `src/app/actions/` for forms. UI primitives are inlined in `src/components/ui/` (no shadcn CLI). Money displays through `formatMoney()`.
 - The scope cookie (`lc-scope`) is the canonical `(entity, book)` for the UI — read via `getCurrentScope()`, write via `setScopeAction`. Import `prisma` from `@/lib/db` (singleton); never `new PrismaClient()` in a page or component.
 
+### SOC 2 / RLS — multi-tenant query enforcement
+
+`ledger-core` is deficiency-#12 remediated to "Remediated" status (see `docs/policies/control-deficiency-log.md`). RLS Phase 2b shipped 23 call-site migrations across 14 PRs (#69-#83); Phase 3 implementation is DRAFT in PR #89, awaiting operator ack on the Decision C runbook (`docs/runbooks/rls-phase-3-bypass-roles.md`).
+
+**For any NEW Server Action or HTTP route that touches tenant-scoped data:**
+
+1. Wrap DB work in `withTenantContext(tenant.id, async (tx) => ...)` (from `src/lib/db/tenant-context.ts`). The wrapper opens a Postgres transaction and SETs `app.current_tenant_id` for its duration.
+2. Use `tx` (not `prisma`) for every read/write inside the callback. After Phase 3 FORCE flips, queries on the unscoped `prisma` singleton will return 0 rows from tenant-scoped tables — loud-fail mode.
+3. Pick the right migration shape (catalog in `docs/architecture/rls-phase-2b-migration-guide.md`):
+   - **W1** — pure widening: helper takes `PrismaClient`, no internal `$transaction`. Widen to `Db = PrismaClient | Prisma.TransactionClient`. Reference: PR #70.
+   - **W2** — helper already tx-aware (e.g. `postJournalEntry` per v1.11): no widening needed, just wrap. Reference: PR #73.
+   - **T1** — Class T, single-helper: helper opens its own `$transaction`. Split into inner-takes-tx + outer-opens-tx. Reference: PR #71.
+   - **T2** — multi-step in-action: action itself uses `$transaction`. Replace with `withTenantContext`. Use outcome-variant return for early-exits. Reference: PR #73.
+   - **E** — tenant-id-from-entity-lookup: entity lookup runs OUTSIDE the wrap (its result IS the GUC value). Reference: PR #75.
+   - **M** — multi-tenant batch: loop with per-iteration `withTenantContext(rec.tenantId, ...)`. Reference: PR #79.
+   - **P** — per-iteration batch helper (atomicity-of-commit): wrap EACH postJournalEntry call so a bad period doesn't roll back already-posted ones. Reference: PR #83.
+4. Audit-emit + revalidatePath + redirect stay OUTSIDE the tx (the audit helper opens its own connection; rolling back the tx wouldn't roll back the audit row anyway).
+5. Cross-tenant security probes (intentional global lookups) need an explicit audit emit so the audit chain isn't silently lost when Phase 3 FORCE blocks the read. See PRs #81 + #86 for the pattern.
+
+**For any entity lookup by code:** scope by tenantId. The pre-existing "accept any tenant's entity" pattern (seen in `period-close`, `record-depreciation`, and the historical `createFixedAsset` bug surfaced by the 15th adversarial pass) is a SEV-2 SOC 2 finding. Reference fix: PRs #85, #88.
+
+**Adversarial-pass cadence:** after any sweep with ≥10 PRs, run one focused adversarial review on the stack. The 15th pass on the RLS arc found 1 HIGH (audit-bypass on Decision A drop) + 3 MEDIUMs + 1 historical finding — all closed in-session before merge. Pattern: launch a `general-purpose` Agent with the stack of PR branch names + risk surfaces, output capped at 600 words, classify HIGH/MEDIUM/LOW.
+
 ## How to start a session
 
 1. Read this file
